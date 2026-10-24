@@ -1,0 +1,94 @@
+:root {
+  --bg: #091119;
+  --bg-deep: #070d13;
+  --surface: #0f1922;
+  --surface-2: #12202b;
+  --surface-3: #162733;
+  --border: #223442;
+  --border-strong: #30495b;
+  --text: #d8e4ec;
+  --text-soft: #9bb0be;
+  --muted: #6f8797;
+  --blue: #4da3ff;
+  --green: #3ee08d;
+  --amber: #efb451;
+  --red: #ff7c78;
+  --sans: "Microsoft YaHei", "PingFang SC", "Segoe UI", system-ui, sans-serif;
+  --mono: "Cascadia Mono", "JetBrains Mono", Consolas, monospace;
+  color-scheme: dark;
+  color: var(--text);
+  background: var(--bg);
+  font-family: var(--sans);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  min-width: 320px;
+  min-height: 100%;
+  margin: 0;
+}
+
+body {
+  min-height: 100vh;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 52% -20%, rgba(41, 106, 148, 0.18), transparent 42%),
+    var(--bg);
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button {
+  color: inherit;
+}
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 1px solid var(--blue);
+  outline-offset: 1px;
+}
+
+button:disabled {
+  cursor: not-allowed;
+}
+
+::selection {
+  color: #fff;
+  background: rgba(77, 163, 255, 0.45);
+}
+
+::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 9px;
+  background: #2a4050;
+  background-clip: padding-box;
+}
+
+.mono {
+  font-family: var(--mono);
+}
