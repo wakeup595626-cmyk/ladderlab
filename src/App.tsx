@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
-import Inspector from './components/Inspector'
+import Guide from './components/Guide'
+import { BoltIcon, HelpIcon } from './components/Icons'
+import Inspector, { type InspectorTab } from './components/Inspector'
 import LadderCanvas from './components/LadderCanvas'
 import Palette from './components/Palette'
 import StatusBar from './components/StatusBar'
@@ -44,6 +46,7 @@ interface ToastState {
 }
 
 const HISTORY_LIMIT = 60
+const GUIDE_KEY = 'ladderlab.guide.v1'
 
 function safeFileName(value: string): string {
   const cleaned = value.trim().replace(/[\\/:*?"<>|]+/g, '-').replace(/\s+/g, '-')
@@ -64,12 +67,30 @@ export default function App() {
     initialProgram.rungs[0] ? { rungId: initialProgram.rungs[0].id, path: null } : null,
   )
   const [toast, setToast] = useState<ToastState | null>(null)
+  const [inspectorTab, setInspectorTab] = useState<InspectorTab>('properties')
+  const [guideOpen, setGuideOpen] = useState(() => {
+    try {
+      return !window.localStorage.getItem(GUIDE_KEY)
+    } catch {
+      return true
+    }
+  })
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const pendingAutoRunRef = useRef(false)
   const program = history.present
   const compileResult = useMemo(() => compile(program), [program])
 
   const notify = useCallback((message: string) => {
     setToast({ id: Date.now(), message })
+  }, [])
+
+  const closeGuide = useCallback(() => {
+    setGuideOpen(false)
+    try {
+      window.localStorage.setItem(GUIDE_KEY, 'seen')
+    } catch {
+      // 隐私模式下不能写入也没关系，关闭动作本身已经生效。
+    }
   }, [])
 
   const commit = useCallback((next: Program) => {
@@ -111,7 +132,8 @@ export default function App() {
   useEffect(() => {
     // 工程变化后必须丢弃旧运行时，避免新变量表沿用上一个工程的计时器和边沿状态。
     // oxlint-disable-next-line react/set-state-in-effect
-    setRunning(false)
+    setRunning(pendingAutoRunRef.current)
+    pendingAutoRunRef.current = false
     setRuntime(createRuntime(program))
     setSelection((current) => {
       if (!current) return program.rungs[0] ? { rungId: program.rungs[0].id, path: null } : null
@@ -137,7 +159,7 @@ export default function App() {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null
-      const typing = target?.matches('input, textarea, select, [contenteditable="true"]')
+      const typing = target instanceof Element && target.matches('input, textarea, select, [contenteditable="true"]')
       if (!typing && (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') {
         event.preventDefault()
         if (event.shiftKey) redo()
@@ -152,6 +174,9 @@ export default function App() {
     ? program.rungs.find((rung) => rung.id === selection.rungId)
     : program.rungs[0]
   const activeRungId = activeRung?.id ?? null
+  const firstInput = program.tags.find(
+    (tag) => tag.kind === 'BOOL' && tag.address.toUpperCase().startsWith('%I'),
+  )
 
   const runToggle = () => {
     if (compileResult.errors.length > 0) {
@@ -233,6 +258,17 @@ export default function App() {
     notify('示例已载入，可直接运行')
   }
 
+  const startDemo = () => {
+    const sample = buildSample('motor-hold')
+    if (!sample) return
+    pendingAutoRunRef.current = true
+    commit(sample)
+    setSelection(sample.rungs[0] ? { rungId: sample.rungs[0].id, path: null } : null)
+    setInspectorTab('tags')
+    closeGuide()
+    notify('示例已开始运行：切到「变量表」，把 StartBtn 切成 TRUE')
+  }
+
   const newProject = () => {
     if (!window.confirm('新建工程会替换当前工程，但可以撤销。继续吗？')) return
     const next = blankProgram()
@@ -300,6 +336,7 @@ export default function App() {
         onNew={newProject}
         onImport={() => fileInputRef.current?.click()}
         onExport={exportProject}
+        onGuide={() => setGuideOpen(true)}
       />
 
       <main className="workspace">
@@ -322,8 +359,12 @@ export default function App() {
               <span><b>{program.rungs.length}</b> 梯级</span>
               <span><b>{program.tags.length}</b> 变量</span>
               <span className={running ? 'scan-live' : ''}>
-                <i />{running ? 'LIVE' : 'STOP'}
+                <i />{running ? '运行中' : '已停止'}
               </span>
+              <button type="button" className="editor-help" onClick={() => setGuideOpen(true)}>
+                <HelpIcon size={15} />
+                怎么用
+              </button>
             </div>
           </div>
 
@@ -336,16 +377,31 @@ export default function App() {
 
           {compileResult.errors.length === 0 && !running && (
             <div className="run-hint">
-              <span>提示：从左侧加入指令 → 在变量表切换 %I 输入 → 点击“运行”观察绿色能流。</span>
-              <button
-                type="button"
-                onClick={() => {
-                  const firstBool = program.tags.find((tag) => tag.kind === 'BOOL' && tag.address.toUpperCase().startsWith('%I'))
-                  if (firstBool) toggleBool(firstBool.name)
-                }}
-              >
-                切换首个输入
-              </button>
+              <span className="run-hint-icon"><BoltIcon size={18} /></span>
+              <div className="run-hint-copy">
+                <strong>第一次用？从这里开始</strong>
+                <span>点「运行仿真」，再到「变量表」把输入位切成 TRUE，就能看到绿色能流。</span>
+              </div>
+              <div className="run-hint-actions">
+                <button type="button" className="hint-primary" onClick={runToggle}>
+                  运行仿真
+                </button>
+                {firstInput && (
+                  <button type="button" className="hint-link" onClick={() => toggleBool(firstInput.name)}>
+                    切换 {firstInput.name}
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
+          {compileResult.errors.length === 0 && running && (
+            <div className="run-hint is-live">
+              <span className="run-hint-icon"><BoltIcon size={18} /></span>
+              <div className="run-hint-copy">
+                <strong>正在扫描</strong>
+                <span>到右侧「变量表」点击输入位的 TRUE / FALSE，绿色导线就是当前通电的路径。</span>
+              </div>
             </div>
           )}
 
@@ -397,6 +453,8 @@ export default function App() {
           onToggleBool={toggleBool}
           onSetInt={setInt}
           onNotify={notify}
+          tab={inspectorTab}
+          onTabChange={setInspectorTab}
         />
       </main>
 
@@ -414,6 +472,8 @@ export default function App() {
         hidden
         onChange={(event) => void importProject(event.target.files?.[0])}
       />
+
+      <Guide open={guideOpen} onClose={closeGuide} onStartDemo={startDemo} />
 
       {toast && (
         <div className="toast" key={toast.id} role="status">

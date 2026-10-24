@@ -1,21 +1,26 @@
 :root {
-  --bg: #091119;
-  --bg-deep: #070d13;
-  --surface: #0f1922;
-  --surface-2: #12202b;
-  --surface-3: #162733;
-  --border: #223442;
-  --border-strong: #30495b;
-  --text: #d8e4ec;
-  --text-soft: #9bb0be;
-  --muted: #6f8797;
-  --blue: #4da3ff;
-  --green: #3ee08d;
-  --amber: #efb451;
-  --red: #ff7c78;
-  --sans: "Microsoft YaHei", "PingFang SC", "Segoe UI", system-ui, sans-serif;
-  --mono: "Cascadia Mono", "JetBrains Mono", Consolas, monospace;
-  color-scheme: dark;
+  --bg: #f5f5f7;
+  --surface: #ffffff;
+  --surface-2: #fbfbfd;
+  --surface-3: #f2f2f4;
+  --border: rgba(0, 0, 0, 0.08);
+  --border-strong: rgba(0, 0, 0, 0.14);
+  --text: #1d1d1f;
+  --text-soft: #515154;
+  --muted: #86868b;
+  --faint: #a1a1a6;
+  --blue: #0071e3;
+  --blue-hover: #0077ed;
+  --blue-soft: rgba(0, 113, 227, 0.08);
+  --green: #248a3d;
+  --green-bright: #34c759;
+  --amber: #b25000;
+  --red: #d70015;
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.04), 0 10px 30px -12px rgba(0, 0, 0, 0.1);
+  --sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "PingFang SC",
+    "Hiragino Sans GB", "Helvetica Neue", "Segoe UI", "Microsoft YaHei", sans-serif;
+  --mono: "SF Mono", "JetBrains Mono", "Cascadia Code", "Cascadia Mono", Consolas, monospace;
+  color-scheme: light;
   color: var(--text);
   background: var(--bg);
   font-family: var(--sans);
@@ -27,6 +32,18 @@
 
 * {
   box-sizing: border-box;
+}
+
+.visually-hidden {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
 }
 
 html,
@@ -41,7 +58,8 @@ body {
   min-height: 100vh;
   overflow: hidden;
   background:
-    radial-gradient(circle at 52% -20%, rgba(41, 106, 148, 0.18), transparent 42%),
+    radial-gradient(1100px 620px at 12% -12%, rgba(0, 113, 227, 0.06), transparent 62%),
+    radial-gradient(900px 520px at 100% -4%, rgba(255, 149, 0, 0.045), transparent 60%),
     var(--bg);
 }
 
@@ -56,12 +74,21 @@ button {
   color: inherit;
 }
 
+button:not(:disabled) {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button:active:not(:disabled) {
+  transform: scale(0.985);
+}
+
 button:focus-visible,
 input:focus-visible,
 select:focus-visible,
-textarea:focus-visible {
-  outline: 1px solid var(--blue);
-  outline-offset: 1px;
+textarea:focus-visible,
+[tabindex]:focus-visible {
+  outline: 3px solid rgba(0, 113, 227, 0.3);
+  outline-offset: 2px;
 }
 
 button:disabled {
@@ -69,13 +96,13 @@ button:disabled {
 }
 
 ::selection {
-  color: #fff;
-  background: rgba(77, 163, 255, 0.45);
+  color: #ffffff;
+  background: rgba(0, 113, 227, 0.75);
 }
 
 ::-webkit-scrollbar {
-  width: 9px;
-  height: 9px;
+  width: 10px;
+  height: 10px;
 }
 
 ::-webkit-scrollbar-track {
@@ -83,10 +110,26 @@ button:disabled {
 }
 
 ::-webkit-scrollbar-thumb {
-  border: 2px solid transparent;
-  border-radius: 9px;
-  background: #2a4050;
+  border: 3px solid transparent;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.18);
   background-clip: padding-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.28);
+  background-clip: padding-box;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 .mono {

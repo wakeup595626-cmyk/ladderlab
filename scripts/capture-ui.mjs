@@ -76,6 +76,16 @@ async function click(selector) {
   if (!clicked) throw new Error(`找不到元素：${selector}`)
 }
 
+// 首次访问会打开使用指南；验收主界面时先关掉它。
+await evaluate(`(() => {
+  const backdrop = document.querySelector('.guide-backdrop')
+  if (!backdrop) return 'not-open'
+  backdrop.querySelector('.guide-secondary')?.click()
+  return 'closed'
+})()`)
+await sleep(300)
+await evaluate(`window.scrollTo({ top: 0, left: 0, behavior: 'instant' })`)
+
 await evaluate(`([...document.querySelectorAll('.sample-card')].find((card) => card.textContent.includes('启保停'))).click()`)
 await sleep(350)
 await click('.run-button')

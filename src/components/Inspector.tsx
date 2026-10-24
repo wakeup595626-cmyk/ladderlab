@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import { getProfile, supportsContact, supportsOutput } from '../engine/profiles'
 import type {
   CompileResult,
@@ -34,9 +33,11 @@ interface InspectorProps {
   onToggleBool: (name: string) => void
   onSetInt: (name: string, value: number) => void
   onNotify: (message: string) => void
+  tab: InspectorTab
+  onTabChange: (tab: InspectorTab) => void
 }
 
-type InspectorTab = 'properties' | 'tags' | 'diagnostics'
+export type InspectorTab = 'properties' | 'tags' | 'diagnostics'
 
 const CONTACT_NAMES: Record<ContactKind, string> = {
   NO: '常开触点',
@@ -239,7 +240,7 @@ function TagsPanel({
         </div>
       </div>
 
-      <p className="panel-note">蓝色数值可直接在仿真中操作。名称失焦后才会提交，避免输入过程误改引用。</p>
+      <p className="panel-note">名称和地址在离开输入框后生效。点运行值可以在 FALSE / TRUE 之间切换，模拟按钮或开关。</p>
 
       <div className="tag-list" aria-label="PLC 变量表">
         {program.tags.map((tag) => {
@@ -334,6 +335,11 @@ function TagsPanel({
             </article>
           )
         })}
+      </div>
+
+      <div className="tags-help">
+        <strong>运行值不会写回真实 PLC</strong>
+        <span>它只改变当前浏览器里的仿真输入。复位后，变量会回到“初值”。</span>
       </div>
 
       {instances.length > 0 && (
@@ -441,35 +447,63 @@ export default function Inspector({
   onToggleBool,
   onSetInt,
   onNotify,
+  tab,
+  onTabChange,
 }: InspectorProps) {
-  const [tab, setTab] = useState<InspectorTab>('properties')
   const rung = selection ? program.rungs.find((item) => item.id === selection.rungId) : undefined
   const node = selection?.path ? getNodeAtPath(program, selection.rungId, selection.path) : null
   const activeProfile = getProfile(program.profile)
 
   const diagnostics = [...compileResult.errors, ...compileResult.warnings]
+  const editingLabel = node
+    ? node.type === 'contact'
+      ? `${CONTACT_NAMES[node.kind]} · ${node.tag || '未绑定'}`
+      : `并联分支 · ${node.branches.length} 条支路`
+    : rung
+      ? `梯级输出 · ${OUTPUT_NAMES[rung.output.kind]} · ${rung.output.tag || '未绑定'}`
+      : '尚未选择元件'
+
+  const context =
+    tab === 'tags'
+      ? { label: 'PLC 变量表', value: `${program.tags.length} 个变量 · 运行值可手动切换` }
+      : tab === 'diagnostics'
+        ? {
+            label: '编译诊断',
+            value: `${compileResult.errors.length} 个错误 · ${compileResult.warnings.length} 个警告`,
+          }
+        : { label: '正在编辑', value: editingLabel }
 
   return (
     <aside className="inspector">
+      <div className="inspector-context">
+        <span className="context-label">{context.label}</span>
+        <strong title={context.value}>{context.value}</strong>
+      </div>
       <div className="inspector-tabs" role="tablist">
         <button
           type="button"
+          role="tab"
+          aria-selected={tab === 'properties'}
           className={tab === 'properties' ? 'active' : ''}
-          onClick={() => setTab('properties')}
+          onClick={() => onTabChange('properties')}
         >
           属性
         </button>
         <button
           type="button"
+          role="tab"
+          aria-selected={tab === 'tags'}
           className={tab === 'tags' ? 'active' : ''}
-          onClick={() => setTab('tags')}
+          onClick={() => onTabChange('tags')}
         >
           变量表 <span>{program.tags.length}</span>
         </button>
         <button
           type="button"
+          role="tab"
+          aria-selected={tab === 'diagnostics'}
           className={tab === 'diagnostics' ? 'active' : ''}
-          onClick={() => setTab('diagnostics')}
+          onClick={() => onTabChange('diagnostics')}
         >
           诊断 <span className={compileResult.errors.length ? 'badge-error' : ''}>{diagnostics.length}</span>
         </button>

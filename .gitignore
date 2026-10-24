@@ -31,3 +31,10 @@ coverage
 *.tsbuildinfo
 test-results
 playwright-report
+docs/qa/
+docs/guide-demo.png
+docs/guide-desktop.png
+docs/guide-mobile.png
+docs/screenshot-1366.png
+docs/screenshot-mobile.png
+docs/screenshot-mobile-full.png

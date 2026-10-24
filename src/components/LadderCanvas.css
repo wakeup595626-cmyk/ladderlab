@@ -1,18 +1,19 @@
 .ll-canvas {
-  --ll-surface: #0f1821;
-  --ll-surface-raised: #13212c;
-  --ll-line: #263846;
-  --ll-line-bright: #395266;
-  --ll-text: #d8e4ec;
-  --ll-muted: #8197a7;
-  --ll-faint: #5e7483;
-  --ll-blue: #4da3ff;
-  --ll-green: #3ee08d;
-  --ll-amber: #f1b650;
-  --ll-danger: #ff7c78;
+  --ll-surface: #ffffff;
+  --ll-surface-raised: #fbfbfd;
+  --ll-line: #e5e5ea;
+  --ll-line-strong: #d2d2d7;
+  --ll-text: #1d1d1f;
+  --ll-muted: #6e6e73;
+  --ll-faint: #a1a1a6;
+  --ll-blue: #0071e3;
+  --ll-green: #248a3d;
+  --ll-green-bright: #34c759;
+  --ll-amber: #b25000;
+  --ll-danger: #ff3b30;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 14px;
   min-width: 0;
   color: var(--ll-text);
 }
@@ -20,17 +21,30 @@
 .ll-rung {
   overflow: hidden;
   border: 1px solid var(--ll-line);
-  border-radius: 10px;
-  background:
-    linear-gradient(145deg, rgba(255, 255, 255, 0.018), transparent 42%),
-    var(--ll-surface);
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.13);
-  transition: border-color 160ms ease, box-shadow 160ms ease;
+  border-radius: 16px;
+  background: var(--ll-surface);
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.035),
+    0 8px 24px rgba(0, 0, 0, 0.035);
+  transition:
+    border-color 180ms ease,
+    box-shadow 180ms ease,
+    transform 180ms ease;
+}
+
+.ll-rung:hover {
+  border-color: #d9d9de;
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.04),
+    0 12px 30px rgba(0, 0, 0, 0.055);
 }
 
 .ll-rung.is-powered {
-  border-color: rgba(62, 224, 141, 0.34);
-  box-shadow: inset 3px 0 0 rgba(62, 224, 141, 0.62), 0 8px 28px rgba(0, 0, 0, 0.14);
+  border-color: rgba(52, 199, 89, 0.38);
+  box-shadow:
+    inset 3px 0 0 var(--ll-green-bright),
+    0 1px 2px rgba(0, 0, 0, 0.035),
+    0 8px 24px rgba(36, 138, 61, 0.07);
 }
 
 .ll-rung-header {
@@ -38,10 +52,10 @@
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  min-height: 58px;
-  padding: 10px 14px;
-  border-bottom: 1px solid rgba(38, 56, 70, 0.72);
-  background: rgba(255, 255, 255, 0.014);
+  min-height: 60px;
+  padding: 11px 16px;
+  border-bottom: 1px solid var(--ll-line);
+  background: var(--ll-surface);
 }
 
 .ll-rung-title {
@@ -61,23 +75,24 @@
   width: 34px;
   height: 34px;
   place-items: center;
-  border: 1px solid #2b4354;
-  border-radius: 7px;
-  background: #13222d;
-  color: #8ba5b6;
-  font-family: "Cascadia Mono", Consolas, monospace;
+  border: 1px solid var(--ll-line);
+  border-radius: 10px;
+  background: #f5f5f7;
+  color: var(--ll-muted);
+  font-family: "SF Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
   font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
+  font-weight: 600;
+  letter-spacing: 0.03em;
 }
 
 .ll-rung-title h3 {
   overflow: hidden;
   margin: 0;
-  color: #dce8ef;
-  font-size: 13px;
+  color: var(--ll-text);
+  font-size: 14px;
   font-weight: 600;
-  line-height: 1.45;
+  letter-spacing: -0.01em;
+  line-height: 1.4;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -86,14 +101,14 @@
   display: flex;
   align-items: center;
   gap: 9px;
-  margin-top: 2px;
+  margin-top: 3px;
   color: var(--ll-faint);
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .ll-rung-meta > span + span::before {
   margin-right: 9px;
-  color: #344b5b;
+  color: var(--ll-line-strong);
   content: "/";
 }
 
@@ -107,45 +122,53 @@
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: #536470;
-  box-shadow: 0 0 0 3px rgba(83, 100, 112, 0.1);
+  background: #c7c7cc;
+  box-shadow: 0 0 0 3px rgba(142, 142, 147, 0.08);
 }
 
 .ll-power-state.is-on {
-  color: #8eeebb;
+  color: var(--ll-green);
+  font-weight: 600;
 }
 
 .ll-power-state.is-on i {
-  background: var(--ll-green);
-  box-shadow: 0 0 8px rgba(62, 224, 141, 0.75);
+  background: var(--ll-green-bright);
+  box-shadow: 0 0 0 3px rgba(52, 199, 89, 0.14);
 }
 
 .ll-rung-tools {
   display: flex;
   flex: 0 0 auto;
-  gap: 4px;
+  gap: 3px;
+  padding: 3px;
+  border-radius: 10px;
+  background: #f5f5f7;
 }
 
 .ll-rung-tools button,
 .ll-inline-actions button,
 .ll-add-rung,
 .ll-empty-board button {
-  border: 1px solid #2b4150;
-  border-radius: 6px;
-  background: #15242f;
-  color: #a8bac6;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ll-muted);
   font: inherit;
   cursor: pointer;
-  transition: border-color 140ms ease, background 140ms ease, color 140ms ease;
+  transition:
+    border-color 140ms ease,
+    background 140ms ease,
+    color 140ms ease,
+    transform 140ms ease;
 }
 
 .ll-rung-tools button {
   display: grid;
-  width: 27px;
-  height: 27px;
+  width: 28px;
+  height: 28px;
   padding: 0;
   place-items: center;
-  font-size: 14px;
+  font-size: 15px;
   line-height: 1;
 }
 
@@ -153,20 +176,28 @@
 .ll-inline-actions button:hover,
 .ll-add-rung:hover,
 .ll-empty-board button:hover {
-  border-color: #476378;
-  background: #1b3040;
-  color: #e0edf5;
+  border-color: var(--ll-line);
+  background: #ffffff;
+  color: var(--ll-text);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+.ll-rung-tools button:active:not(:disabled),
+.ll-inline-actions button:active,
+.ll-add-rung:active,
+.ll-empty-board button:active {
+  transform: scale(0.96);
 }
 
 .ll-rung-tools button:disabled {
   cursor: default;
-  opacity: 0.3;
+  opacity: 0.28;
 }
 
 .ll-rung-tools button.is-danger:hover,
 .ll-inline-actions button.is-danger:hover {
-  border-color: rgba(255, 124, 120, 0.55);
-  background: rgba(255, 124, 120, 0.1);
+  border-color: rgba(255, 59, 48, 0.22);
+  background: rgba(255, 59, 48, 0.08);
   color: var(--ll-danger);
 }
 
@@ -174,46 +205,69 @@
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 7px;
-  padding: 8px 14px;
-  border-bottom: 1px solid rgba(77, 163, 255, 0.13);
-  background: rgba(77, 163, 255, 0.055);
-  color: #8ea6b7;
-  font-size: 10px;
+  gap: 6px;
+  padding: 8px 16px;
+  border-bottom: 1px solid rgba(0, 113, 227, 0.1);
+  background: rgba(0, 113, 227, 0.045);
+  color: var(--ll-muted);
+  font-size: 11px;
 }
 
 .ll-inline-actions > span {
   margin-right: auto;
-  color: #b6cad7;
+  color: #3a3a3c;
+  font-weight: 500;
 }
 
 .ll-inline-actions button {
-  padding: 4px 8px;
-  font-size: 10px;
+  padding: 4px 9px;
+  border-color: rgba(0, 113, 227, 0.14);
+  background: rgba(255, 255, 255, 0.78);
+  color: #0062c4;
+  font-size: 11px;
 }
 
 .ll-svg-scroll {
   overflow-x: auto;
   overflow-y: hidden;
-  padding: 4px 8px 2px;
-  scrollbar-color: #30495b transparent;
+  padding: 8px 10px 6px;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-color: #d2d2d7 transparent;
   scrollbar-width: thin;
+  background-color: #ffffff;
+  background-image: radial-gradient(circle, rgba(60, 60, 67, 0.095) 0.65px, transparent 0.8px);
+  background-position: 10px 10px;
+  background-size: 16px 16px;
+}
+
+.ll-scroll-note {
+  display: none;
+  margin: 0;
+  padding: 0 12px 10px;
+  color: var(--ll-faint);
+  font-size: 10px;
+  text-align: center;
 }
 
 .ll-svg-scroll::-webkit-scrollbar {
-  height: 7px;
+  height: 8px;
 }
 
 .ll-svg-scroll::-webkit-scrollbar-thumb {
   border-radius: 9px;
-  background: #30495b;
+  background: #d2d2d7;
+}
+
+.ll-svg-scroll::-webkit-scrollbar-thumb:hover {
+  background: #b8b8be;
 }
 
 .ll-diagram {
   display: block;
   min-width: 100%;
   max-width: none;
-  font-family: "Microsoft YaHei", "PingFang SC", system-ui, sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Microsoft YaHei", sans-serif;
 }
 
 .ll-node {
@@ -227,11 +281,11 @@
 }
 
 .ll-node:hover .ll-node-hit {
-  fill: rgba(77, 163, 255, 0.055);
+  fill: rgba(0, 113, 227, 0.035);
 }
 
 .ll-node:focus-visible .ll-node-hit {
-  fill: rgba(77, 163, 255, 0.08);
+  fill: rgba(0, 113, 227, 0.06);
 }
 
 .ll-wire,
@@ -240,11 +294,11 @@
 .ll-coil-arc,
 .ll-box-divider {
   fill: none;
-  stroke: #496174;
+  stroke: #98989d;
   stroke-width: 1.7;
   stroke-linecap: round;
   stroke-linejoin: round;
-  transition: stroke 120ms ease;
+  transition: stroke 140ms ease;
 }
 
 .ll-wire,
@@ -254,13 +308,13 @@
 
 .ll-rail {
   fill: none;
-  stroke: #263b4b;
+  stroke: #d2d2d7;
   stroke-width: 3;
+  stroke-linecap: round;
 }
 
 .ll-power-wire.is-on {
   stroke: var(--ll-green);
-  filter: drop-shadow(0 0 2px rgba(62, 224, 141, 0.45));
 }
 
 .ll-contact.is-powered .ll-wire,
@@ -271,46 +325,44 @@
   stroke: var(--ll-green);
 }
 
-.ll-contact.is-powered .ll-wire,
-.ll-output.is-powered .ll-wire {
-  filter: drop-shadow(0 0 2px rgba(62, 224, 141, 0.42));
-}
-
 .ll-contact-slash {
   fill: none;
-  stroke: #efb451;
-  stroke-width: 1.6;
+  stroke: var(--ll-amber);
+  stroke-width: 1.7;
   stroke-linecap: round;
 }
 
 .ll-edge-mark {
-  fill: #efbc62;
-  font-family: "Cascadia Mono", Consolas, monospace;
+  fill: var(--ll-amber);
+  font-family: "SF Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
   font-size: 10px;
-  font-weight: 700;
+  font-weight: 600;
 }
 
 .ll-compare-box {
-  fill: #14232e;
-  stroke: #3c5b6f;
-  stroke-width: 1.2;
+  fill: #f5f5f7;
+  stroke: #d2d2d7;
+  stroke-width: 1.1;
+  transition:
+    fill 140ms ease,
+    stroke 140ms ease;
 }
 
 .ll-contact.is-powered .ll-compare-box {
-  fill: rgba(62, 224, 141, 0.09);
-  stroke: rgba(62, 224, 141, 0.7);
+  fill: rgba(52, 199, 89, 0.1);
+  stroke: rgba(36, 138, 61, 0.55);
 }
 
 .ll-compare-value {
-  fill: #d5e5ee;
-  font-family: "Cascadia Mono", Consolas, monospace;
+  fill: #3a3a3c;
+  font-family: "SF Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
   font-size: 10.5px;
 }
 
 .ll-tag-name,
 .ll-output-name {
-  fill: #dbe7ee;
-  font-family: "Cascadia Mono", Consolas, monospace;
+  fill: var(--ll-text);
+  font-family: "SF Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
   font-size: 10.5px;
   font-weight: 600;
   pointer-events: none;
@@ -318,27 +370,26 @@
 
 .ll-contact.is-powered .ll-tag-name,
 .ll-output.is-powered .ll-output-name {
-  fill: #a6f5c9;
+  fill: var(--ll-green);
 }
 
 .ll-address,
 .ll-kind-label {
-  fill: #647e90;
-  font-family: "Cascadia Mono", Consolas, monospace;
+  fill: var(--ll-faint);
+  font-family: "SF Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
   font-size: 8.5px;
   pointer-events: none;
 }
 
 .ll-kind-label {
-  fill: #526d80;
+  fill: #c7c7cc;
   letter-spacing: 0.015em;
 }
 
 .ll-selection-box {
   fill: none;
   stroke: var(--ll-blue);
-  stroke-width: 1.4;
-  stroke-dasharray: 5 4;
+  stroke-width: 2;
   opacity: 0;
   pointer-events: none;
 }
@@ -349,7 +400,7 @@
 }
 
 .ll-node.is-selected .ll-node-hit {
-  fill: rgba(77, 163, 255, 0.075);
+  fill: rgba(0, 113, 227, 0.055);
 }
 
 .ll-or-badge {
@@ -358,104 +409,117 @@
 }
 
 .ll-or-badge rect {
-  fill: #13222d;
-  stroke: #365164;
+  fill: #ffffff;
+  stroke: #d2d2d7;
   stroke-width: 1;
+  transition:
+    fill 140ms ease,
+    stroke 140ms ease;
 }
 
 .ll-or-badge text {
-  fill: #7995a7;
-  font-family: "Cascadia Mono", Consolas, monospace;
+  fill: var(--ll-muted);
+  font-family: "SF Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
   font-size: 8px;
-  font-weight: 700;
+  font-weight: 600;
   letter-spacing: 0.06em;
 }
 
 .ll-or-badge:hover rect,
 .ll-or-badge:focus-visible rect {
-  fill: #1a3040;
+  fill: #f0f7ff;
   stroke: var(--ll-blue);
 }
 
 .ll-empty-branch text {
-  fill: #536b7b;
+  fill: var(--ll-faint);
   font-size: 9px;
 }
 
 .ll-coil-mark {
-  fill: #9fb5c3;
-  font-family: "Cascadia Mono", Consolas, monospace;
+  fill: #3a3a3c;
+  font-family: "SF Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
   font-size: 10px;
   font-weight: 700;
   pointer-events: none;
 }
 
 .ll-output.is-powered .ll-coil-mark {
-  fill: #c1ffdd;
+  fill: var(--ll-green);
 }
 
 .ll-instruction-box {
-  fill: #101d27;
-  stroke: #355065;
-  stroke-width: 1.3;
-  transition: fill 140ms ease, stroke 140ms ease;
+  fill: #fbfbfd;
+  stroke: #d2d2d7;
+  stroke-width: 1.2;
+  transition:
+    fill 140ms ease,
+    stroke 140ms ease;
 }
 
 .ll-output.is-powered .ll-instruction-box {
-  fill: rgba(62, 224, 141, 0.055);
-  stroke: rgba(62, 224, 141, 0.68);
+  fill: rgba(52, 199, 89, 0.07);
+  stroke: rgba(36, 138, 61, 0.5);
 }
 
 .ll-box-title,
 .ll-box-instance,
 .ll-pin-label,
 .ll-box-data {
-  font-family: "Cascadia Mono", Consolas, monospace;
+  font-family: "SF Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
   pointer-events: none;
 }
 
 .ll-box-title {
-  fill: #79b8ee;
+  fill: var(--ll-blue);
   font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
+  font-weight: 600;
+  letter-spacing: 0.05em;
 }
 
 .ll-box-instance {
-  fill: #c2d5e1;
+  fill: var(--ll-text);
   font-size: 10px;
   font-weight: 600;
 }
 
 .ll-pin-label {
-  fill: #647f91;
+  fill: var(--ll-faint);
   font-size: 8px;
   letter-spacing: 0.05em;
 }
 
 .ll-box-data {
-  fill: #a7bbc8;
+  fill: var(--ll-muted);
   font-size: 9.5px;
 }
 
 .ll-pin-led {
-  fill: #20313d;
-  stroke: #4a6577;
+  fill: #f5f5f7;
+  stroke: #d2d2d7;
   stroke-width: 1;
 }
 
 .ll-pin-led.is-on {
-  fill: var(--ll-green);
-  stroke: #9dffc8;
-  filter: drop-shadow(0 0 3px rgba(62, 224, 141, 0.7));
+  fill: var(--ll-green-bright);
+  stroke: #1f8a3a;
 }
 
 .ll-add-rung {
   align-self: center;
-  min-width: 150px;
-  padding: 8px 16px;
-  border-style: dashed;
-  font-size: 11px;
+  min-width: 168px;
+  padding: 9px 18px;
+  border: 1px dashed #c7c7cc;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.7);
+  color: var(--ll-muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.ll-add-rung:hover {
+  border-color: var(--ll-blue);
+  color: var(--ll-blue);
 }
 
 .ll-add-rung span {
@@ -465,45 +529,59 @@
 
 .ll-empty-board {
   display: grid;
-  min-height: 320px;
-  padding: 34px;
+  min-height: 340px;
+  padding: 36px;
   place-items: center;
   align-content: center;
-  border: 1px dashed #2b4151;
-  border-radius: 10px;
-  background: rgba(15, 24, 33, 0.62);
+  border: 1px dashed #d2d2d7;
+  border-radius: 16px;
+  background-color: #ffffff;
+  background-image: radial-gradient(circle, rgba(60, 60, 67, 0.08) 0.65px, transparent 0.8px);
+  background-position: 10px 10px;
+  background-size: 16px 16px;
   text-align: center;
 }
 
 .ll-empty-symbol {
-  margin-bottom: 10px;
-  color: #4f6d80;
-  font-family: "Cascadia Mono", Consolas, monospace;
+  margin-bottom: 12px;
+  color: #c7c7cc;
+  font-family: "SF Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
   font-size: 17px;
   letter-spacing: 0.12em;
 }
 
 .ll-empty-board h3 {
-  margin: 0 0 5px;
-  color: #c2d3de;
-  font-size: 14px;
+  margin: 0 0 6px;
+  color: var(--ll-text);
+  font-size: 15px;
+  font-weight: 600;
 }
 
 .ll-empty-board p {
-  margin: 0 0 18px;
-  color: #718899;
-  font-size: 11px;
+  max-width: 330px;
+  margin: 0 0 20px;
+  color: var(--ll-muted);
+  font-size: 12px;
+  line-height: 1.6;
 }
 
 .ll-empty-board button {
-  padding: 7px 14px;
-  font-size: 11px;
+  padding: 8px 16px;
+  border-color: var(--ll-line);
+  background: #ffffff;
+  color: var(--ll-blue);
+  font-size: 12px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
 }
 
 @media (max-width: 720px) {
+  .ll-canvas {
+    gap: 10px;
+  }
+
   .ll-rung-header {
     align-items: flex-start;
-    padding: 9px 10px;
+    padding: 10px 12px;
   }
 
   .ll-rung-title {
@@ -513,18 +591,53 @@
   .ll-rung-number {
     width: 28px;
     height: 28px;
+    border-radius: 8px;
     font-size: 10px;
   }
 
   .ll-rung-title h3 {
     max-width: 180px;
+    font-size: 13px;
+  }
+
+  .ll-rung-tools {
+    gap: 0;
+  }
+
+  .ll-rung-tools button {
+    width: 26px;
+    height: 26px;
   }
 
   .ll-inline-actions {
-    padding: 8px 10px;
+    padding: 8px 12px;
   }
 
   .ll-inline-actions > span {
     width: 100%;
+  }
+
+  .ll-svg-scroll {
+    padding: 6px 6px 4px;
+    box-shadow: inset -16px 0 16px -18px rgba(0, 0, 0, 0.28);
+  }
+
+  .ll-scroll-note {
+    display: block;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ll-rung,
+  .ll-node-hit,
+  .ll-wire,
+  .ll-power-wire,
+  .ll-contact-bar,
+  .ll-coil-arc,
+  .ll-box-divider,
+  .ll-compare-box,
+  .ll-instruction-box,
+  .ll-or-badge rect {
+    transition: none;
   }
 }

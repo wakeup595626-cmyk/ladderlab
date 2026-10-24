@@ -205,7 +205,7 @@ function renderContact(node: ContactNode, context: DrawContext, path: number[]):
       )}
 
       <text className="ll-tag-name" x={centerX} y="17" textAnchor="middle">{shorten(node.tag || '未绑定')}</text>
-      <text className="ll-kind-label" x="8" y={size.height - 8}>#{CONTACT_LABELS[node.kind]}</text>
+      <text className="ll-kind-label" x="8" y={size.height - 8}>{CONTACT_LABELS[node.kind]}</text>
       <text className="ll-address" x={size.width - 8} y={size.height - 8} textAnchor="end">{address}</text>
       <rect className="ll-selection-box" x="2" y="3" width={size.width - 4} height={size.height - 6} rx="8" />
     </g>
@@ -389,7 +389,7 @@ function renderOutput(output: OutputElement, context: DrawContext, rungId: strin
       {(output.kind === 'COIL' || output.kind === 'SET' || output.kind === 'RESET') && (
         <text className="ll-output-name" x={size.width / 2} y="16" textAnchor="middle">{shorten(output.tag || '未绑定')}</text>
       )}
-      <text className="ll-kind-label" x="8" y={size.height - 8}>#{OUTPUT_LABELS[output.kind]}</text>
+      <text className="ll-kind-label" x="8" y={size.height - 8}>{OUTPUT_LABELS[output.kind]}</text>
       <text className="ll-address" x={size.width - 8} y={size.height - 8} textAnchor="end">{address}</text>
       <rect className="ll-selection-box" x="2" y="3" width={size.width - 4} height={size.height - 6} rx="8" />
     </g>
@@ -517,6 +517,7 @@ function RungCard({
           />
         </svg>
       </div>
+      <p className="ll-scroll-note">↔ 左右滑动查看完整回路</p>
     </article>
   )
 }
@@ -548,7 +549,7 @@ export default function LadderCanvas({
         <div className="ll-empty-board">
           <div className="ll-empty-symbol">—[ ]—( )</div>
           <h3>程序里还没有梯级</h3>
-          <p>添加第一条梯级，然后从左侧指令面板插入触点。</p>
+          <p>添加第一条梯级，然后打开“指令”面板插入触点。</p>
           <button type="button" onClick={onAddRung}>＋ 添加梯级</button>
         </div>
       ) : (
