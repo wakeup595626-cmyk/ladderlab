@@ -6,9 +6,10 @@
 ## 开发流程
 
 1. Fork 仓库并从 `main` 创建主题分支。
-2. 使用 Node.js 22+ 和仓库中的 `package-lock.json`：`npm ci`。
+2. 使用 `.nvmrc` 指定的 Node.js（24.20.0，也支持 22.12+ 或 26+）和仓库中的
+   `package-lock.json`：`npm ci`。
 3. 启动开发环境：`npm run dev`。
-4. 提交前运行 `npm test`、`npm run typecheck` 和 `npm run build`。
+4. 提交前运行 `npm run check`；它会依次执行测试、类型检查、lint 和构建。
 5. 在 Pull Request 中说明动机、用户可见变化、验证方法和已知限制。
 
 ## 修改原则

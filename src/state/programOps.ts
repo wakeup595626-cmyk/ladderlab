@@ -11,6 +11,7 @@ import type {
   TagKind,
 } from '../engine/types'
 import { uid } from '../lib/uid'
+import { byteAddressLength, parseBitAddress, parseByteAddress } from '../engine/references'
 
 export function nextTagName(program: Program, kind: TagKind): string {
   const base = kind === 'BOOL' ? 'Tag' : 'Count'
@@ -29,9 +30,28 @@ export function nextInstanceName(program: Program, prefix: 'T' | 'C'): string {
 
 function freeAddress(program: Program, kind: TagKind): string {
   const used = new Set(program.tags.map((tag) => tag.address.trim().toUpperCase()))
+  const boolBytes = new Set<number>()
+  const intBytes = new Set<number>()
+  for (const tag of program.tags) {
+    const bit = parseBitAddress(tag.address)
+    if (bit?.area === 'M') boolBytes.add(bit.byte)
+    const byte = parseByteAddress(tag.address)
+    if (byte?.area === 'M') {
+      for (let offset = 0; offset < byteAddressLength(byte.width); offset += 1) {
+        intBytes.add(byte.byte + offset)
+      }
+    }
+  }
   for (let index = 0; index < 512; index += 1) {
-    const address = kind === 'BOOL' ? `%M${index}.0` : `%MW${index * 2}`
-    if (!used.has(address.toUpperCase())) return address
+    if (kind === 'BOOL') {
+      const address = `%M${index}.0`
+      if (!used.has(address.toUpperCase()) && !intBytes.has(index)) return address
+    } else {
+      const address = `%MW${index * 2}`
+      if (!used.has(address.toUpperCase())
+        && !boolBytes.has(index * 2) && !boolBytes.has(index * 2 + 1)
+        && !intBytes.has(index * 2) && !intBytes.has(index * 2 + 1)) return address
+    }
   }
   return ''
 }

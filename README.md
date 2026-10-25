@@ -41,10 +41,11 @@ LadderLab 面向 PLC 入门课程、实验预习和个人练习。它把梯形�
 
 ## 快速开始
 
-需要 Node.js 22 或更高版本。
+需要 Node.js 22.12+、24.x 或 26+（CI 使用仓库内 `.nvmrc` 固定的 24.20.0）。
+23、25 这类奇数版本不在 `engines` 支持范围内，依赖和测试不保证能正常运行。
 
 ```bash
-npm install
+npm ci
 npm run dev
 ```
 
@@ -55,13 +56,13 @@ npm run build
 npm run preview
 ```
 
-常用检查：
+提交前可一次运行全部校验：
 
 ```bash
-npm test
-npm run typecheck
-npm run lint
+npm run check
 ```
+
+它会依次执行 `npm test`、`npm run typecheck`、`npm run lint` 和 `npm run build`。
 
 ## 部署到 GitHub Pages
 
@@ -70,7 +71,8 @@ npm run lint
 1. 确认默认分支为 `main`；
 2. 在 GitHub 仓库的 **Settings → Pages → Build and deployment** 中将 Source 选为
    **GitHub Actions**；
-3. 推送 `main` 分支，等待 **Deploy to GitHub Pages** 工作流完成。
+3. 推送 `main` 分支；CI 会先完成测试、类型检查、lint 和构建，成功后才自动触发
+   **Deploy to GitHub Pages** 工作流。
 
 部署地址会显示在工作流的 deploy 步骤中。应用是纯静态前端，不需要数据库或后端服务。
 

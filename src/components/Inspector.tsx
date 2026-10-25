@@ -740,8 +740,14 @@ function PropertiesPanel({
             {output.kind !== 'MOVE' && referenceField('操作数 INT 变量（可选）', 'valueTag', 'INT')}
             <label className="field">
               <span>{output.kind === 'MOVE' ? '整数常量' : output.kind === 'SHL' || output.kind === 'ROL' ? '移位次数' : '操作数常量'}</span>
-              <input type="number" step={1} min={output.kind === 'SHL' || output.kind === 'ROL' ? 0 : undefined} max={output.kind === 'SHL' || output.kind === 'ROL' ? 31 : undefined} value={output.value ?? 0} onChange={(event) => setOutput({ value: Number(event.target.value) })} />
-              {output.kind !== 'MOVE' && <small>未连接操作数变量时使用此常量；目标变量同时是运算的源值。</small>}
+              <input type="number" step={1} min={output.kind === 'SHL' || output.kind === 'ROL' ? 0 : undefined} max={output.kind === 'SHL' ? 15 : output.kind === 'ROL' ? 7 : undefined} value={output.value ?? 0} onChange={(event) => setOutput({ value: Number(event.target.value) })} />
+              {output.kind !== 'MOVE' && (
+                <small>
+                  未连接操作数变量时使用此常量；目标变量同时是运算的源值。
+                  {output.kind === 'SHL' && ' 常量移位次数为 0～15。'}
+                  {output.kind === 'ROL' && ' 常量移位次数为 0～7。'}
+                </small>
+              )}
             </label>
           </>
         )}

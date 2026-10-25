@@ -11,6 +11,11 @@ const CONTACT_KINDS: ContactKind[] = ['NO', 'NC', 'P', 'N', 'CMP']
 const OUTPUT_KINDS: OutputKind[] = ['COIL', 'SET', 'RESET', 'TON', 'TOF', 'TONR', 'CTU', 'MOVE', 'ADD', 'SUB', 'SHL', 'ROL', 'PATTERN']
 const TAG_KINDS: TagKind[] = ['BOOL', 'INT']
 const PROFILES: ProfileId[] = ['v14', 'v21']
+const MAX_DEPTH = 32
+const MAX_TAGS = 1000
+const MAX_RUNGS = 1000
+const MAX_NODES = 5000
+const MAX_PATTERN = 1024
 
 function fail(message: string): never {
   throw new Error(`工程文件格式不正确：${message}`)
@@ -31,14 +36,15 @@ function number(value: unknown, where: string): number {
   return value
 }
 
-function parseNode(value: unknown, where: string): LadderNode {
+function parseNode(value: unknown, where: string, depth = 0): LadderNode {
+  if (depth > MAX_DEPTH) fail(`${where} 的并联层数超过 ${MAX_DEPTH} 层。`)
   const node = record(value, where)
   const type = text(node.type, `${where}.type`)
   if (type === 'contact') {
     const kind = text(node.kind, `${where}.kind`) as ContactKind
     if (!CONTACT_KINDS.includes(kind)) fail(`${where}.kind 不是支持的触点类型。`)
-    const tag = text(node.tag, `${where}.tag`)
-    const condition: LadderNode = { type: 'contact', id: text(node.id, `${where}.id`), kind, tag }
+    const tag = text(node.tag, `${where}.tag`).trim()
+    const condition: LadderNode = { type: 'contact', id: text(node.id, `${where}.id`).trim(), kind, tag }
     if (node.compare !== undefined) {
       const compare = record(node.compare, `${where}.compare`)
       const op = text(compare.op, `${where}.compare.op`)
@@ -54,9 +60,9 @@ function parseNode(value: unknown, where: string): LadderNode {
     if (!Array.isArray(node.branches) || node.branches.length === 0) fail(`${where}.branches 必须是非空数组。`)
     const branches = node.branches.map((branch, index) => {
       if (!Array.isArray(branch)) fail(`${where}.branches[${index}] 必须是数组。`)
-      return branch.map((item, itemIndex) => parseNode(item, `${where}.branches[${index}][${itemIndex}]`))
+      return branch.map((item, itemIndex) => parseNode(item, `${where}.branches[${index}][${itemIndex}]`, depth + 1))
     })
-    return { type: 'parallel', id: text(node.id, `${where}.id`), branches }
+    return { type: 'parallel', id: text(node.id, `${where}.id`).trim(), branches }
   }
   return fail(`${where}.type 只能是 contact 或 parallel。`)
 }
@@ -70,6 +76,10 @@ export function parseProgram(input: unknown): Program {
   if (!Array.isArray(tags)) fail('tags 必须是数组。')
   const rungs = data.rungs
   if (!Array.isArray(rungs)) fail('rungs 必须是数组。')
+  if (tags.length > MAX_TAGS) fail(`变量数量超过上限 ${MAX_TAGS}。`)
+  if (rungs.length > MAX_RUNGS) fail(`梯级数量超过上限 ${MAX_RUNGS}。`)
+  const tagIds = new Set<string>()
+  const tagNames = new Set<string>()
 
   const parsedTags = tags.map((item, index) => {
     const where = `tags[${index}]`
@@ -79,17 +89,29 @@ export function parseProgram(input: unknown): Program {
     const initial = tag.initial
     if (typeof initial !== 'boolean' && typeof initial !== 'number') fail(`${where}.initial 必须是布尔值或数字。`)
     if (kind === 'INT' && typeof initial !== 'number') fail(`${where}.initial 必须是数字。`)
+    if (kind === 'BOOL' && typeof initial !== 'boolean') fail(`${where}.initial 必须是布尔值。`)
+    if (typeof initial === 'number' && !Number.isFinite(initial)) fail(`${where}.initial 必须是有限数字。`)
+    const id = text(tag.id, `${where}.id`).trim()
+    if (!id) fail(`${where}.id 不能为空。`)
+    if (tagIds.has(id)) fail(`变量 ID“${id}”重复。`)
+    tagIds.add(id)
+    const name = text(tag.name, `${where}.name`).trim()
+    if (!name) fail(`${where}.name 不能为空。`)
+    if (tagNames.has(name)) fail(`变量名“${name}”重复。`)
+    tagNames.add(name)
     return {
-      id: text(tag.id, `${where}.id`),
-      name: text(tag.name, `${where}.name`),
-      address: text(tag.address, `${where}.address`),
+      id,
+      name,
+      address: text(tag.address, `${where}.address`).trim(),
       kind,
       initial,
       comment: typeof tag.comment === 'string' ? tag.comment : '',
-      ...(tag.bitOf !== undefined ? { bitOf: text(tag.bitOf, `${where}.bitOf`) } : {}),
+      ...(tag.bitOf !== undefined ? { bitOf: text(tag.bitOf, `${where}.bitOf`).trim() } : {}),
     }
   })
 
+  const rungIds = new Set<string>()
+  const outputIds = new Set<string>()
   const parsedRungs = rungs.map((item, index) => {
     const where = `rungs[${index}]`
     const rung = record(item, where)
@@ -97,36 +119,63 @@ export function parseProgram(input: unknown): Program {
     const output = record(rung.output, `${where}.output`)
     const kind = text(output.kind, `${where}.output.kind`) as OutputKind
     if (!OUTPUT_KINDS.includes(kind)) fail(`${where}.output.kind 不是支持的输出类型。`)
+    if (Array.isArray(output.pattern) && output.pattern.length > MAX_PATTERN) {
+      fail(`${where}.output.pattern 最多支持 ${MAX_PATTERN} 个灯字。`)
+    }
+    const outputId = text(output.id, `${where}.output.id`).trim()
+    if (!outputId) fail(`${where}.output.id 不能为空。`)
+    if (outputIds.has(outputId)) fail(`输出 ID“${outputId}”重复。`)
+    outputIds.add(outputId)
     const parsedOutput = {
-      id: text(output.id, `${where}.output.id`),
+      id: outputId,
       kind,
-      tag: text(output.tag, `${where}.output.tag`),
+      tag: text(output.tag, `${where}.output.tag`).trim(),
       ...(output.pt !== undefined ? { pt: number(output.pt, `${where}.output.pt`) } : {}),
       ...(output.pv !== undefined ? { pv: number(output.pv, `${where}.output.pv`) } : {}),
-      ...(output.resetTag !== undefined ? { resetTag: text(output.resetTag, `${where}.output.resetTag`) } : {}),
-      ...(output.qTag !== undefined ? { qTag: text(output.qTag, `${where}.output.qTag`) } : {}),
-      ...(output.valueTag !== undefined ? { valueTag: text(output.valueTag, `${where}.output.valueTag`) } : {}),
-      ...(output.sourceTag !== undefined ? { sourceTag: text(output.sourceTag, `${where}.output.sourceTag`) } : {}),
+      ...(output.resetTag !== undefined ? { resetTag: text(output.resetTag, `${where}.output.resetTag`).trim() } : {}),
+      ...(output.qTag !== undefined ? { qTag: text(output.qTag, `${where}.output.qTag`).trim() } : {}),
+      ...(output.valueTag !== undefined ? { valueTag: text(output.valueTag, `${where}.output.valueTag`).trim() } : {}),
+      ...(output.sourceTag !== undefined ? { sourceTag: text(output.sourceTag, `${where}.output.sourceTag`).trim() } : {}),
       ...(output.value !== undefined ? { value: number(output.value, `${where}.output.value`) } : {}),
-      ...(output.pulseTag !== undefined ? { pulseTag: text(output.pulseTag, `${where}.output.pulseTag`) } : {}),
-      ...(output.stepTag !== undefined ? { stepTag: text(output.stepTag, `${where}.output.stepTag`) } : {}),
+      ...(output.pulseTag !== undefined ? { pulseTag: text(output.pulseTag, `${where}.output.pulseTag`).trim() } : {}),
+      ...(output.stepTag !== undefined ? { stepTag: text(output.stepTag, `${where}.output.stepTag`).trim() } : {}),
       ...(output.pattern !== undefined ? {
         pattern: Array.isArray(output.pattern)
           ? output.pattern.map((value, index) => number(value, `${where}.output.pattern[${index}]`))
           : fail(`${where}.output.pattern 必须是数组。`),
       } : {}),
     }
+    const rungId = text(rung.id, `${where}.id`).trim()
+    if (!rungId) fail(`${where}.id 不能为空。`)
+    if (rungIds.has(rungId)) fail(`梯级 ID“${rungId}”重复。`)
+    rungIds.add(rungId)
     return {
-      id: text(rung.id, `${where}.id`),
+      id: rungId,
       label: typeof rung.label === 'string' ? rung.label : '',
       nodes: rung.nodes.map((node, nodeIndex) => parseNode(node, `${where}.nodes[${nodeIndex}]`)),
       output: parsedOutput,
     }
   })
 
+  const edgeNodeIds = new Set<string>()
+  let nodeCount = 0
+  const validateNodes = (nodes: LadderNode[]) => {
+    for (const node of nodes) {
+      nodeCount += 1
+      if (nodeCount > MAX_NODES) fail(`节点总数超过上限 ${MAX_NODES}。`)
+      if (!node.id) fail('节点 ID 不能为空。')
+      if (node.type === 'contact' && (node.kind === 'P' || node.kind === 'N')) {
+        if (edgeNodeIds.has(node.id)) fail(`边沿触点 ID“${node.id}”重复。`)
+        edgeNodeIds.add(node.id)
+      }
+      if (node.type === 'parallel') node.branches.forEach(validateNodes)
+    }
+  }
+  parsedRungs.forEach((rung) => validateNodes(rung.nodes))
+
   return {
     schema: 1,
-    name: typeof data.name === 'string' && data.name.trim() ? data.name : '未命名项目',
+    name: typeof data.name === 'string' && data.name.trim() ? data.name.trim() : '未命名项目',
     profile,
     tags: parsedTags,
     rungs: parsedRungs,

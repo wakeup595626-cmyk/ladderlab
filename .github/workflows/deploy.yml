@@ -1,14 +1,14 @@
 name: Deploy to GitHub Pages
 
 on:
-  push:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
     branches: [main]
   workflow_dispatch:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 concurrency:
   group: pages
@@ -16,22 +16,79 @@ concurrency:
 
 jobs:
   build:
+    # 自动部署只认“同仓库 main 的成功 push CI”；手动入口只允许在 main 上重发，
+    # 避免新仓库或故障恢复时只能靠制造一个无关提交来触发 Pages。
+    if: >-
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'workflow_run' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_repository.full_name == github.repository &&
+      github.event.workflow_run.head_branch == 'main')
     runs-on: ubuntu-latest
+    outputs:
+      stale: ${{ steps.freshness.outputs.stale }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # deployment 必须对应 CI 真正验证过的提交，而不是“此刻的 main”。
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+          persist-credentials: false
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version-file: .nvmrc
           cache: npm
 
       - name: Install dependencies
         run: npm ci
 
-      - name: Build
-        run: npm run build
+      - name: Verify tests, types, lint, and build
+        run: npm run check
+
+      - name: Check the build is still the tip of main
+        id: freshness
+        if: github.event_name == 'workflow_run'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          built="$(git rev-parse HEAD)"
+          latest="$(gh api "repos/$REPO/commits/main" --jq .sha)"
+          if [ "$built" != "$latest" ]; then
+            echo "stale=true" >> "$GITHUB_OUTPUT"
+            echo "::warning::提交 $built 已不是 main 最新提交（$latest），跳过部署以免把旧版本覆盖回 Pages。"
+          else
+            echo "stale=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload built site
+        uses: actions/upload-artifact@v4
+        with:
+          name: site-dist
+          path: dist
+          if-no-files-found: error
+
+  deploy:
+    needs: build
+    if: needs.build.outputs.stale != 'true'
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download built site
+        uses: actions/download-artifact@v4
+        with:
+          name: site-dist
+          path: dist
 
       - name: Configure Pages
         uses: actions/configure-pages@v5
@@ -41,13 +98,6 @@ jobs:
         with:
           path: dist
 
-  deploy:
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    runs-on: ubuntu-latest
-    needs: build
-    steps:
       - name: Deploy
         id: deployment
         uses: actions/deploy-pages@v4

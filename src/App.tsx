@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 import Guide from './components/Guide'
 import { BoltIcon, HelpIcon } from './components/Icons'
@@ -18,7 +18,19 @@ import type {
   Selection,
 } from './engine/types'
 import { downloadText, parseProgramText, serializeProgram } from './lib/io'
-import { loadSavedProgram, saveProgram } from './lib/storage'
+import {
+  archiveRecoveryCopy,
+  isRecoveryBackupIntact,
+  getLastSavedAt,
+  listRecoveryBackups,
+  loadSavedProgram,
+  PROGRAM_STORAGE_KEY,
+  RECOVERY_STORAGE_KEY_PREFIX,
+  readRecoveryBackup,
+  saveProgram,
+  type LoadSavedProgramResult,
+  type RecoveryBackup,
+} from './lib/storage'
 import {
   addRung,
   changeOutputKind,
@@ -45,16 +57,52 @@ interface ToastState {
   message: string
 }
 
+type CorruptSavedProgram = Extract<LoadSavedProgramResult, { status: 'corrupt' }>
+
 const HISTORY_LIMIT = 60
 const GUIDE_KEY = 'ladderlab.guide.v1'
+const SAVE_DEBOUNCE_MS = 400
+const SAVE_RETRY_DELAYS_MS = [1500, 5000, 15000]
+const MAX_SIMULATION_CATCH_UP_STEPS = 5
 
 function safeFileName(value: string): string {
   const cleaned = value.trim().replace(/[\\/:*?"<>|]+/g, '-').replace(/\s+/g, '-')
   return cleaned || 'ladderlab-program'
 }
 
+const backupTimeFormatter = new Intl.DateTimeFormat('zh-CN', {
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  hour12: false,
+})
+
+function formatBackupTime(savedAt: number | null): string {
+  return savedAt ? backupTimeFormatter.format(savedAt) : '时间未知'
+}
+
+function formatBackupSize(bytes: number): string {
+  return bytes < 1024 ? `${bytes} B` : `${(bytes / 1024).toFixed(1)} KB`
+}
+
+function downloadTimestamp(): string {
+  return new Date().toISOString().replace(/[:.]/g, '-')
+}
+
+function archiveProgramVersion(program: Program): boolean {
+  try {
+    return Boolean(archiveRecoveryCopy(serializeProgram(program)))
+  } catch {
+    return false
+  }
+}
+
 export default function App() {
-  const [initialProgram] = useState<Program>(() => loadSavedProgram() ?? blankProgram())
+  const [startup] = useState<LoadSavedProgramResult>(() => loadSavedProgram())
+  const [initialProgram] = useState<Program>(() =>
+    startup.status === 'ok' ? startup.program : blankProgram(),
+  )
   const [history, setHistory] = useState<HistoryState>({
     past: [],
     present: initialProgram,
@@ -67,6 +115,21 @@ export default function App() {
     initialProgram.rungs[0] ? { rungId: initialProgram.rungs[0].id, path: null } : null,
   )
   const [toast, setToast] = useState<ToastState | null>(null)
+  const [corruptProject, setCorruptProject] = useState<CorruptSavedProgram | null>(() =>
+    startup.status === 'corrupt' ? startup : null,
+  )
+  const [savingEnabled, setSavingEnabled] = useState(() => startup.status !== 'corrupt')
+  const [lastSavedAt, setLastSavedAt] = useState<number | null>(() =>
+    startup.status === 'ok' ? startup.savedAt ?? null : null,
+  )
+  const [savePending, setSavePending] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
+  const [backups, setBackups] = useState<RecoveryBackup[]>(() => listRecoveryBackups())
+  const [backupsDismissed, setBackupsDismissed] = useState(false)
+  const [rawDownloaded, setRawDownloaded] = useState(false)
+  const [remoteConflict, setRemoteConflict] = useState<{ program: Program; savedAt: number } | null>(
+    null,
+  )
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>('properties')
   const [guideOpen, setGuideOpen] = useState(() => {
     try {
@@ -76,13 +139,89 @@ export default function App() {
     }
   })
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const editorRef = useRef<HTMLElement>(null)
   const pendingAutoRunRef = useRef(false)
+  const saveTimerRef = useRef<number | null>(null)
+  const saveRetryTimerRef = useRef<number | null>(null)
+  const saveRetryAttemptRef = useRef(0)
+  const retrySaveRef = useRef<() => void>(() => {})
+  const latestProgramRef = useRef(initialProgram)
+  const savingEnabledRef = useRef(startup.status !== 'corrupt')
+  const saveDirtyRef = useRef(false)
+  // 上一次真正写入本机存储的工程对象；用身份比较补上“渲染已完成但保存 effect
+  // 尚未执行”的窗口，避免把这次编辑当成已保存。
+  const lastPersistedProgramRef = useRef<Program | null>(
+    startup.status === 'ok' ? initialProgram : null,
+  )
+  const lastSaveFailureRef = useRef<string | null>(null)
+  const remoteConflictRef = useRef(false)
   const program = history.present
   const compileResult = useMemo(() => compile(program), [program])
+
+  // 布局 effect 在提交后同步执行、早于任何后续任务：编辑后立刻刷新或切后台时，
+  // pagehide 处理器一定能读到最新工程，避免用旧值覆盖最后一笔修改。
+  useLayoutEffect(() => {
+    latestProgramRef.current = program
+    savingEnabledRef.current = savingEnabled
+  }, [program, savingEnabled])
 
   const notify = useCallback((message: string) => {
     setToast({ id: Date.now(), message })
   }, [])
+
+  const clearSaveRetryTimer = useCallback(() => {
+    if (saveRetryTimerRef.current !== null) {
+      window.clearTimeout(saveRetryTimerRef.current)
+      saveRetryTimerRef.current = null
+    }
+  }, [])
+
+  const saveLatestProgram = useCallback(() => {
+    if (!savingEnabledRef.current) return false
+    const result = saveProgram(latestProgramRef.current)
+    if (result.ok) {
+      lastPersistedProgramRef.current = latestProgramRef.current
+      saveDirtyRef.current = false
+      saveRetryAttemptRef.current = 0
+      clearSaveRetryTimer()
+      setLastSavedAt(result.savedAt)
+      setSavePending(false)
+      setSaveError(null)
+      lastSaveFailureRef.current = null
+      return true
+    }
+
+    // 保存失败时保留待保存状态，让下一次编辑、离开页面或定时重试继续尝试。
+    saveDirtyRef.current = true
+    setSaveError(result.error)
+    if (lastSaveFailureRef.current !== result.error) {
+      notify(`自动保存失败：${result.error}。请先导出工程 JSON 备份。`)
+      lastSaveFailureRef.current = result.error
+    }
+
+    const retryDelay = SAVE_RETRY_DELAYS_MS[saveRetryAttemptRef.current]
+    if (retryDelay !== undefined && saveRetryTimerRef.current === null) {
+      saveRetryAttemptRef.current += 1
+      saveRetryTimerRef.current = window.setTimeout(() => {
+        saveRetryTimerRef.current = null
+        retrySaveRef.current()
+      }, retryDelay)
+    }
+    return false
+  }, [clearSaveRetryTimer, notify])
+
+  const flushPendingSave = useCallback(() => {
+    if (saveTimerRef.current !== null) {
+      window.clearTimeout(saveTimerRef.current)
+      saveTimerRef.current = null
+    }
+    if (!savingEnabledRef.current) return true
+    // 冲突未处理前不要偷偷把本页版本写回去，否则等于替用户做了选择。
+    if (remoteConflictRef.current) return false
+    const unsaved = saveDirtyRef.current || latestProgramRef.current !== lastPersistedProgramRef.current
+    if (!unsaved) return true
+    return saveLatestProgram()
+  }, [saveLatestProgram])
 
   const closeGuide = useCallback(() => {
     setGuideOpen(false)
@@ -126,8 +265,119 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    saveProgram(program)
-  }, [program])
+    if (saveTimerRef.current !== null) {
+      window.clearTimeout(saveTimerRef.current)
+      saveTimerRef.current = null
+    }
+    clearSaveRetryTimer()
+    saveRetryAttemptRef.current = 0
+    if (!savingEnabled || remoteConflict) {
+      saveDirtyRef.current = false
+      // oxlint-disable-next-line react/set-state-in-effect
+      setSavePending(false)
+      return
+    }
+
+    // 刚打开页面、或刚同步到另一个标签页的版本时，内容已经等同本机存储，不需要再写一次；
+    // 否则多开一个标签页就会用自己的旧工程盖掉别人刚保存的版本。
+    if (program === lastPersistedProgramRef.current) {
+      saveDirtyRef.current = false
+      // oxlint-disable-next-line react/set-state-in-effect
+      setSavePending(false)
+      return
+    }
+
+    saveDirtyRef.current = true
+    // 防抖保存由 effect 调度，状态栏需要同步显示“正在保存”。
+    // oxlint-disable-next-line react/set-state-in-effect
+    setSavePending(true)
+    saveTimerRef.current = window.setTimeout(() => {
+      saveTimerRef.current = null
+      if (!saveDirtyRef.current) return
+      saveLatestProgram()
+    }, SAVE_DEBOUNCE_MS)
+
+    return () => {
+      if (saveTimerRef.current !== null) {
+        window.clearTimeout(saveTimerRef.current)
+        saveTimerRef.current = null
+      }
+    }
+  }, [clearSaveRetryTimer, program, remoteConflict, savingEnabled, saveLatestProgram])
+
+  useEffect(() => {
+    retrySaveRef.current = flushPendingSave
+  }, [flushPendingSave])
+
+  useEffect(() => {
+    const flush = () => flushPendingSave()
+    const flushWhenHidden = () => {
+      if (document.visibilityState === 'hidden') flushPendingSave()
+    }
+    window.addEventListener('pagehide', flush)
+    window.addEventListener('beforeunload', flush)
+    document.addEventListener('visibilitychange', flushWhenHidden)
+    return () => {
+      window.removeEventListener('pagehide', flush)
+      window.removeEventListener('beforeunload', flush)
+      document.removeEventListener('visibilitychange', flushWhenHidden)
+      flushPendingSave()
+    }
+  }, [flushPendingSave])
+
+  // 多标签页：没有本地改动时直接跟随另一个标签页的保存；有改动时暂停自动保存，
+  // 让用户自己决定保留哪一份，而不是由最后写入的一方静默覆盖。
+  useEffect(() => {
+    const onStorage = (event: StorageEvent) => {
+      if (event.key?.startsWith(RECOVERY_STORAGE_KEY_PREFIX)) {
+        setBackups(listRecoveryBackups())
+        return
+      }
+      if (event.key !== PROGRAM_STORAGE_KEY || !event.newValue) return
+      let incoming: Program
+      try {
+        incoming = parseProgramText(event.newValue)
+      } catch {
+        return
+      }
+
+      if (serializeProgram(incoming) === serializeProgram(latestProgramRef.current)) {
+        lastPersistedProgramRef.current = latestProgramRef.current
+        saveDirtyRef.current = false
+        setSavePending(false)
+        setLastSavedAt(getLastSavedAt() ?? Date.now())
+        return
+      }
+
+      const unsaved = latestProgramRef.current !== lastPersistedProgramRef.current
+      if (!unsaved && !saveDirtyRef.current) {
+        lastPersistedProgramRef.current = incoming
+        setHistory({ past: [], present: incoming, future: [] })
+        setSavePending(false)
+        setLastSavedAt(getLastSavedAt() ?? Date.now())
+        notify('已同步另一个标签页保存的工程')
+        return
+      }
+
+      if (saveTimerRef.current !== null) {
+        window.clearTimeout(saveTimerRef.current)
+        saveTimerRef.current = null
+      }
+      clearSaveRetryTimer()
+      remoteConflictRef.current = true
+      setRemoteConflict({ program: incoming, savedAt: getLastSavedAt() ?? Date.now() })
+      setSavePending(false)
+      notify('另一个标签页保存了不同的版本，本页自动保存已暂停')
+    }
+
+    window.addEventListener('storage', onStorage)
+    return () => window.removeEventListener('storage', onStorage)
+  }, [clearSaveRetryTimer, notify])
+
+  useEffect(() => {
+    // 浏览器会在刷新后恢复内部滚动位置；恢复提示必须回到可见区域，避免被静默错过。
+    if (corruptProject) editorRef.current?.scrollTo({ top: 0, left: 0, behavior: 'auto' })
+  }, [corruptProject])
 
   useEffect(() => {
     // 工程变化后必须丢弃旧运行时，避免新变量表沿用上一个工程的计时器和边沿状态。
@@ -144,10 +394,36 @@ export default function App() {
 
   useEffect(() => {
     if (!running || compileResult.errors.length > 0) return
-    const timer = window.setInterval(() => {
-      setRuntime((previous) => step(program, previous, speed))
-    }, speed)
-    return () => window.clearInterval(timer)
+    let frameId = 0
+    let previousTime = window.performance.now()
+    let elapsedCarry = 0
+
+    const tick = (now: number) => {
+      const elapsed = Math.max(0, now - previousTime)
+      previousTime = now
+      elapsedCarry += elapsed
+      let stepsToRun = Math.floor(elapsedCarry / speed)
+      if (stepsToRun > MAX_SIMULATION_CATCH_UP_STEPS) {
+        stepsToRun = MAX_SIMULATION_CATCH_UP_STEPS
+        elapsedCarry = 0
+      } else {
+        elapsedCarry -= stepsToRun * speed
+      }
+
+      if (stepsToRun > 0) {
+        setRuntime((previous) => {
+          let next = previous
+          for (let count = 0; count < stepsToRun; count += 1) {
+            next = step(program, next, speed)
+          }
+          return next
+        })
+      }
+      frameId = window.requestAnimationFrame(tick)
+    }
+
+    frameId = window.requestAnimationFrame(tick)
+    return () => window.cancelAnimationFrame(frameId)
   }, [running, program, speed, compileResult.errors.length])
 
   useEffect(() => {
@@ -269,6 +545,163 @@ export default function App() {
     notify('示例已开始运行：切到「变量表」，把 StartBtn 切成 TRUE')
   }
 
+  const downloadCorruptBackup = () => {
+    if (!corruptProject) return
+    const stamp = downloadTimestamp()
+    downloadText(`梯形实验室-损坏工程备份-${stamp}.txt`, corruptProject.raw)
+    setRawDownloaded(true)
+    notify(
+      isRecoveryBackupIntact(corruptProject.backupKey, corruptProject.raw)
+        ? '损坏工程原始内容已下载，浏览器内也已保留恢复副本'
+        : '损坏工程原始内容已下载；浏览器内额外备份未能建立',
+    )
+  }
+
+  // 只有在“浏览器内备份确实还在”或“用户已经把原文下载到本机”时，才允许覆盖主工程。
+  const backupIntact = Boolean(
+    corruptProject && isRecoveryBackupIntact(corruptProject.backupKey, corruptProject.raw),
+  )
+  const originalContentKept = backupIntact || rawDownloaded
+  const hasRecoveryCandidate = Boolean(corruptProject) && program !== initialProgram
+
+  const acceptRecoveredProject = () => {
+    if (!corruptProject) return
+    if (!isRecoveryBackupIntact(corruptProject.backupKey, corruptProject.raw) && !rawDownloaded) {
+      notify('请先下载损坏工程的原始内容，再覆盖本机工程')
+      return
+    }
+    const result = saveProgram(program)
+    if (!result.ok) {
+      setSaveError(result.error)
+      notify(`无法接受当前工程：${result.error}。自动保存仍保持暂停。`)
+      return
+    }
+
+    if (saveTimerRef.current !== null) {
+      window.clearTimeout(saveTimerRef.current)
+      saveTimerRef.current = null
+    }
+    clearSaveRetryTimer()
+    saveRetryAttemptRef.current = 0
+    saveDirtyRef.current = false
+    latestProgramRef.current = program
+    lastPersistedProgramRef.current = program
+    savingEnabledRef.current = true
+    setCorruptProject(null)
+    setSavingEnabled(true)
+    setSaveError(null)
+    setLastSavedAt(result.savedAt)
+    setSavePending(false)
+    setBackups(listRecoveryBackups())
+    setRawDownloaded(false)
+    lastSaveFailureRef.current = null
+    notify('已接受当前工程，自动保存已恢复')
+  }
+
+  const discardCorruptProject = () => {
+    if (!corruptProject) return
+    const intact = isRecoveryBackupIntact(corruptProject.backupKey, corruptProject.raw)
+    if (!intact && !rawDownloaded) {
+      notify('请先下载损坏工程的原始内容，再放弃本机工程')
+      return
+    }
+    const keepNote = intact ? '浏览器内恢复副本会保留，' : '原始内容已下载到本机，'
+    if (!window.confirm(`将放弃当前浏览器里的损坏工程并新建空白工程。${keepNote}继续吗？`)) return
+    const next = blankProgram()
+    if (saveTimerRef.current !== null) {
+      window.clearTimeout(saveTimerRef.current)
+      saveTimerRef.current = null
+    }
+    saveDirtyRef.current = false
+    clearSaveRetryTimer()
+    saveRetryAttemptRef.current = 0
+    latestProgramRef.current = next
+    savingEnabledRef.current = true
+    setCorruptProject(null)
+    setSavingEnabled(true)
+    setSaveError(null)
+    setLastSavedAt(null)
+    setSavePending(false)
+    lastSaveFailureRef.current = null
+    setRunning(false)
+    setHistory({ past: [], present: next, future: [] })
+    setRuntime(createRuntime(next))
+    setSelection(next.rungs[0] ? { rungId: next.rungs[0].id, path: null } : null)
+    setBackups(listRecoveryBackups())
+    setRawDownloaded(false)
+    notify('已放弃损坏工程，并新建空白工程')
+  }
+
+  const keepLocalVersion = () => {
+    if (!remoteConflict) return
+    if (!archiveProgramVersion(remoteConflict.program)) {
+      notify('无法暂存另一标签页版本，尚未覆盖本机存储；请先从工具栏导出本页 JSON')
+      return
+    }
+    remoteConflictRef.current = false
+    setRemoteConflict(null)
+    saveDirtyRef.current = true
+    setBackups(listRecoveryBackups())
+    setBackupsDismissed(false)
+    if (saveLatestProgram()) notify('已保留本页修改；另一标签页版本已存为恢复副本')
+    else notify('已保留本页修改，但写回本机存储失败；请先导出工程 JSON，另一版本已存为恢复副本')
+  }
+
+  const adoptRemoteVersion = () => {
+    if (!remoteConflict) return
+    if (!archiveProgramVersion(latestProgramRef.current)) {
+      notify('无法暂存本页修改，尚未切换版本；请先从工具栏导出本页 JSON')
+      return
+    }
+    const incoming = remoteConflict.program
+    remoteConflictRef.current = false
+    setRemoteConflict(null)
+    lastPersistedProgramRef.current = incoming
+    latestProgramRef.current = incoming
+    saveDirtyRef.current = false
+    setHistory({ past: [], present: incoming, future: [] })
+    setSelection(incoming.rungs[0] ? { rungId: incoming.rungs[0].id, path: null } : null)
+    setLastSavedAt(remoteConflict.savedAt)
+    setSaveError(null)
+    setSavePending(false)
+    setBackups(listRecoveryBackups())
+    setBackupsDismissed(false)
+    notify('已载入另一标签页版本；本页修改已存为恢复副本')
+  }
+
+  const downloadBackup = (backup: RecoveryBackup) => {
+    const raw = readRecoveryBackup(backup.key)
+    if (raw === null) {
+      notify('这份恢复副本已经不在本机存储里了')
+      setBackups(listRecoveryBackups())
+      return
+    }
+    const stamp = downloadTimestamp()
+    downloadText(`梯形实验室-恢复副本-${stamp}.txt`, raw)
+    notify('恢复副本已下载')
+  }
+
+  const restoreBackup = (backup: RecoveryBackup) => {
+    const raw = readRecoveryBackup(backup.key)
+    if (raw === null) {
+      notify('这份恢复副本已经不在本机存储里了')
+      setBackups(listRecoveryBackups())
+      return
+    }
+    let restored: Program
+    try {
+      restored = parseProgramText(raw)
+    } catch (error) {
+      notify(`这份恢复副本无法解析：${error instanceof Error ? error.message : '未知错误'}`)
+      return
+    }
+    commit(restored)
+    setSelection(restored.rungs[0] ? { rungId: restored.rungs[0].id, path: null } : null)
+    notify(corruptProject
+      ? '已载入恢复副本；请确认恢复横幅中的「接受当前工程」以恢复自动保存'
+      : '已从恢复副本载入工程，会作为当前工程自动保存')
+  }
+
   const newProject = () => {
     if (!window.confirm('新建工程会替换当前工程，但可以撤销。继续吗？')) return
     const next = blankProgram()
@@ -294,7 +727,9 @@ export default function App() {
       const imported = parseProgramText(text)
       commit(imported)
       setSelection(imported.rungs[0] ? { rungId: imported.rungs[0].id, path: null } : null)
-      notify(`已导入「${imported.name}」`)
+      notify(corruptProject
+        ? `已导入「${imported.name}」；现在可点「接受当前工程并恢复自动保存」`
+        : `已导入「${imported.name}」`)
     } catch (error) {
       notify(error instanceof Error ? error.message : '工程文件无法读取')
     } finally {
@@ -346,7 +781,132 @@ export default function App() {
           onLoadSample={loadSample}
         />
 
-        <section className="editor">
+        <section className="editor" ref={editorRef}>
+          {remoteConflict && (
+            <section
+              className="recovery-banner conflict-banner"
+              role="alert"
+              aria-labelledby="conflict-title"
+            >
+              <div className="recovery-copy">
+                <span className="recovery-eyebrow">多标签页冲突</span>
+                <strong id="conflict-title">另一个标签页保存了不同的工程</strong>
+                <span>本页自动保存已暂停。先选择保留哪一版，未被保留的一版会自动存成恢复副本。</span>
+                <span className="recovery-detail">
+                  另一版保存于 {formatBackupTime(remoteConflict.savedAt)}
+                </span>
+              </div>
+              <div className="recovery-actions">
+                <button type="button" className="conflict-adopt" onClick={adoptRemoteVersion}>
+                  载入另一标签页版本
+                </button>
+                <button type="button" className="conflict-keep" onClick={keepLocalVersion}>
+                  保留本页并覆盖
+                </button>
+              </div>
+            </section>
+          )}
+
+          {corruptProject && (
+            <section className="recovery-banner" role="alert" aria-labelledby="recovery-title">
+              <div className="recovery-copy">
+                <span className="recovery-eyebrow">本机工程恢复</span>
+                <strong id="recovery-title">本地工程数据无法读取，自动保存已暂停</strong>
+                <span>
+                  原工程不会被空白工程覆盖。
+                  {backupIntact
+                    ? ' 原始内容已保留为浏览器内恢复副本。'
+                    : rawDownloaded
+                      ? ' 原始内容已下载到本机。'
+                      : ' 浏览器内额外备份不可用，必须先下载原始内容。'}
+                </span>
+                <span>
+                  {hasRecoveryCandidate
+                    ? '当前工程已准备好；接受后会写入本机存储并恢复自动保存。'
+                    : '请先通过工具栏导入备份，或直接在下方工作区重建工程，再接受当前工程。'}
+                </span>
+                <span className="recovery-detail">{corruptProject.message}</span>
+              </div>
+              <div className="recovery-actions">
+                <button
+                  type="button"
+                  className="recovery-download"
+                  onClick={downloadCorruptBackup}
+                  disabled={!corruptProject.raw}
+                >
+                  下载损坏备份
+                </button>
+                <button
+                  type="button"
+                  className="recovery-accept"
+                  onClick={acceptRecoveredProject}
+                  disabled={!hasRecoveryCandidate || !originalContentKept}
+                  title={originalContentKept ? undefined : '请先下载损坏工程原始内容'}
+                >
+                  接受当前工程并恢复自动保存
+                </button>
+                <button
+                  type="button"
+                  className="recovery-discard"
+                  onClick={discardCorruptProject}
+                  disabled={!originalContentKept}
+                  title={originalContentKept ? undefined : '请先下载损坏工程原始内容'}
+                >
+                  放弃损坏工程并新建
+                </button>
+              </div>
+            </section>
+          )}
+
+          {!corruptProject && backups.length > 0 && !backupsDismissed && (
+            <section className="backup-strip" aria-labelledby="backup-title">
+              <div className="backup-strip-head">
+                <div className="backup-strip-copy">
+                  <span>本机恢复副本</span>
+                  <strong id="backup-title">保留着 {backups.length} 份工程快照</strong>
+                  <small>可以直接下载，或载入为当前工程；载入后会自动保存。</small>
+                </div>
+                <button
+                  type="button"
+                  className="backup-dismiss"
+                  onClick={() => setBackupsDismissed(true)}
+                >
+                  稍后再说
+                </button>
+              </div>
+              <ul className="backup-list">
+                {backups.map((backup) => {
+                  const label = formatBackupTime(backup.savedAt)
+                  return (
+                    <li key={backup.key}>
+                      <div className="backup-meta">
+                        <strong>{label}</strong>
+                        <span>{formatBackupSize(backup.bytes)}</span>
+                      </div>
+                      <div className="backup-actions">
+                        <button
+                          type="button"
+                          onClick={() => downloadBackup(backup)}
+                          aria-label={`下载 ${label} 的恢复副本`}
+                        >
+                          下载
+                        </button>
+                        <button
+                          type="button"
+                          className="backup-restore"
+                          onClick={() => restoreBackup(backup)}
+                          aria-label={`载入 ${label} 的恢复副本`}
+                        >
+                          载入
+                        </button>
+                      </div>
+                    </li>
+                  )
+                })}
+              </ul>
+            </section>
+          )}
+
           <div className="editor-heading">
             <div>
               <span className="eyebrow">程序块 Main [OB1] · 梯形图 LAD</span>
@@ -436,7 +996,13 @@ export default function App() {
                 }}
               />
             </label>
-            <span>所有编辑都会自动保存到本机浏览器；导出 JSON 可长期归档。</span>
+            <span>
+              {corruptProject
+                ? '自动保存已暂停：请先处理上方恢复提示；导出 JSON 可长期归档。'
+                : remoteConflict
+                  ? '自动保存已暂停：请先选择要保留的多标签页版本。'
+                : '编辑后会自动保存到本机浏览器；导出 JSON 可长期归档。'}
+            </span>
           </div>
         </section>
 
@@ -460,6 +1026,10 @@ export default function App() {
         running={running}
         runtime={runtime}
         compileResult={compileResult}
+        lastSavedAt={lastSavedAt}
+        savePending={savePending}
+        saveError={saveError}
+        saveBlocked={Boolean(corruptProject) || Boolean(remoteConflict)}
       />
 
       <input

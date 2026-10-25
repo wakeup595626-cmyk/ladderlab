@@ -1,8 +1,17 @@
 import type { ContactNode, LadderNode, OutputElement, Program, Runtime } from './types'
+import { normalizeReference, parseBitAddress, splitReference } from './references'
 
-function splitRef(ref: string) {
-  const index = ref.indexOf('.')
-  return index < 0 ? { base: ref, field: null } : { base: ref.slice(0, index), field: ref.slice(index + 1) }
+const INT_MAX = 32767
+
+/** 教学模型按 S7 INT 的 16 位补码保存结果，溢出时回绕而不是变成超范围数值。 */
+function wrapInt(value: number): number {
+  if (!Number.isFinite(value)) return 0
+  const wrapped = ((Math.trunc(value) % 65536) + 65536) % 65536
+  return wrapped > INT_MAX ? wrapped - 65536 : wrapped
+}
+
+function tagName(tag: { name: string }): string {
+  return normalizeReference(tag.name)
 }
 
 function walkNodes(program: Program, visit: (node: ContactNode) => void) {
@@ -15,21 +24,29 @@ function walkNodes(program: Program, visit: (node: ContactNode) => void) {
 
 /** Synchronize an explicit INT-byte / BOOL-bit alias in either direction. */
 function syncAlias(runtime: Runtime, program: Program, name: string, kind: 'BOOL' | 'INT') {
-  const changed = program.tags.find((tag) => tag.name === name)
+  const normalized = normalizeReference(name)
+  const changed = program.tags.find((tag) => tagName(tag) === normalized)
   if (!changed) return
-  const byte = changed.kind === 'INT' ? changed : program.tags.find((tag) => tag.name === changed.bitOf)
+  const byte = changed.kind === 'INT'
+    ? changed
+    : program.tags.find((tag) => tagName(tag) === normalizeReference(changed.bitOf ?? ''))
   if (!byte || byte.kind !== 'INT') return
-  const bits = program.tags.filter((tag) => tag.bitOf === byte.name)
+  const byteName = tagName(byte)
+  const bits = program.tags.filter((tag) => normalizeReference(tag.bitOf ?? '') === byteName)
   if (kind === 'INT') {
-    const value = runtime.ints[byte.name] ?? 0
-    for (const bit of bits) runtime.bools[bit.name] = (value & (1 << Number(splitRef(bit.address).field))) !== 0
+    const value = runtime.ints[byteName] ?? 0
+    for (const bitTag of bits) {
+      const bit = parseBitAddress(bitTag.address)?.bit
+      if (bit === undefined) continue
+      runtime.bools[tagName(bitTag)] = (value & (1 << bit)) !== 0
+    }
   } else if (changed.bitOf) {
-    const bit = Number(splitRef(changed.address).field)
-    if (!Number.isInteger(bit) || bit < 0 || bit > 7) return
-    const value = runtime.ints[byte.name] ?? 0
-    runtime.ints[byte.name] = runtime.bools[name]
+    const bit = parseBitAddress(changed.address)?.bit
+    if (bit === undefined) return
+    const value = runtime.ints[byteName] ?? 0
+    runtime.ints[byteName] = wrapInt(runtime.bools[normalized]
       ? value | (1 << bit)
-      : value & ~(1 << bit)
+      : value & ~(1 << bit))
   }
 }
 
@@ -39,24 +56,29 @@ export function writeRuntimeValue(program: Program, previous: Runtime, name: str
     bools: { ...previous.bools },
     ints: { ...previous.ints },
   }
-  const tag = program.tags.find((item) => item.name === name)
+  const normalized = normalizeReference(name)
+  const tag = program.tags.find((item) => tagName(item) === normalized)
   if (!tag) return previous
-  if (tag.kind === 'BOOL') runtime.bools[name] = Boolean(value)
-  else runtime.ints[name] = Number(value) || 0
-  syncAlias(runtime, program, name, tag.kind)
+  if (tag.kind === 'BOOL') {
+    runtime.bools[normalized] = Boolean(value)
+  } else {
+    if (typeof value !== 'number' || !Number.isFinite(value)) return previous
+    runtime.ints[normalized] = wrapInt(value)
+  }
+  syncAlias(runtime, program, normalized, tag.kind)
   return runtime
 }
 
 export function readBoolValue(runtime: Runtime, ref: string): boolean {
-  const { base, field } = splitRef(ref)
-  if (field === 'Q') return runtime.timers[base]?.q ?? runtime.counters[base]?.q ?? false
-  return runtime.bools[ref] ?? false
+  const { base, field } = splitReference(ref)
+  if (field?.toUpperCase() === 'Q') return runtime.timers[base]?.q ?? runtime.counters[base]?.q ?? false
+  return runtime.bools[base] ?? false
 }
 
 export function readIntValue(runtime: Runtime, ref: string): number {
-  const { base, field } = splitRef(ref)
-  if (field === 'CV') return runtime.counters[base]?.cv ?? 0
-  return runtime.ints[ref] ?? 0
+  const { base, field } = splitReference(ref)
+  if (field?.toUpperCase() === 'CV') return runtime.counters[base]?.cv ?? 0
+  return runtime.ints[base] ?? 0
 }
 
 function compare(left: number, op: ContactNode['compare']): boolean {
@@ -111,64 +133,67 @@ function evalChain(chain: LadderNode[], incoming: boolean, runtime: Runtime): bo
 
 function applyOutput(output: OutputElement, power: boolean, runtime: Runtime, dtMs: number, program: Program) {
   const write = (name: string, value: boolean | number) => {
-    const tag = program.tags.find((item) => item.name === name)
+    const normalized = normalizeReference(name)
+    const tag = program.tags.find((item) => tagName(item) === normalized)
     if (!tag) return
-    if (tag.kind === 'BOOL') runtime.bools[name] = Boolean(value)
-    else runtime.ints[name] = Number(value) || 0
-    syncAlias(runtime, program, name, tag.kind)
+    if (tag.kind === 'BOOL') runtime.bools[normalized] = Boolean(value)
+    else runtime.ints[normalized] = wrapInt(Number(value))
+    syncAlias(runtime, program, normalized, tag.kind)
   }
+  const instance = normalizeReference(output.tag)
   switch (output.kind) {
     case 'COIL': write(output.tag, power); break
     case 'SET': if (power) write(output.tag, true); break
     case 'RESET': if (power) write(output.tag, false); break
     case 'TON': {
-      const timer = runtime.timers[output.tag] ?? { et: 0, q: false, prevIn: false }
+      const timer = runtime.timers[instance] ?? { et: 0, q: false, prevIn: false }
       if (power) {
         timer.et = Math.min(timer.et + dtMs, output.pt ?? 0)
         timer.q = timer.et >= (output.pt ?? 0)
       } else { timer.et = 0; timer.q = false }
       timer.prevIn = power
-      runtime.timers[output.tag] = timer
+      runtime.timers[instance] = timer
       if (output.qTag) write(output.qTag, timer.q)
       if (output.valueTag) write(output.valueTag, timer.et)
       break
     }
     case 'TOF': {
-      const timer = runtime.timers[output.tag] ?? { et: 0, q: false, prevIn: false }
+      const timer = runtime.timers[instance] ?? { et: 0, q: false, prevIn: false }
       if (power) { timer.et = 0; timer.q = true }
       else if (timer.q) {
         timer.et = Math.min(timer.et + dtMs, output.pt ?? 0)
         if (timer.et >= (output.pt ?? 0)) timer.q = false
       }
       timer.prevIn = power
-      runtime.timers[output.tag] = timer
+      runtime.timers[instance] = timer
       if (output.qTag) write(output.qTag, timer.q)
       if (output.valueTag) write(output.valueTag, timer.et)
       break
     }
     case 'TONR': {
-      const timer = runtime.timers[output.tag] ?? { et: 0, q: false, prevIn: false }
+      const timer = runtime.timers[instance] ?? { et: 0, q: false, prevIn: false }
       if (output.resetTag && readBoolValue(runtime, output.resetTag)) { timer.et = 0; timer.q = false }
       else if (power) {
         timer.et = Math.min(timer.et + dtMs, output.pt ?? 0)
         timer.q = timer.et >= (output.pt ?? 0)
       }
       timer.prevIn = power
-      runtime.timers[output.tag] = timer
+      runtime.timers[instance] = timer
       if (output.qTag) write(output.qTag, timer.q)
       if (output.valueTag) write(output.valueTag, timer.et)
       break
     }
     case 'CTU': {
-      const counter = runtime.counters[output.tag] ?? { cv: 0, q: false, prevIn: false }
+      const counter = runtime.counters[instance] ?? { cv: 0, q: false, prevIn: false }
       const rising = power && !counter.prevIn
       if (output.resetTag && readBoolValue(runtime, output.resetTag)) { counter.cv = 0; counter.q = false }
       else {
-        if (rising) counter.cv += 1
+        // 计数器当前值在 S7 中是 16 位整数；到顶后保持，避免继续累加变成负数。
+        if (rising) counter.cv = Math.min(counter.cv + 1, INT_MAX)
         counter.q = counter.cv >= (output.pv ?? 1)
       }
       counter.prevIn = power
-      runtime.counters[output.tag] = counter
+      runtime.counters[instance] = counter
       if (output.qTag) write(output.qTag, counter.q)
       if (output.valueTag) write(output.valueTag, counter.cv)
       break
@@ -184,9 +209,12 @@ function applyOutput(output: OutputElement, power: boolean, runtime: Runtime, dt
       const source = output.sourceTag ? readIntValue(runtime, output.sourceTag) : readIntValue(runtime, output.tag)
       const operand = output.valueTag ? readIntValue(runtime, output.valueTag) : output.value ?? 1
       let result = operand
-      if (output.kind === 'ADD') result = source + operand
-      if (output.kind === 'SUB') result = source - operand
-      if (output.kind === 'SHL') result = source << (operand & 31)
+      if (output.kind === 'ADD') result = wrapInt(source + operand)
+      if (output.kind === 'SUB') result = wrapInt(source - operand)
+      if (output.kind === 'SHL') {
+        const count = ((operand % 16) + 16) % 16
+        result = wrapInt(source << count)
+      }
       if (output.kind === 'ROL') {
         const count = ((operand % 8) + 8) % 8
         const byte = source & 255
@@ -218,16 +246,18 @@ export function createRuntime(program: Program): Runtime {
     nodePower: {}, outputPower: {}, rungPower: {}, scanCount: 0, simTime: 0,
   }
   for (const tag of program.tags) {
-    if (tag.kind === 'BOOL') runtime.bools[tag.name] = Boolean(tag.initial)
-    else runtime.ints[tag.name] = Number(tag.initial) || 0
+    const name = tagName(tag)
+    if (tag.kind === 'BOOL') runtime.bools[name] = Boolean(tag.initial)
+    else runtime.ints[name] = wrapInt(typeof tag.initial === 'number' ? tag.initial : 0)
   }
   for (const tag of program.tags) {
-    if (tag.kind === 'INT') syncAlias(runtime, program, tag.name, 'INT')
+    if (tag.kind === 'INT') syncAlias(runtime, program, tagName(tag), 'INT')
   }
   for (const rung of program.rungs) {
     const output = rung.output
-    if (['TON', 'TOF', 'TONR'].includes(output.kind)) runtime.timers[output.tag] = { et: 0, q: false, prevIn: false }
-    if (output.kind === 'CTU') runtime.counters[output.tag] = { cv: 0, q: false, prevIn: false }
+    const instanceName = normalizeReference(output.tag)
+    if (['TON', 'TOF', 'TONR'].includes(output.kind)) runtime.timers[instanceName] = { et: 0, q: false, prevIn: false }
+    if (output.kind === 'CTU') runtime.counters[instanceName] = { cv: 0, q: false, prevIn: false }
     if (output.kind === 'PATTERN') runtime.patterns[output.id] = { index: 0, prevIn: false }
   }
   // A closed switch at startup must not create a false rising edge.
@@ -239,6 +269,9 @@ export function createRuntime(program: Program): Runtime {
 
 /** Execute one deterministic teaching scan, returning an independent runtime snapshot. */
 export function step(program: Program, previous: Runtime, dtMs: number): Runtime {
+  if (!Number.isFinite(dtMs) || dtMs < 0) {
+    throw new RangeError('扫描时间 dtMs 必须是大于等于 0 的有限毫秒数。')
+  }
   const runtime: Runtime = {
     bools: { ...previous.bools }, ints: { ...previous.ints }, edges: { ...previous.edges },
     timers: Object.fromEntries(Object.entries(previous.timers).map(([key, value]) => [key, { ...value }])),
