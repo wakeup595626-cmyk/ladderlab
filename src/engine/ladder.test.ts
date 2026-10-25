@@ -315,6 +315,15 @@ describe('工程操作与序列化', () => {
     expect(renamed.tags.some((item) => item.name === 'Start1')).toBe(true)
   })
 
+  it('变量字段没有实际变化时不新增编辑记录', () => {
+    const source = blankProgram()
+    const start = source.tags.find((item) => item.name === 'StartBtn')!
+    expect(updateTag(source, start.id, { address: start.address })).toBe(source)
+    expect(updateTag(source, start.id, { initial: start.initial })).toBe(source)
+    expect(updateTag(source, start.id, { comment: start.comment })).toBe(source)
+    expect(updateTag(source, start.id, { name: ` ${start.name} ` })).toBe(source)
+  })
+
   it('新增变量分配不重复地址，并联操作保留两条可用支路', () => {
     let source = blankProgram()
     source = addTag(source, 'BOOL')

@@ -78,6 +78,10 @@ export function updateTag(
   const current = program.tags.find((tag) => tag.id === tagId)
   if (!current) return program
   const nextName = patch.name === undefined ? current.name : patch.name.trim()
+  const unchanged = (Object.keys(patch) as Array<keyof typeof patch>).every((key) => (
+    Object.is(current[key], key === 'name' ? nextName : patch[key])
+  ))
+  if (unchanged) return program
   const next: Program = {
     ...program,
     tags: program.tags.map((tag) => (tag.id === tagId ? { ...tag, ...patch, name: nextName } : tag)),

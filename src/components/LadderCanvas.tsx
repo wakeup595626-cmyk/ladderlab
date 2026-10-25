@@ -1,3 +1,4 @@
+import { useLayoutEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import type {
   ContactNode,
@@ -27,6 +28,7 @@ export interface LadderCanvasProps {
 interface Size {
   width: number
   height: number
+  lineY: number
 }
 
 interface DrawContext {
@@ -37,18 +39,26 @@ interface DrawContext {
   onSelect: (selection: Selection) => void
 }
 
-const CONTACT_WIDTH = 148
-const COMPARE_WIDTH = 184
-const CONTACT_HEIGHT = 76
-const CHAIN_GAP = 22
-const PARALLEL_SIDE = 32
-const PARALLEL_GAP = 18
-const EMPTY_CHAIN_WIDTH = 72
-const EMPTY_CHAIN_HEIGHT = 52
-const COIL_WIDTH = 132
-const COIL_HEIGHT = 86
-const BOX_WIDTH = 236
-const BOX_HEIGHT = 136
+const CONTACT_WIDTH = 120
+const COMPARE_WIDTH = 172
+const CONTACT_HEIGHT = 100
+const CONTACT_LINE_Y = 72
+const CHAIN_GAP = 12
+const PARALLEL_SIDE = 20
+const PARALLEL_GAP = 8
+const EMPTY_CHAIN_WIDTH = 96
+const EMPTY_CHAIN_HEIGHT = 80
+const COIL_WIDTH = 104
+const COIL_HEIGHT = 108
+const COIL_LINE_Y = 76
+const BOX_WIDTH = 220
+const BOX_HEIGHT = 168
+const BOX_LINE_Y = BOX_HEIGHT / 2
+const PROGRAM_MIN_WIDTH = 520
+const RAIL_LEFT = 20
+const RAIL_RIGHT = 18
+const OUTPUT_LEAD = 20
+const CHAIN_TAIL = 8
 
 const CONTACT_LABELS: Record<ContactNode['kind'], string> = {
   NO: '常开',
@@ -72,37 +82,50 @@ function contactSize(node: ContactNode): Size {
   return {
     width: node.kind === 'CMP' ? COMPARE_WIDTH : CONTACT_WIDTH,
     height: CONTACT_HEIGHT,
+    lineY: CONTACT_LINE_Y,
   }
 }
 
 function outputSize(output: OutputElement): Size {
   return output.kind === 'COIL' || output.kind === 'SET' || output.kind === 'RESET'
-    ? { width: COIL_WIDTH, height: COIL_HEIGHT }
-    : { width: BOX_WIDTH, height: BOX_HEIGHT }
+    ? { width: COIL_WIDTH, height: COIL_HEIGHT, lineY: COIL_LINE_Y }
+    : { width: BOX_WIDTH, height: BOX_HEIGHT, lineY: BOX_LINE_Y }
 }
 
 function measureChain(chain: LadderNode[]): Size {
-  if (chain.length === 0) return { width: EMPTY_CHAIN_WIDTH, height: EMPTY_CHAIN_HEIGHT }
+  if (chain.length === 0) {
+    return { width: EMPTY_CHAIN_WIDTH, height: EMPTY_CHAIN_HEIGHT, lineY: EMPTY_CHAIN_HEIGHT / 2 }
+  }
   let width = 0
-  let height = 0
+  let top = 0
+  let bottom = 0
   for (const node of chain) {
     const size = measureNode(node)
     width += size.width
-    height = Math.max(height, size.height)
+    top = Math.max(top, size.lineY)
+    bottom = Math.max(bottom, size.height - size.lineY)
   }
   return {
     width: width + CHAIN_GAP * (chain.length - 1),
-    height,
+    height: top + bottom,
+    lineY: top,
   }
 }
 
 function measureNode(node: LadderNode): Size {
   if (node.type === 'contact') return contactSize(node)
-  if (node.branches.length === 0) return { width: EMPTY_CHAIN_WIDTH + PARALLEL_SIDE * 2, height: EMPTY_CHAIN_HEIGHT }
+  if (node.branches.length === 0) {
+    return {
+      width: EMPTY_CHAIN_WIDTH + PARALLEL_SIDE * 2,
+      height: EMPTY_CHAIN_HEIGHT,
+      lineY: EMPTY_CHAIN_HEIGHT / 2,
+    }
+  }
   const branches = node.branches.map(measureChain)
   return {
     width: Math.max(...branches.map((branch) => branch.width)) + PARALLEL_SIDE * 2,
     height: branches.reduce((sum, branch) => sum + branch.height, 0) + PARALLEL_GAP * (branches.length - 1),
+    lineY: branches[0].lineY,
   }
 }
 
@@ -120,9 +143,31 @@ function shorten(value: string, limit = 19): string {
   return chars.length > limit ? `${chars.slice(0, limit - 1).join('')}…` : value
 }
 
-function findAddress(tags: TagDef[], reference: string): string {
+function commentLines(value: string): string[] {
+  const chars = Array.from(value)
+  if (chars.length <= 7) return [value]
+  const parenthesis = chars.findIndex((char) => char === '（' || char === '(')
+  if (parenthesis > 0 && parenthesis <= 7 && chars.length - parenthesis <= 7) {
+    return [chars.slice(0, parenthesis).join(''), chars.slice(parenthesis).join('')]
+  }
+  const firstLength = Math.min(7, Math.ceil(chars.length / 2))
+  return [chars.slice(0, firstLength).join(''), shorten(chars.slice(firstLength).join(''), 7)]
+}
+
+function findTag(tags: TagDef[], reference: string): TagDef | undefined {
   const base = reference.split('.')[0]
-  return tags.find((tag) => tag.name === base)?.address ?? ''
+  return tags.find((tag) => tag.name === base)
+}
+
+function tagDetails(tags: TagDef[], reference: string) {
+  const tag = findTag(tags, reference)
+  const fallback = reference ? reference.split('.')[0] : '未绑定变量'
+  return {
+    address: tag?.address || fallback,
+    comment: tag?.comment || fallback,
+    name: tag?.name || reference || '未绑定变量',
+    kind: tag?.kind ?? '—',
+  }
 }
 
 function formatMilliseconds(value: number): string {
@@ -150,13 +195,18 @@ function activateWithKeyboard(
   }
 }
 
-function renderContact(node: ContactNode, context: DrawContext, path: number[]): ReactNode {
+function renderContact(
+  node: ContactNode,
+  context: DrawContext,
+  path: number[],
+  incomingPower: boolean,
+): ReactNode {
   const size = contactSize(node)
   const selected = isSelected(context, path)
   const powered = context.runtime.nodePower[node.id] === true
-  const address = findAddress(context.tags, node.tag)
+  const details = tagDetails(context.tags, node.tag)
+  const comments = commentLines(details.comment)
   const centerX = size.width / 2
-  const centerY = size.height / 2
   const select = () => context.onSelect({ rungId: context.rungId, path })
 
   return (
@@ -165,74 +215,84 @@ function renderContact(node: ContactNode, context: DrawContext, path: number[]):
       className={[
         'll-node',
         'll-contact',
+        incomingPower ? 'has-input-power' : '',
         powered ? 'is-powered' : '',
         selected ? 'is-selected' : '',
       ].filter(Boolean).join(' ')}
       role="button"
       tabIndex={0}
-      aria-label={`${CONTACT_LABELS[node.kind]}触点，变量 ${node.tag || '未绑定'}，点击选中`}
+      aria-label={`${CONTACT_LABELS[node.kind]}触点，${details.address}，${details.comment}，变量 ${details.name}，点击选中`}
       onClick={(event) => {
         event.stopPropagation()
         select()
       }}
       onKeyDown={(event) => activateWithKeyboard(event, select)}
     >
-      <title>{`${CONTACT_LABELS[node.kind]} ${node.tag || '未绑定'}${address ? ` · ${address}` : ''}`}</title>
-      <rect className="ll-node-hit" x="2" y="3" width={size.width - 4} height={size.height - 6} rx="8" />
-      <path className="ll-wire" d={`M 0 ${centerY} H ${size.width}`} />
+      <title>{`${CONTACT_LABELS[node.kind]} · ${details.name} · ${details.kind} · ${details.address} · ${details.comment}`}</title>
+      <rect className="ll-node-hit" x="2" y="3" width={size.width - 4} height={size.height - 6} rx="2" />
+      <path className={`ll-wire ll-wire-in${incomingPower ? ' is-on' : ''}`} d={`M 0 ${CONTACT_LINE_Y} H ${centerX - 10}`} />
+      <path className={`ll-wire ll-wire-out${powered ? ' is-on' : ''}`} d={`M ${centerX + 10} ${CONTACT_LINE_Y} H ${size.width}`} />
 
       {node.kind === 'CMP' ? (
         <g>
-          <rect className="ll-compare-box" x="10" y="27" width={size.width - 20} height="36" rx="5" />
-          <text className="ll-compare-value" x={centerX} y="50" textAnchor="middle">
+          <rect className="ll-compare-box" x="10" y="54" width={size.width - 20} height="34" rx="0" />
+          <text className="ll-compare-value" x={centerX} y="76" textAnchor="middle">
             {`${node.tag || '未绑定'} ${node.compare?.op ?? '>='} ${node.compare?.value ?? 0}`}
           </text>
         </g>
       ) : (
         <g>
-          <line className="ll-contact-bar" x1={centerX - 10} y1={centerY - 15} x2={centerX - 10} y2={centerY + 15} />
-          <line className="ll-contact-bar" x1={centerX + 10} y1={centerY - 15} x2={centerX + 10} y2={centerY + 15} />
+          <line className="ll-contact-bar" x1={centerX - 9} y1="59" x2={centerX - 9} y2="85" />
+          <line className="ll-contact-bar" x1={centerX + 9} y1="59" x2={centerX + 9} y2="85" />
           {node.kind === 'NC' && (
-            <line className="ll-contact-slash" x1={centerX - 16} y1={centerY + 16} x2={centerX + 16} y2={centerY - 16} />
+            <line className="ll-contact-slash" x1={centerX - 11} y1="82" x2={centerX + 11} y2="62" />
           )}
           {node.kind === 'P' && (
-            <text className="ll-edge-mark" x={centerX + 23} y={centerY - 15}>P</text>
+            <text className="ll-edge-mark" x={centerX} y="57" textAnchor="middle">P</text>
           )}
           {node.kind === 'N' && (
-            <text className="ll-edge-mark" x={centerX + 23} y={centerY + 24}>N</text>
+            <text className="ll-edge-mark" x={centerX} y="57" textAnchor="middle">N</text>
           )}
         </g>
       )}
 
-      <text className="ll-tag-name" x={centerX} y="17" textAnchor="middle">{shorten(node.tag || '未绑定')}</text>
-      <text className="ll-kind-label" x="8" y={size.height - 8}>{CONTACT_LABELS[node.kind]}</text>
-      <text className="ll-address" x={size.width - 8} y={size.height - 8} textAnchor="end">{address}</text>
-      <rect className="ll-selection-box" x="2" y="3" width={size.width - 4} height={size.height - 6} rx="8" />
+      <text className="ll-tag-name" x={centerX} y="16" textAnchor="middle">{shorten(details.address, 16)}</text>
+      <text className="ll-address" x={centerX} y={comments.length === 1 ? 42 : 35} textAnchor="middle">
+        <tspan x={centerX}>“{comments[0]}</tspan>
+        {comments.length > 1 && <tspan x={centerX} dy="17">{comments[1]}”</tspan>}
+        {comments.length === 1 && <tspan>”</tspan>}
+      </text>
+      <rect className="ll-selection-box" x="2" y="3" width={size.width - 4} height={size.height - 6} rx="2" />
     </g>
   )
 }
 
-function renderParallel(node: Extract<LadderNode, { type: 'parallel' }>, context: DrawContext, path: number[]): ReactNode {
+function chainOutputPower(chain: LadderNode[], runtime: Runtime, incomingPower: boolean): boolean {
+  if (chain.length === 0) return incomingPower
+  return runtime.nodePower[chain[chain.length - 1].id] === true
+}
+
+function renderParallel(
+  node: Extract<LadderNode, { type: 'parallel' }>,
+  context: DrawContext,
+  path: number[],
+  incomingPower: boolean,
+): ReactNode {
   const size = measureNode(node)
   const branchSizes = node.branches.map(measureChain)
   const selected = isSelected(context, path)
   const splitX = PARALLEL_SIDE / 2
   const collectX = size.width - PARALLEL_SIDE / 2
-  const entryY = size.height / 2
   let branchY = 0
   const placements = branchSizes.map((branch) => {
     const y = branchY
     branchY += branch.height + PARALLEL_GAP
-    return { y, centerY: y + branch.height / 2 }
+    return { y, centerY: y + branch.lineY }
   })
+  const entryY = size.lineY
   const firstCenter = placements[0]?.centerY ?? entryY
   const lastCenter = placements[placements.length - 1]?.centerY ?? entryY
-  const wireParts = [`M 0 ${entryY} H ${splitX}`, `M ${splitX} ${firstCenter} V ${lastCenter}`]
-  placements.forEach((placement) => {
-    wireParts.push(`M ${splitX} ${placement.centerY} H ${PARALLEL_SIDE}`)
-    wireParts.push(`M ${collectX} ${placement.centerY} H ${size.width - PARALLEL_SIDE}`)
-  })
-  wireParts.push(`M ${collectX} ${firstCenter} V ${lastCenter}`, `M ${collectX} ${entryY} H ${size.width}`)
+  const outputPower = context.runtime.nodePower[node.id] === true
   const select = () => context.onSelect({ rungId: context.rungId, path })
 
   return (
@@ -240,8 +300,28 @@ function renderParallel(node: Extract<LadderNode, { type: 'parallel' }>, context
       key={`${node.id}-${path.join('.')}`}
       className={`ll-node ll-parallel${selected ? ' is-selected' : ''}`}
     >
-      <title>并联分支，点击 OR 标记选中</title>
-      <path className="ll-wire" d={wireParts.join(' ')} />
+      <title>并联分支，点击分支连接处选中</title>
+      <path className={`ll-wire${incomingPower ? ' is-on' : ''}`} d={`M 0 ${entryY} H ${splitX} M ${splitX} ${firstCenter} V ${lastCenter}`} />
+      {placements.map((placement, index) => {
+        const branch = node.branches[index]
+        const branchPower = chainOutputPower(branch, context.runtime, incomingPower)
+        return (
+          <g key={`${node.id}-wires-${index}`}>
+            <path
+              className={`ll-wire${incomingPower ? ' is-on' : ''}`}
+              d={`M ${splitX} ${placement.centerY} H ${PARALLEL_SIDE}`}
+            />
+            <path
+              className={`ll-wire${branchPower ? ' is-on' : ''}`}
+              d={`M ${PARALLEL_SIDE + branchSizes[index].width} ${placement.centerY} H ${collectX}`}
+            />
+          </g>
+        )
+      })}
+      <path
+        className={`ll-wire${outputPower ? ' is-on' : ''}`}
+        d={`M ${collectX} ${firstCenter} V ${lastCenter} M ${collectX} ${entryY} H ${size.width}`}
+      />
       <g
         className="ll-or-badge"
         role="button"
@@ -253,8 +333,8 @@ function renderParallel(node: Extract<LadderNode, { type: 'parallel' }>, context
         }}
         onKeyDown={(event) => activateWithKeyboard(event, select)}
       >
-        <rect x={splitX + 5} y="2" width="34" height="18" rx="5" />
-        <text x={splitX + 22} y="15" textAnchor="middle">OR</text>
+        <rect x={splitX - 14} y={entryY - 17} width="28" height="34" rx="0" />
+        <text x={splitX} y={entryY + 4} textAnchor="middle">OR</text>
       </g>
       {node.branches.map((branch, index) => {
         const placement = placements[index]
@@ -263,28 +343,33 @@ function renderParallel(node: Extract<LadderNode, { type: 'parallel' }>, context
             key={`${node.id}-branch-${index}`}
             transform={`translate(${PARALLEL_SIDE}, ${placement.y})`}
           >
-            {renderChain(branch, context, [...path, index])}
+            {renderChain(branch, context, [...path, index], incomingPower)}
           </g>
         )
       })}
-      <rect className="ll-selection-box" x="5" y="2" width={size.width - 10} height={size.height - 4} rx="7" />
+      <rect className="ll-selection-box" x="5" y="2" width={size.width - 10} height={size.height - 4} rx="2" />
     </g>
   )
 }
 
-function renderNode(node: LadderNode, context: DrawContext, path: number[]): ReactNode {
+function renderNode(node: LadderNode, context: DrawContext, path: number[], incomingPower: boolean): ReactNode {
   return node.type === 'contact'
-    ? renderContact(node, context, path)
-    : renderParallel(node, context, path)
+    ? renderContact(node, context, path, incomingPower)
+    : renderParallel(node, context, path, incomingPower)
 }
 
-function renderChain(chain: LadderNode[], context: DrawContext, pathPrefix: number[]): ReactNode {
+function renderChain(
+  chain: LadderNode[],
+  context: DrawContext,
+  pathPrefix: number[],
+  incomingPower: boolean,
+): ReactNode {
   const size = measureChain(chain)
   if (chain.length === 0) {
     return (
-      <g className="ll-empty-branch">
-        <line className="ll-wire" x1="0" y1={size.height / 2} x2={size.width} y2={size.height / 2} />
-        <text x={size.width / 2} y={size.height / 2 - 8} textAnchor="middle">空</text>
+      <g className={`ll-empty-branch${incomingPower ? ' is-powered' : ''}`}>
+        <line className={`ll-wire${incomingPower ? ' is-on' : ''}`} x1="0" y1={size.lineY} x2={size.width} y2={size.lineY} />
+        <text x={size.width / 2} y={size.lineY - 8} textAnchor="middle">空</text>
       </g>
     )
   }
@@ -292,26 +377,28 @@ function renderChain(chain: LadderNode[], context: DrawContext, pathPrefix: numb
   const parts: ReactNode[] = []
   let cursorX = 0
   let previousEnd = 0
+  let currentPower = incomingPower
   chain.forEach((node, index) => {
     const nodeSize = measureNode(node)
-    const nodeY = (size.height - nodeSize.height) / 2
+    const nodeY = size.lineY - nodeSize.lineY
     if (index > 0) {
       parts.push(
         <line
           key={`connector-${index}`}
-          className="ll-wire"
+          className={`ll-wire${currentPower ? ' is-on' : ''}`}
           x1={previousEnd}
-          y1={size.height / 2}
+          y1={size.lineY}
           x2={cursorX}
-          y2={size.height / 2}
+          y2={size.lineY}
         />,
       )
     }
     parts.push(
       <g key={`${node.id}-${index}`} transform={`translate(${cursorX}, ${nodeY})`}>
-        {renderNode(node, context, [...pathPrefix, index])}
+        {renderNode(node, context, [...pathPrefix, index], currentPower)}
       </g>,
     )
+    currentPower = context.runtime.nodePower[node.id] === true
     previousEnd = cursorX + nodeSize.width
     cursorX = previousEnd + CHAIN_GAP
   })
@@ -323,8 +410,14 @@ function renderOutput(output: OutputElement, context: DrawContext, rungId: strin
   const selected = isSelected(context, null)
   const powered = context.runtime.outputPower[output.id] === true
   const q = readOutputQ(output, context.runtime)
-  const address = findAddress(context.tags, output.tag)
-  const centerY = size.height / 2
+  const details = tagDetails(context.tags, output.tag)
+  const comments = commentLines(details.comment)
+  const isCoil = output.kind === 'COIL' || output.kind === 'SET' || output.kind === 'RESET'
+  const centerY = isCoil ? COIL_LINE_Y : BOX_LINE_Y
+  const symbolX = isCoil ? size.width / 2 : 0
+  const boxTop = centerY - 62
+  const hasReset = output.kind === 'TONR' || output.kind === 'CTU'
+  const boxHeight = hasReset ? 140 : 124
   const select = () => context.onSelect({ rungId, path: null })
 
   return (
@@ -338,60 +431,70 @@ function renderOutput(output: OutputElement, context: DrawContext, rungId: strin
       ].filter(Boolean).join(' ')}
       role="button"
       tabIndex={0}
-      aria-label={`${OUTPUT_LABELS[output.kind]}输出，${output.tag || '未绑定'}，点击编辑`}
+      aria-label={`${OUTPUT_LABELS[output.kind]}输出，${details.address}，${details.comment}，变量 ${details.name}，点击编辑`}
       onClick={(event) => {
         event.stopPropagation()
         select()
       }}
       onKeyDown={(event) => activateWithKeyboard(event, select)}
     >
-      <title>{`${OUTPUT_LABELS[output.kind]} ${output.tag || '未绑定'}${q ? ' · Q=TRUE' : ' · Q=FALSE'}`}</title>
-      <rect className="ll-node-hit" x="2" y="3" width={size.width - 4} height={size.height - 6} rx="8" />
+      <title>{`${OUTPUT_LABELS[output.kind]} · ${details.name} · ${details.kind} · ${details.address} · ${details.comment} · ${q ? 'Q=TRUE' : 'Q=FALSE'}`}</title>
+      <rect className="ll-node-hit" x="2" y="3" width={size.width - 4} height={size.height - 6} rx="2" />
 
-      {output.kind === 'COIL' || output.kind === 'SET' || output.kind === 'RESET' ? (
+      {isCoil ? (
         <g>
-          <path className="ll-wire" d={`M 0 ${centerY} H ${size.width}`} />
-          <path className="ll-coil-arc" d="M 56 21 Q 44 43 56 65" />
-          <path className="ll-coil-arc" d="M 80 21 Q 92 43 80 65" />
-          <text className="ll-coil-mark" x="68" y={centerY + 4} textAnchor="middle">
+          <path className="ll-wire" d={`M 0 ${centerY} H ${symbolX - 10} M ${symbolX + 10} ${centerY} H ${size.width}`} />
+          <path className="ll-coil-arc" d={`M ${symbolX - 10} ${centerY - 17} Q ${symbolX - 20} ${centerY} ${symbolX - 10} ${centerY + 17}`} />
+          <path className="ll-coil-arc" d={`M ${symbolX + 10} ${centerY - 17} Q ${symbolX + 20} ${centerY} ${symbolX + 10} ${centerY + 17}`} />
+          <text className="ll-coil-mark" x={symbolX} y={centerY + 5} textAnchor="middle">
             {output.kind === 'SET' ? 'S' : output.kind === 'RESET' ? 'R' : ''}
+          </text>
+          <text className="ll-output-name" x={symbolX} y="16" textAnchor="middle">{shorten(details.address, 16)}</text>
+          <text className="ll-output-comment" x={symbolX} y={comments.length === 1 ? 42 : 35} textAnchor="middle">
+            <tspan x={symbolX}>“{comments[0]}</tspan>
+            {comments.length > 1 && <tspan x={symbolX} dy="17">{comments[1]}”</tspan>}
+            {comments.length === 1 && <tspan>”</tspan>}
           </text>
         </g>
       ) : (
         <g>
-          <path className="ll-wire" d={`M 0 ${centerY} H 14`} />
-          <rect className="ll-instruction-box" x="12" y="6" width={size.width - 12} height={size.height - 12} rx="7" />
-          <text className="ll-box-title" x="24" y="25">{output.kind}</text>
-          <text className="ll-box-instance" x={size.width - 20} y="25" textAnchor="end">{output.tag || '未命名'}</text>
-          <line className="ll-box-divider" x1="20" y1="33" x2={size.width - 8} y2="33" />
-          <text className="ll-pin-label" x="24" y="56">IN</text>
-          <circle className={`ll-pin-led${powered ? ' is-on' : ''}`} cx="52" cy={centerY - 5} r="5" />
-          <text className="ll-pin-label" x={size.width - 22} y="56" textAnchor="end">Q</text>
-          <circle className={`ll-pin-led${q ? ' is-on' : ''}`} cx={size.width - 38} cy={centerY - 5} r="5" />
+          <text className="ll-box-instance" x={size.width / 2} y="14" textAnchor="middle">
+            <tspan className="ll-box-comment">“{shorten(details.comment, 12)}”</tspan>
+            <tspan dx="14">{shorten(details.address, 12)}</tspan>
+          </text>
+          <path className={`ll-wire${powered ? ' is-on' : ''}`} d={`M 0 ${centerY} H 16 M ${size.width - 16} ${centerY} H ${size.width}`} />
+          <rect className="ll-instruction-box" x="16" y={boxTop} width={size.width - 32} height={boxHeight} />
+          <rect className="ll-box-heading" x="16" y={boxTop} width={size.width - 32} height="31" />
+          <text className="ll-box-title" x={size.width / 2} y={boxTop + 23} textAnchor="middle">{output.kind}</text>
+          <text className="ll-pin-label" x="25" y={centerY + 6}>{output.kind === 'CTU' ? 'CU' : 'IN'}</text>
+          <text className="ll-pin-label" x={size.width - 25} y={centerY + 6} textAnchor="end">Q</text>
           {output.kind === 'CTU' ? (
             <g>
-              <text className="ll-box-data" x="24" y="80">{`PV   ${output.pv ?? 1}`}</text>
-              <text className="ll-box-data" x="24" y="101">{`CV   ${context.runtime.counters[output.tag]?.cv ?? 0}`}</text>
-              <text className="ll-box-data" x="24" y="121">{`R    ${output.resetTag || '—'}`}</text>
+              <text className="ll-box-data" x="25" y={centerY + 40}>PV</text>
+              <text className="ll-box-data" x={size.width - 25} y={centerY + 40} textAnchor="end">{output.pv ?? 1}</text>
+              <text className="ll-box-data" x="25" y={centerY + 66}>R</text>
+              <text className="ll-box-data" x={size.width - 25} y={centerY + 66} textAnchor="end">{shorten(output.resetTag || '—', 13)}</text>
+              <text className="ll-box-value" x={size.width / 2} y={centerY + 40} textAnchor="middle">{context.runtime.counters[output.tag]?.cv ?? 0}</text>
             </g>
           ) : (
             <g>
-              <text className="ll-box-data" x="24" y="80">{`PT   ${formatMilliseconds(output.pt ?? 0)}`}</text>
-              <text className="ll-box-data" x="24" y="101">{`ET   ${formatMilliseconds(context.runtime.timers[output.tag]?.et ?? 0)}`}</text>
+              <text className="ll-box-data" x="25" y={centerY + 40}>PT</text>
+              <text className="ll-box-data" x={size.width - 25} y={centerY + 40} textAnchor="end">{formatMilliseconds(output.pt ?? 0)}</text>
+              <text className="ll-box-value" x={size.width / 2} y={centerY + 40} textAnchor="middle">{formatMilliseconds(context.runtime.timers[output.tag]?.et ?? 0)}</text>
               {output.kind === 'TONR' && (
-                <text className="ll-box-data" x="24" y="121">{`R    ${output.resetTag || '—'}`}</text>
+                <g>
+                  <text className="ll-box-data" x="25" y={centerY + 66}>R</text>
+                  <text className="ll-box-data" x={size.width - 25} y={centerY + 66} textAnchor="end">
+                    {shorten(output.resetTag || '—', 13)}
+                  </text>
+                </g>
               )}
             </g>
           )}
         </g>
       )}
 
-      {(output.kind === 'COIL' || output.kind === 'SET' || output.kind === 'RESET') && (
-        <text className="ll-output-name" x={size.width / 2} y="16" textAnchor="middle">{shorten(output.tag || '未绑定')}</text>
-      )}
-      <text className="ll-kind-label" x="8" y={size.height - 8}>{OUTPUT_LABELS[output.kind]}</text>
-      <text className="ll-address" x={size.width - 8} y={size.height - 8} textAnchor="end">{address}</text>
-      <rect className="ll-selection-box" x="2" y="3" width={size.width - 4} height={size.height - 6} rx="8" />
+      <rect className="ll-selection-box" x="2" y="3" width={size.width - 4} height={size.height - 6} rx="2" />
     </g>
   )
 }
@@ -417,7 +520,31 @@ function describeNode(node: LadderNode): string {
     : `并联分支 · ${node.branches.length} 条支路`
 }
 
-function RungCard({
+function measureRung(rung: Program['rungs'][number], availableWidth: number) {
+  const chain = measureChain(rung.nodes)
+  const output = outputSize(rung.output)
+  const chainX = RAIL_LEFT + 42
+  const naturalWidth = chainX + chain.width + CHAIN_TAIL + OUTPUT_LEAD + output.width + 42 + RAIL_RIGHT
+  const width = Math.max(PROGRAM_MIN_WIDTH, naturalWidth, Math.ceil(availableWidth))
+  const top = Math.max(chain.lineY, output.lineY)
+  const bottom = Math.max(chain.height - chain.lineY, output.height - output.lineY)
+  const height = top + bottom + 22
+  const centerY = top + 11
+  return {
+    chain,
+    output,
+    chainX,
+    outputX: width - RAIL_RIGHT - 42 - output.width,
+    width,
+    naturalWidth,
+    height,
+    chainY: centerY - chain.lineY,
+    outputY: centerY - output.lineY,
+    centerY,
+  }
+}
+
+function RungSection({
   rung,
   index,
   total,
@@ -440,39 +567,40 @@ function RungCard({
   onDeleteRung: (rungId: string) => void
   onMoveRung: (rungId: string, delta: -1 | 1) => void
 }) {
-  const chainMetrics = measureChain(rung.nodes)
-  const outputMetrics = outputSize(rung.output)
-  const contentHeight = Math.max(chainMetrics.height, outputMetrics.height)
-  const diagramHeight = contentHeight + 42
-  const chainX = 44
-  const outputX = chainX + chainMetrics.width + 44
-  const diagramWidth = outputX + outputMetrics.width + 38
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const [availableWidth, setAvailableWidth] = useState(PROGRAM_MIN_WIDTH)
+  const layout = measureRung(rung, availableWidth)
   const powered = context.runtime.rungPower[rung.id] === true
   const selectedNode = findSelectedNode(rung, context.selection)
   const selectedPath = context.selection?.rungId === rung.id ? context.selection.path : null
-  const chainY = (diagramHeight - chainMetrics.height) / 2
-  const outputY = (diagramHeight - outputMetrics.height) / 2
+
+  useLayoutEffect(() => {
+    const element = scrollRef.current
+    if (!element) return
+    const updateWidth = () => setAvailableWidth(element.clientWidth)
+    updateWidth()
+    const observer = new ResizeObserver(updateWidth)
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [])
 
   return (
     <article className={`ll-rung${powered ? ' is-powered' : ''}`} aria-label={`梯级 ${index + 1}：${rung.label || '未命名'}`}>
       <header className="ll-rung-header">
         <div className="ll-rung-title">
-          <span className="ll-rung-number">{String(index + 1).padStart(2, '0')}</span>
-          <div>
-            <h3>{rung.label || '未命名梯级'}</h3>
-            <div className="ll-rung-meta">
-              <span className={`ll-power-state${powered ? ' is-on' : ''}`}>
-                <i />{powered ? '回路通电' : '回路断开'}
-              </span>
-              <span>{OUTPUT_LABELS[rung.output.kind]}</span>
-            </div>
-          </div>
+          <span className="ll-rung-marker" aria-hidden="true" />
+          <h3>{rung.label || '未命名梯级'}</h3>
         </div>
-        <div className="ll-rung-tools" aria-label="梯级操作">
-          <button type="button" title="上移梯级" disabled={index === 0} onClick={() => onMoveRung(rung.id, -1)}>↑</button>
-          <button type="button" title="下移梯级" disabled={index === total - 1} onClick={() => onMoveRung(rung.id, 1)}>↓</button>
-          <button type="button" title="复制梯级" onClick={() => onDuplicateRung(rung.id)}>⧉</button>
-          <button type="button" className="is-danger" title="删除梯级" onClick={() => onDeleteRung(rung.id)}>×</button>
+        <div className="ll-rung-header-right">
+          <span className={`ll-power-state${powered ? ' is-on' : ''}`} title={powered ? '回路通电' : '回路断开'}>
+            <i />{powered ? '能流接通' : `程序段 ${index + 1}`}
+          </span>
+          <div className="ll-rung-tools" aria-label="梯级操作">
+            <button type="button" title="上移梯级" aria-label="上移梯级" disabled={index === 0} onClick={() => onMoveRung(rung.id, -1)}>↑</button>
+            <button type="button" title="下移梯级" aria-label="下移梯级" disabled={index === total - 1} onClick={() => onMoveRung(rung.id, 1)}>↓</button>
+            <button type="button" title="复制梯级" aria-label="复制梯级" onClick={() => onDuplicateRung(rung.id)}>⧉</button>
+            <button type="button" className="is-danger" title="删除梯级" aria-label="删除梯级" onClick={() => onDeleteRung(rung.id)}>×</button>
+          </div>
         </div>
       </header>
 
@@ -487,33 +615,34 @@ function RungCard({
         </div>
       )}
 
-      <div className="ll-svg-scroll">
+      <div className="ll-svg-scroll" ref={scrollRef}>
         <svg
           className="ll-diagram"
-          width={diagramWidth}
-          height={diagramHeight}
-          viewBox={`0 0 ${diagramWidth} ${diagramHeight}`}
+          width={layout.width}
+          height={layout.height}
+          viewBox={`0 0 ${layout.width} ${layout.height}`}
+          style={{ minWidth: Math.min(layout.naturalWidth, PROGRAM_MIN_WIDTH) }}
           role="group"
           aria-label={`${rung.label || '梯级'} 梯形图`}
         >
-          <line className="ll-rail" x1="20" y1="12" x2="20" y2={diagramHeight - 12} />
-          <line className={`ll-power-wire${powered ? ' is-on' : ''}`} x1="20" y1={diagramHeight / 2} x2={chainX} y2={diagramHeight / 2} />
-          <g transform={`translate(${chainX}, ${chainY})`}>{renderChain(rung.nodes, context, [])}</g>
+          <line className="ll-rail" x1={RAIL_LEFT} y1="0" x2={RAIL_LEFT} y2={layout.height} />
+          <line className="ll-power-wire is-on" x1={RAIL_LEFT} y1={layout.centerY} x2={layout.chainX} y2={layout.centerY} />
+          <g transform={`translate(${layout.chainX}, ${layout.chainY})`}>{renderChain(rung.nodes, context, [], true)}</g>
           <line
             className={`ll-power-wire${powered ? ' is-on' : ''}`}
-            x1={chainX + chainMetrics.width}
-            y1={diagramHeight / 2}
-            x2={outputX}
-            y2={diagramHeight / 2}
+            x1={layout.chainX + layout.chain.width}
+            y1={layout.centerY}
+            x2={layout.outputX}
+            y2={layout.centerY}
           />
-          <g transform={`translate(${outputX}, ${outputY})`}>{renderOutput(rung.output, context, rung.id)}</g>
-          <line className="ll-rail" x1={diagramWidth - 20} y1="12" x2={diagramWidth - 20} y2={diagramHeight - 12} />
+          <g transform={`translate(${layout.outputX}, ${layout.outputY})`}>{renderOutput(rung.output, context, rung.id)}</g>
+          <line className="ll-terminal" x1={layout.width - RAIL_RIGHT} y1={layout.centerY - 14} x2={layout.width - RAIL_RIGHT} y2={layout.centerY + 14} />
           <line
             className={`ll-power-wire${powered ? ' is-on' : ''}`}
-            x1={outputX + outputMetrics.width}
-            y1={diagramHeight / 2}
-            x2={diagramWidth - 20}
-            y2={diagramHeight / 2}
+            x1={layout.outputX + layout.output.width}
+            y1={layout.centerY}
+            x2={layout.width - RAIL_RIGHT}
+            y2={layout.centerY}
           />
         </svg>
       </div>
@@ -553,21 +682,23 @@ export default function LadderCanvas({
           <button type="button" onClick={onAddRung}>＋ 添加梯级</button>
         </div>
       ) : (
-        program.rungs.map((rung, index) => (
-          <RungCard
-            key={rung.id}
-            rung={rung}
-            index={index}
-            total={program.rungs.length}
-            context={{ ...context, rungId: rung.id }}
-            onDeleteNode={onDeleteNode}
-            onWrapParallel={onWrapParallel}
-            onCollapseParallel={onCollapseParallel}
-            onDuplicateRung={onDuplicateRung}
-            onDeleteRung={onDeleteRung}
-            onMoveRung={onMoveRung}
-          />
-        ))
+        <div className="ll-program-sheet">
+          {program.rungs.map((rung, index) => (
+            <RungSection
+              key={rung.id}
+              rung={rung}
+              index={index}
+              total={program.rungs.length}
+              context={{ ...context, rungId: rung.id }}
+              onDeleteNode={onDeleteNode}
+              onWrapParallel={onWrapParallel}
+              onCollapseParallel={onCollapseParallel}
+              onDuplicateRung={onDuplicateRung}
+              onDeleteRung={onDeleteRung}
+              onMoveRung={onMoveRung}
+            />
+          ))}
+        </div>
       )}
       {program.rungs.length > 0 && (
         <button type="button" className="ll-add-rung" onClick={onAddRung}>

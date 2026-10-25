@@ -1,129 +1,96 @@
 .ll-canvas {
   --ll-surface: #ffffff;
-  --ll-surface-raised: #fbfbfd;
-  --ll-line: #e5e5ea;
-  --ll-line-strong: #d2d2d7;
-  --ll-text: #1d1d1f;
-  --ll-muted: #6e6e73;
-  --ll-faint: #a1a1a6;
-  --ll-blue: #0071e3;
-  --ll-green: #248a3d;
-  --ll-green-bright: #34c759;
-  --ll-amber: #b25000;
-  --ll-danger: #ff3b30;
+  --ll-ink: #161616;
+  --ll-text: #202b30;
+  --ll-muted: #657278;
+  --ll-faint: #899398;
+  --ll-border: #d9ddde;
+  --ll-address: #478d84;
+  --ll-blue: #2b6f97;
+  --ll-green: #159447;
+  --ll-danger: #b42318;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 12px;
   min-width: 0;
   color: var(--ll-text);
 }
 
-.ll-rung {
+.ll-program-sheet {
   overflow: hidden;
-  border: 1px solid var(--ll-line);
-  border-radius: 16px;
+  border: 0;
   background: var(--ll-surface);
-  box-shadow:
-    0 1px 2px rgba(0, 0, 0, 0.035),
-    0 8px 24px rgba(0, 0, 0, 0.035);
-  transition:
-    border-color 180ms ease,
-    box-shadow 180ms ease,
-    transform 180ms ease;
 }
 
-.ll-rung:hover {
-  border-color: #d9d9de;
-  box-shadow:
-    0 1px 2px rgba(0, 0, 0, 0.04),
-    0 12px 30px rgba(0, 0, 0, 0.055);
-}
-
-.ll-rung.is-powered {
-  border-color: rgba(52, 199, 89, 0.38);
-  box-shadow:
-    inset 3px 0 0 var(--ll-green-bright),
-    0 1px 2px rgba(0, 0, 0, 0.035),
-    0 8px 24px rgba(36, 138, 61, 0.07);
+.ll-rung + .ll-rung {
+  border-top: 4px solid var(--ll-surface);
 }
 
 .ll-rung-header {
   display: flex;
+  min-height: 34px;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  min-height: 60px;
-  padding: 11px 16px;
-  border-bottom: 1px solid var(--ll-line);
-  background: var(--ll-surface);
+  gap: 12px;
+  padding: 0 8px 0 15px;
+  border: 0;
+  background: #dedfdf;
 }
 
 .ll-rung-title {
   display: flex;
+  min-width: 0;
   align-items: center;
-  gap: 12px;
-  min-width: 0;
+  gap: 9px;
+  font-size: 12px;
 }
 
-.ll-rung-title > div {
-  min-width: 0;
-}
-
-.ll-rung-number {
-  display: grid;
+.ll-rung-marker {
+  width: 0;
+  height: 0;
   flex: 0 0 auto;
-  width: 34px;
-  height: 34px;
-  place-items: center;
-  border: 1px solid var(--ll-line);
-  border-radius: 10px;
-  background: #f5f5f7;
-  color: var(--ll-muted);
-  font-family: "SF Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.03em;
+  border-top: 5px solid transparent;
+  border-bottom: 5px solid transparent;
+  border-left: 7px solid var(--ll-ink);
 }
 
 .ll-rung-title h3 {
   overflow: hidden;
   margin: 0;
-  color: var(--ll-text);
-  font-size: 14px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
+  color: #303c41;
+  font-size: 16px;
+  font-weight: 400;
   line-height: 1.4;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.ll-rung-meta {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  margin-top: 3px;
-  color: var(--ll-faint);
-  font-size: 11px;
+.ll-rung-title h3::before {
+  content: none;
 }
 
-.ll-rung-meta > span + span::before {
-  margin-right: 9px;
-  color: var(--ll-line-strong);
-  content: "/";
+.ll-rung-header-right {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
 }
 
 .ll-power-state {
   display: inline-flex;
   align-items: center;
   gap: 5px;
+  color: #6e797e;
+  font-size: 10px;
+  white-space: nowrap;
 }
 
 .ll-power-state i {
+  display: none;
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: #c7c7cc;
-  box-shadow: 0 0 0 3px rgba(142, 142, 147, 0.08);
+  background: var(--ll-green);
 }
 
 .ll-power-state.is-on {
@@ -132,17 +99,13 @@
 }
 
 .ll-power-state.is-on i {
-  background: var(--ll-green-bright);
-  box-shadow: 0 0 0 3px rgba(52, 199, 89, 0.14);
+  display: block;
 }
 
 .ll-rung-tools {
   display: flex;
   flex: 0 0 auto;
-  gap: 3px;
-  padding: 3px;
-  border-radius: 10px;
-  background: #f5f5f7;
+  gap: 1px;
 }
 
 .ll-rung-tools button,
@@ -150,54 +113,45 @@
 .ll-add-rung,
 .ll-empty-board button {
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: 2px;
   background: transparent;
-  color: var(--ll-muted);
+  color: #536168;
   font: inherit;
   cursor: pointer;
-  transition:
-    border-color 140ms ease,
-    background 140ms ease,
-    color 140ms ease,
-    transform 140ms ease;
 }
 
 .ll-rung-tools button {
   display: grid;
-  width: 28px;
-  height: 28px;
+  width: 26px;
+  height: 26px;
   padding: 0;
   place-items: center;
-  font-size: 15px;
+  font-family: Arial, sans-serif;
+  font-size: 16px;
   line-height: 1;
 }
 
 .ll-rung-tools button:hover:not(:disabled),
+.ll-rung-tools button:focus-visible:not(:disabled),
 .ll-inline-actions button:hover,
+.ll-inline-actions button:focus-visible,
 .ll-add-rung:hover,
 .ll-empty-board button:hover {
-  border-color: var(--ll-line);
-  background: #ffffff;
-  color: var(--ll-text);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
-}
-
-.ll-rung-tools button:active:not(:disabled),
-.ll-inline-actions button:active,
-.ll-add-rung:active,
-.ll-empty-board button:active {
-  transform: scale(0.96);
+  border-color: #aab4b8;
+  background: #f8f9f9;
+  color: #152a34;
+  outline: none;
 }
 
 .ll-rung-tools button:disabled {
   cursor: default;
-  opacity: 0.28;
+  opacity: 0.3;
 }
 
 .ll-rung-tools button.is-danger:hover,
 .ll-inline-actions button.is-danger:hover {
-  border-color: rgba(255, 59, 48, 0.22);
-  background: rgba(255, 59, 48, 0.08);
+  border-color: #e0b4af;
+  background: #fff5f3;
   color: var(--ll-danger);
 }
 
@@ -205,191 +159,165 @@
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 6px;
-  padding: 8px 16px;
-  border-bottom: 1px solid rgba(0, 113, 227, 0.1);
-  background: rgba(0, 113, 227, 0.045);
+  gap: 7px;
+  padding: 8px 12px;
+  border-bottom: 1px solid #c8d7e1;
+  background: #f0f5f8;
   color: var(--ll-muted);
   font-size: 11px;
 }
 
 .ll-inline-actions > span {
   margin-right: auto;
-  color: #3a3a3c;
+  color: #344c5b;
   font-weight: 500;
 }
 
 .ll-inline-actions button {
   padding: 4px 9px;
-  border-color: rgba(0, 113, 227, 0.14);
-  background: rgba(255, 255, 255, 0.78);
-  color: #0062c4;
+  border-color: #b8cad5;
+  background: #ffffff;
+  color: #285f7e;
   font-size: 11px;
 }
 
 .ll-svg-scroll {
   overflow-x: auto;
   overflow-y: hidden;
-  padding: 8px 10px 6px;
+  padding: 0;
   overscroll-behavior-x: contain;
   -webkit-overflow-scrolling: touch;
-  scrollbar-color: #d2d2d7 transparent;
+  scrollbar-color: #aeb8bc #f4f5f5;
   scrollbar-width: thin;
-  background-color: #ffffff;
-  background-image: radial-gradient(circle, rgba(60, 60, 67, 0.095) 0.65px, transparent 0.8px);
-  background-position: 10px 10px;
-  background-size: 16px 16px;
+  background: #ffffff;
 }
 
 .ll-scroll-note {
   display: none;
   margin: 0;
-  padding: 0 12px 10px;
+  padding: 0 12px 7px;
   color: var(--ll-faint);
   font-size: 10px;
-  text-align: center;
+  text-align: right;
 }
 
 .ll-svg-scroll::-webkit-scrollbar {
-  height: 8px;
+  height: 7px;
 }
 
 .ll-svg-scroll::-webkit-scrollbar-thumb {
-  border-radius: 9px;
-  background: #d2d2d7;
-}
-
-.ll-svg-scroll::-webkit-scrollbar-thumb:hover {
-  background: #b8b8be;
+  background: #aeb8bc;
 }
 
 .ll-diagram {
   display: block;
-  min-width: 100%;
   max-width: none;
-  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-family: "Microsoft YaHei", "PingFang SC", -apple-system, BlinkMacSystemFont, sans-serif;
+  shape-rendering: geometricPrecision;
 }
 
-.ll-node {
+.ll-node,
+.ll-or-badge {
   cursor: pointer;
   outline: none;
 }
 
 .ll-node-hit {
   fill: transparent;
-  transition: fill 140ms ease;
 }
 
-.ll-node:hover .ll-node-hit {
-  fill: rgba(0, 113, 227, 0.035);
-}
-
+.ll-node:hover .ll-node-hit,
 .ll-node:focus-visible .ll-node-hit {
-  fill: rgba(0, 113, 227, 0.06);
+  fill: rgba(43, 111, 151, 0.045);
 }
 
 .ll-wire,
 .ll-power-wire,
 .ll-contact-bar,
+.ll-contact-slash,
 .ll-coil-arc,
-.ll-box-divider {
+.ll-rail,
+.ll-terminal {
   fill: none;
-  stroke: #98989d;
-  stroke-width: 1.7;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  transition: stroke 140ms ease;
+  stroke: var(--ll-ink);
+  stroke-width: 2.5;
+  stroke-linecap: square;
+  stroke-linejoin: miter;
 }
 
-.ll-wire,
-.ll-power-wire {
-  stroke-width: 2;
+.ll-contact-bar,
+.ll-coil-arc,
+.ll-contact-slash {
+  stroke-width: 3;
 }
 
 .ll-rail {
-  fill: none;
-  stroke: #d2d2d7;
+  stroke-width: 4;
+}
+
+.ll-terminal {
   stroke-width: 3;
-  stroke-linecap: round;
 }
 
-.ll-power-wire.is-on {
-  stroke: var(--ll-green);
-}
-
-.ll-contact.is-powered .ll-wire,
-.ll-contact.is-powered .ll-contact-bar,
+.ll-wire.is-on,
+.ll-power-wire.is-on,
+.ll-contact.has-input-power .ll-contact-bar,
+.ll-contact.has-input-power .ll-contact-slash,
 .ll-output.is-powered .ll-wire,
-.ll-output.is-powered .ll-coil-arc,
-.ll-output.is-powered .ll-box-divider {
+.ll-output.is-powered .ll-coil-arc {
   stroke: var(--ll-green);
-}
-
-.ll-contact-slash {
-  fill: none;
-  stroke: var(--ll-amber);
-  stroke-width: 1.7;
-  stroke-linecap: round;
-}
-
-.ll-edge-mark {
-  fill: var(--ll-amber);
-  font-family: "SF Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
-  font-size: 10px;
-  font-weight: 600;
-}
-
-.ll-compare-box {
-  fill: #f5f5f7;
-  stroke: #d2d2d7;
-  stroke-width: 1.1;
-  transition:
-    fill 140ms ease,
-    stroke 140ms ease;
-}
-
-.ll-contact.is-powered .ll-compare-box {
-  fill: rgba(52, 199, 89, 0.1);
-  stroke: rgba(36, 138, 61, 0.55);
-}
-
-.ll-compare-value {
-  fill: #3a3a3c;
-  font-family: "SF Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
-  font-size: 10.5px;
 }
 
 .ll-tag-name,
-.ll-output-name {
-  fill: var(--ll-text);
-  font-family: "SF Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
-  font-size: 10.5px;
+.ll-output-name,
+.ll-box-instance {
+  fill: var(--ll-address);
+  font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
+  font-size: 16px;
   font-weight: 600;
+  letter-spacing: 0.03em;
   pointer-events: none;
-}
-
-.ll-contact.is-powered .ll-tag-name,
-.ll-output.is-powered .ll-output-name {
-  fill: var(--ll-green);
 }
 
 .ll-address,
-.ll-kind-label {
-  fill: var(--ll-faint);
-  font-family: "SF Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
-  font-size: 8.5px;
+.ll-output-comment {
+  fill: var(--ll-ink);
+  font-size: 13px;
   pointer-events: none;
 }
 
-.ll-kind-label {
-  fill: #c7c7cc;
-  letter-spacing: 0.015em;
+.ll-edge-mark {
+  fill: var(--ll-ink);
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.ll-contact.has-input-power .ll-edge-mark {
+  fill: var(--ll-green);
+}
+
+.ll-compare-box {
+  fill: #f2f3f3;
+  stroke: var(--ll-ink);
+  stroke-width: 2;
+}
+
+.ll-contact.has-input-power .ll-compare-box {
+  stroke: var(--ll-green);
+}
+
+.ll-compare-value {
+  fill: var(--ll-ink);
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 11px;
 }
 
 .ll-selection-box {
   fill: none;
   stroke: var(--ll-blue);
-  stroke-width: 2;
+  stroke-width: 1.5;
+  stroke-dasharray: 4 3;
   opacity: 0;
   pointer-events: none;
 }
@@ -400,47 +328,45 @@
 }
 
 .ll-node.is-selected .ll-node-hit {
-  fill: rgba(0, 113, 227, 0.055);
-}
-
-.ll-or-badge {
-  cursor: pointer;
-  outline: none;
+  fill: rgba(43, 111, 151, 0.06);
 }
 
 .ll-or-badge rect {
-  fill: #ffffff;
-  stroke: #d2d2d7;
-  stroke-width: 1;
-  transition:
-    fill 140ms ease,
-    stroke 140ms ease;
+  fill: transparent;
+  stroke: transparent;
 }
 
 .ll-or-badge text {
-  fill: var(--ll-muted);
-  font-family: "SF Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
-  font-size: 8px;
+  fill: transparent;
+  font-family: Consolas, monospace;
+  font-size: 10px;
   font-weight: 600;
-  letter-spacing: 0.06em;
 }
 
 .ll-or-badge:hover rect,
-.ll-or-badge:focus-visible rect {
-  fill: #f0f7ff;
-  stroke: var(--ll-blue);
+.ll-or-badge:focus-visible rect,
+.ll-parallel.is-selected .ll-or-badge rect {
+  fill: #f3f7f9;
+  stroke: #7d9aad;
+  stroke-width: 1;
+}
+
+.ll-or-badge:hover text,
+.ll-or-badge:focus-visible text,
+.ll-parallel.is-selected .ll-or-badge text {
+  fill: #35627d;
 }
 
 .ll-empty-branch text {
   fill: var(--ll-faint);
-  font-size: 9px;
+  font-size: 10px;
 }
 
 .ll-coil-mark {
-  fill: #3a3a3c;
-  font-family: "SF Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
-  font-size: 10px;
-  font-weight: 700;
+  fill: var(--ll-ink);
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 15px;
+  font-weight: 600;
   pointer-events: none;
 }
 
@@ -449,109 +375,98 @@
 }
 
 .ll-instruction-box {
-  fill: #fbfbfd;
-  stroke: #d2d2d7;
-  stroke-width: 1.2;
-  transition:
-    fill 140ms ease,
-    stroke 140ms ease;
+  fill: #d5d7e0;
+  stroke: none;
 }
 
-.ll-output.is-powered .ll-instruction-box {
-  fill: rgba(52, 199, 89, 0.07);
-  stroke: rgba(36, 138, 61, 0.5);
+.ll-box-heading {
+  fill: #b9bcc9;
+  stroke: none;
 }
 
 .ll-box-title,
-.ll-box-instance,
 .ll-pin-label,
-.ll-box-data {
-  font-family: "SF Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+.ll-box-data,
+.ll-box-value {
+  font-family: "Cascadia Mono", Consolas, monospace;
   pointer-events: none;
 }
 
 .ll-box-title {
-  fill: var(--ll-blue);
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.05em;
+  fill: #1c292f;
+  font-size: 20px;
+  font-weight: 700;
 }
 
-.ll-box-instance {
-  fill: var(--ll-text);
-  font-size: 10px;
-  font-weight: 600;
+.ll-box-comment {
+  fill: var(--ll-ink);
+  font-weight: 400;
+  letter-spacing: 0;
 }
 
 .ll-pin-label {
-  fill: var(--ll-faint);
-  font-size: 8px;
-  letter-spacing: 0.05em;
+  fill: #45545a;
+  font-size: 16px;
+  font-weight: 400;
 }
 
 .ll-box-data {
-  fill: var(--ll-muted);
-  font-size: 9.5px;
+  fill: #4c585d;
+  font-size: 13px;
 }
 
-.ll-pin-led {
-  fill: #f5f5f7;
-  stroke: #d2d2d7;
-  stroke-width: 1;
-}
-
-.ll-pin-led.is-on {
-  fill: var(--ll-green-bright);
-  stroke: #1f8a3a;
+.ll-box-value {
+  fill: var(--ll-green);
+  font-size: 13px;
+  font-weight: 600;
 }
 
 .ll-add-rung {
-  align-self: center;
-  min-width: 168px;
-  padding: 9px 18px;
-  border: 1px dashed #c7c7cc;
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.7);
-  color: var(--ll-muted);
-  font-size: 12px;
-  font-weight: 500;
+  align-self: stretch;
+  padding: 9px 16px;
+  border: 1px dashed #b6bfc3;
+  border-radius: 2px;
+  background: #ffffff;
+  color: #5c6b71;
+  font-size: 11px;
+  text-align: left;
 }
 
 .ll-add-rung:hover {
-  border-color: var(--ll-blue);
-  color: var(--ll-blue);
+  border-color: #6f8fa1;
+  color: #285f7e;
 }
 
 .ll-add-rung span {
-  margin-right: 4px;
-  color: var(--ll-blue);
+  display: inline-block;
+  width: 28px;
+  margin-right: 5px;
+  color: #285f7e;
+  text-align: center;
 }
 
 .ll-empty-board {
   display: grid;
-  min-height: 340px;
+  min-height: 320px;
   padding: 36px;
   place-items: center;
   align-content: center;
-  border: 1px dashed #d2d2d7;
-  border-radius: 16px;
-  background-color: #ffffff;
-  background-image: radial-gradient(circle, rgba(60, 60, 67, 0.08) 0.65px, transparent 0.8px);
-  background-position: 10px 10px;
-  background-size: 16px 16px;
+  border: 1px solid var(--ll-border);
+  border-radius: 2px;
+  background: #ffffff;
   text-align: center;
 }
 
 .ll-empty-symbol {
-  margin-bottom: 12px;
-  color: #c7c7cc;
-  font-family: "SF Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
-  font-size: 17px;
-  letter-spacing: 0.12em;
+  margin-bottom: 14px;
+  color: #4a5b62;
+  font-family: Consolas, monospace;
+  font-size: 25px;
+  letter-spacing: 0.08em;
 }
 
 .ll-empty-board h3 {
-  margin: 0 0 6px;
+  margin: 0 0 7px;
   color: var(--ll-text);
   font-size: 15px;
   font-weight: 600;
@@ -567,77 +482,62 @@
 
 .ll-empty-board button {
   padding: 8px 16px;
-  border-color: var(--ll-line);
+  border-color: #b6bfc3;
   background: #ffffff;
-  color: var(--ll-blue);
+  color: #285f7e;
   font-size: 12px;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+@media (min-width: 1000px) {
+  .ll-rung-tools {
+    opacity: 0;
+  }
+
+  .ll-rung:hover .ll-rung-tools,
+  .ll-rung:focus-within .ll-rung-tools {
+    opacity: 1;
+  }
 }
 
 @media (max-width: 720px) {
   .ll-canvas {
-    gap: 10px;
+    gap: 9px;
   }
 
   .ll-rung-header {
-    align-items: flex-start;
-    padding: 10px 12px;
+    min-height: 38px;
+    gap: 5px;
+    padding-left: 9px;
   }
 
   .ll-rung-title {
-    gap: 8px;
-  }
-
-  .ll-rung-number {
-    width: 28px;
-    height: 28px;
-    border-radius: 8px;
-    font-size: 10px;
+    gap: 6px;
   }
 
   .ll-rung-title h3 {
-    max-width: 180px;
+    max-width: 145px;
     font-size: 13px;
   }
 
-  .ll-rung-tools {
-    gap: 0;
+  .ll-rung-title h3::before,
+  .ll-rung-header-right > .ll-power-state {
+    display: none;
   }
 
   .ll-rung-tools button {
-    width: 26px;
-    height: 26px;
+    width: 27px;
+    height: 28px;
   }
 
   .ll-inline-actions {
-    padding: 8px 12px;
+    padding: 8px 10px;
   }
 
   .ll-inline-actions > span {
     width: 100%;
   }
 
-  .ll-svg-scroll {
-    padding: 6px 6px 4px;
-    box-shadow: inset -16px 0 16px -18px rgba(0, 0, 0, 0.28);
-  }
-
   .ll-scroll-note {
     display: block;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .ll-rung,
-  .ll-node-hit,
-  .ll-wire,
-  .ll-power-wire,
-  .ll-contact-bar,
-  .ll-coil-arc,
-  .ll-box-divider,
-  .ll-compare-box,
-  .ll-instruction-box,
-  .ll-or-badge rect {
-    transition: none;
   }
 }
