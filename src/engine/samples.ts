@@ -1,4 +1,5 @@
 import { uid } from '../lib/uid'
+import { buildCourseLab } from './courseLabs'
 import type {
   ContactKind,
   ContactNode,
@@ -190,6 +191,8 @@ export const SAMPLES: Sample[] = [
 ]
 
 export function buildSample(id: string): Program | null {
+  const courseLab = buildCourseLab(id)
+  if (courseLab) return courseLab
   const sample = SAMPLES.find((item) => item.id === id)
   return sample ? sample.build() : null
 }

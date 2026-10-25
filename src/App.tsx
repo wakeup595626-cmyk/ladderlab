@@ -9,7 +9,7 @@ import StatusBar from './components/StatusBar'
 import Toolbar from './components/Toolbar'
 import { compile } from './engine/compile'
 import { blankProgram, buildSample } from './engine/samples'
-import { createRuntime, step } from './engine/simulate'
+import { createRuntime, step, writeRuntimeValue } from './engine/simulate'
 import type {
   ContactKind,
   OutputKind,
@@ -252,10 +252,10 @@ export default function App() {
   const loadSample = (id: string) => {
     const sample = buildSample(id)
     if (!sample) return
-    if (!window.confirm('载入示例会替换当前工程，但可以撤销。继续吗？')) return
+    if (!window.confirm('载入课程实验 / 示例会替换当前工程，但可以撤销。继续吗？')) return
     commit(sample)
     setSelection(sample.rungs[0] ? { rungId: sample.rungs[0].id, path: null } : null)
-    notify('示例已载入，可直接运行')
+    notify('实验 / 示例已载入，可直接编辑和运行')
   }
 
   const startDemo = () => {
@@ -303,15 +303,12 @@ export default function App() {
   }
 
   const toggleBool = (name: string) => {
-    setRuntime((previous) => ({
-      ...previous,
-      bools: { ...previous.bools, [name]: !previous.bools[name] },
-    }))
+    setRuntime((previous) => writeRuntimeValue(program, previous, name, !previous.bools[name]))
     notify(`${name} 已切换为 ${runtime.bools[name] ? 'FALSE' : 'TRUE'}`)
   }
 
   const setInt = (name: string, value: number) => {
-    setRuntime((previous) => ({ ...previous, ints: { ...previous.ints, [name]: value } }))
+    setRuntime((previous) => writeRuntimeValue(program, previous, name, value))
     notify(`${name} 当前值已设为 ${value}`)
   }
 

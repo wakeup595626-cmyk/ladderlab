@@ -1,4 +1,5 @@
 import { getProfile, supportsContact, supportsOutput } from '../engine/profiles'
+import { COURSE_LABS } from '../engine/courseLabs'
 import { SAMPLES } from '../engine/samples'
 import type { ContactKind, OutputKind, ProfileId } from '../engine/types'
 import { ChevronRightIcon, PlusIcon } from './Icons'
@@ -28,6 +29,12 @@ const OUTPUTS: Array<{ kind: OutputKind; symbol: string; label: string; hint: st
   { kind: 'TOF', symbol: 'TOF', label: '断开延时', hint: '输入断开后延时' },
   { kind: 'TONR', symbol: 'TONR', label: '累计定时', hint: '累计输入接通时间' },
   { kind: 'CTU', symbol: 'CTU', label: '加计数器', hint: '在上升沿累加计数' },
+  { kind: 'MOVE', symbol: 'MOVE', label: '整数传送', hint: '把常量或 INT 写入目标' },
+  { kind: 'ADD', symbol: 'ADD', label: '整数加法', hint: '源值加操作数，写回目标' },
+  { kind: 'SUB', symbol: 'SUB', label: '整数减法', hint: '源值减操作数，写回目标' },
+  { kind: 'SHL', symbol: 'SHL', label: '左移位', hint: '整数值向左移位' },
+  { kind: 'ROL', symbol: 'ROL', label: '字节循环左移', hint: '8 位循环左移，用于流水工位' },
+  { kind: 'PATTERN', symbol: 'SEQ', label: '教学灯字序列', hint: '教学扩展：按节拍输出 0～255' },
 ]
 
 export default function Palette({
@@ -58,8 +65,31 @@ export default function Palette({
 
       <section className="palette-section sample-section">
         <div className="section-title-row">
+          <h3>实验指导书 · 6 个实验</h3>
+          <span>可编辑 · 可仿真</span>
+        </div>
+        <div className="sample-list course-lab-list">
+          {COURSE_LABS.map((lab) => (
+            <button
+              type="button"
+              className="sample-card course-lab-card"
+              key={lab.id}
+              onClick={() => onLoadSample(lab.id)}
+              title={lab.description}
+            >
+              <span className="sample-name">{lab.name}</span>
+              <span className="sample-badge">{lab.badge}</span>
+              <span className="sample-description">{lab.description}</span>
+              <ChevronRightIcon size={14} className="sample-arrow" />
+            </button>
+          ))}
+        </div>
+      </section>
+
+      <section className="palette-section sample-section">
+        <div className="section-title-row">
           <h3>快速示例</h3>
-          <span>先从这里开始</span>
+          <span>基础练习</span>
         </div>
         <div className="sample-list">
           {SAMPLES.map((sample) => (

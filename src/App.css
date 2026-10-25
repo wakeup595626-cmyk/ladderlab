@@ -571,6 +571,35 @@
   display: none;
 }
 
+.palette .course-lab-list {
+  grid-template-columns: 1fr;
+  gap: 5px;
+  margin-bottom: 8px;
+}
+
+.palette .course-lab-card {
+  min-height: 43px;
+  border-color: #d8dedf;
+  border-radius: 4px;
+  background: #f8f9f9;
+}
+
+.palette .course-lab-card:hover {
+  border-color: #7f989d;
+  background: #f0f5f3;
+}
+
+.palette .course-lab-card .sample-name {
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.palette .course-lab-card .sample-badge {
+  color: #52776e;
+  font-size: 10px;
+  white-space: nowrap;
+}
+
 .palette .sample-name {
   overflow: hidden;
   font-size: 11.5px;

@@ -8,7 +8,7 @@ import type {
 } from '../engine/types'
 
 const CONTACT_KINDS: ContactKind[] = ['NO', 'NC', 'P', 'N', 'CMP']
-const OUTPUT_KINDS: OutputKind[] = ['COIL', 'SET', 'RESET', 'TON', 'TOF', 'TONR', 'CTU']
+const OUTPUT_KINDS: OutputKind[] = ['COIL', 'SET', 'RESET', 'TON', 'TOF', 'TONR', 'CTU', 'MOVE', 'ADD', 'SUB', 'SHL', 'ROL', 'PATTERN']
 const TAG_KINDS: TagKind[] = ['BOOL', 'INT']
 const PROFILES: ProfileId[] = ['v14', 'v21']
 
@@ -86,6 +86,7 @@ export function parseProgram(input: unknown): Program {
       kind,
       initial,
       comment: typeof tag.comment === 'string' ? tag.comment : '',
+      ...(tag.bitOf !== undefined ? { bitOf: text(tag.bitOf, `${where}.bitOf`) } : {}),
     }
   })
 
@@ -103,6 +104,17 @@ export function parseProgram(input: unknown): Program {
       ...(output.pt !== undefined ? { pt: number(output.pt, `${where}.output.pt`) } : {}),
       ...(output.pv !== undefined ? { pv: number(output.pv, `${where}.output.pv`) } : {}),
       ...(output.resetTag !== undefined ? { resetTag: text(output.resetTag, `${where}.output.resetTag`) } : {}),
+      ...(output.qTag !== undefined ? { qTag: text(output.qTag, `${where}.output.qTag`) } : {}),
+      ...(output.valueTag !== undefined ? { valueTag: text(output.valueTag, `${where}.output.valueTag`) } : {}),
+      ...(output.sourceTag !== undefined ? { sourceTag: text(output.sourceTag, `${where}.output.sourceTag`) } : {}),
+      ...(output.value !== undefined ? { value: number(output.value, `${where}.output.value`) } : {}),
+      ...(output.pulseTag !== undefined ? { pulseTag: text(output.pulseTag, `${where}.output.pulseTag`) } : {}),
+      ...(output.stepTag !== undefined ? { stepTag: text(output.stepTag, `${where}.output.stepTag`) } : {}),
+      ...(output.pattern !== undefined ? {
+        pattern: Array.isArray(output.pattern)
+          ? output.pattern.map((value, index) => number(value, `${where}.output.pattern[${index}]`))
+          : fail(`${where}.output.pattern 必须是数组。`),
+      } : {}),
     }
     return {
       id: text(rung.id, `${where}.id`),

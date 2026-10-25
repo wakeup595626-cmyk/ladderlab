@@ -55,6 +55,16 @@ const OUTPUT_NAMES: Record<OutputKind, string> = {
   TOF: '断开延时 TOF',
   TONR: '累计定时 TONR',
   CTU: '加计数器 CTU',
+  MOVE: '整数传送 MOVE',
+  ADD: '整数加法 ADD',
+  SUB: '整数减法 SUB',
+  SHL: '左移位 SHL',
+  ROL: '字节循环左移 ROL',
+  PATTERN: '教学灯字序列 PATTERN',
+}
+
+function isTimerKind(kind: OutputKind): boolean {
+  return kind === 'TON' || kind === 'TOF' || kind === 'TONR'
 }
 
 function findPath(chain: LadderNode[], nodeId: string): number[] | null {
@@ -513,6 +523,7 @@ export default function Inspector({
         {tab === 'properties' && (
           <PropertiesPanel
             program={program}
+            runtime={runtime}
             selectedRung={rung}
             selectedNode={node}
             isOutput={Boolean(selection && selection.path === null)}
@@ -545,6 +556,7 @@ export default function Inspector({
 
 interface PropertiesPanelProps {
   program: Program
+  runtime: Runtime
   selectedRung: Program['rungs'][number] | undefined
   selectedNode: LadderNode | null
   isOutput: boolean
@@ -556,6 +568,7 @@ interface PropertiesPanelProps {
 
 function PropertiesPanel({
   program,
+  runtime,
   selectedRung,
   selectedNode,
   isOutput,
@@ -581,9 +594,25 @@ function PropertiesPanel({
   if (isOutput || !selectedNode) {
     const output = selectedRung.output
     const boolTags = program.tags.filter((tag) => tag.kind === 'BOOL')
+    const intTags = program.tags.filter((tag) => tag.kind === 'INT')
     const supports = (kind: OutputKind) => supportsOutput(program.profile, kind)
     const setOutput = (patch: Parameters<typeof updateOutput>[2]) => onProgram(updateOutput(program, selectedRung.id, patch))
-    const isTimer = output.kind === 'TON' || output.kind === 'TOF' || output.kind === 'TONR'
+    const isTimer = isTimerKind(output.kind)
+    const isInteger = ['MOVE', 'ADD', 'SUB', 'SHL', 'ROL', 'PATTERN'].includes(output.kind)
+    const referenceField = (label: string, field: 'qTag' | 'valueTag' | 'pulseTag' | 'stepTag', kind: 'BOOL' | 'INT', allowInstances = false) => (
+      <label className="field">
+        <span>{label}</span>
+        <select value={output[field] ?? ''} onChange={(event) => setOutput({ [field]: event.target.value })}>
+          <option value="">不连接</option>
+          {program.tags.filter((tag) => tag.kind === kind).map((tag) => (
+            <option key={tag.id} value={tag.name}>{tag.name} · {tag.address}</option>
+          ))}
+          {kind === 'BOOL' && allowInstances && program.rungs.filter((rung) => isTimerKind(rung.output.kind) || rung.output.kind === 'CTU').map((rung) => (
+            <option key={rung.output.id} value={`${rung.output.tag}.Q`}>{rung.output.tag}.Q</option>
+          ))}
+        </select>
+      </label>
+    )
 
     return (
       <div className="property-form">
@@ -621,6 +650,17 @@ function PropertiesPanel({
               spellCheck={false}
             />
             <small>在触点里使用 <b>{output.tag || '实例'}.Q</b> 读取状态。</small>
+          </label>
+        ) : isInteger ? (
+          <label className="field">
+            <span>目标 INT 变量</span>
+            <select value={output.tag} onChange={(event) => setOutput({ tag: event.target.value })}>
+              <option value="">— 选择 INT 变量 —</option>
+              {intTags.map((tag) => (
+                <option key={tag.id} value={tag.name}>{tag.name} · {tag.address}</option>
+              ))}
+            </select>
+            <small className="mono">当前值：{runtime.ints[output.tag] ?? 0}</small>
           </label>
         ) : (
           <label className="field">
@@ -675,6 +715,45 @@ function PropertiesPanel({
                 <option value="">不复位</option>
                 {boolTags.map((tag) => <option key={tag.id} value={tag.name}>{tag.name}</option>)}
               </select>
+            </label>
+          </>
+        )}
+
+        {(isTimer || output.kind === 'CTU') && (
+          <>
+            {referenceField('Q 状态写入 BOOL（可选）', 'qTag', 'BOOL')}
+            {referenceField('ET / CV 写入 INT（可选）', 'valueTag', 'INT')}
+          </>
+        )}
+
+        {isInteger && output.kind !== 'PATTERN' && (
+          <>
+            {output.kind === 'MOVE' && (
+              <label className="field">
+                <span>源 INT 变量（可选）</span>
+                <select value={output.sourceTag ?? ''} onChange={(event) => setOutput({ sourceTag: event.target.value })}>
+                  <option value="">使用下方常量</option>
+                  {intTags.map((tag) => <option key={tag.id} value={tag.name}>{tag.name}</option>)}
+                </select>
+              </label>
+            )}
+            {output.kind !== 'MOVE' && referenceField('操作数 INT 变量（可选）', 'valueTag', 'INT')}
+            <label className="field">
+              <span>{output.kind === 'MOVE' ? '整数常量' : output.kind === 'SHL' || output.kind === 'ROL' ? '移位次数' : '操作数常量'}</span>
+              <input type="number" step={1} min={output.kind === 'SHL' || output.kind === 'ROL' ? 0 : undefined} max={output.kind === 'SHL' || output.kind === 'ROL' ? 31 : undefined} value={output.value ?? 0} onChange={(event) => setOutput({ value: Number(event.target.value) })} />
+              {output.kind !== 'MOVE' && <small>未连接操作数变量时使用此常量；目标变量同时是运算的源值。</small>}
+            </label>
+          </>
+        )}
+
+        {output.kind === 'PATTERN' && (
+          <>
+            {referenceField('节拍 BOOL / 实例 .Q（上升沿前进一步）', 'pulseTag', 'BOOL', true)}
+            {referenceField('当前步号 INT（可选）', 'stepTag', 'INT')}
+            <label className="field">
+              <span>灯字序列（0～255，逗号分隔）</span>
+              <textarea key={output.pattern?.join(',')} className="mono" rows={3} defaultValue={output.pattern?.join(', ') ?? ''} onBlur={(event) => setOutput({ pattern: event.target.value.split(/[,，\s]+/).filter(Boolean).map(Number) })} />
+              <small>教学扩展指令，不是西门子标准 PATTERN 指令。停止时输出 0，保留下一拍位置。</small>
             </label>
           </>
         )}

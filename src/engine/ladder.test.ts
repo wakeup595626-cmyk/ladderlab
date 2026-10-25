@@ -61,11 +61,13 @@ function program(
 }
 
 describe('版本档案', () => {
-  it('只向 V14 开放基础触点，而 V21 开放边沿与比较触点', () => {
+  it('课程档案开放实验所需指令，V21 额外支持累计定时', () => {
     expect(supportsContact('v14', 'NO')).toBe(true)
-    expect(supportsContact('v14', 'P')).toBe(false)
+    expect(supportsContact('v14', 'P')).toBe(true)
+    expect(supportsContact('v14', 'CMP')).toBe(true)
     expect(supportsContact('v21', 'CMP')).toBe(true)
     expect(supportsOutput('v14', 'TON')).toBe(true)
+    expect(supportsOutput('v14', 'ROL')).toBe(true)
     expect(supportsOutput('v14', 'TONR')).toBe(false)
     expect(supportsOutput('v21', 'TONR')).toBe(true)
   })
@@ -74,7 +76,7 @@ describe('版本档案', () => {
     const source = program(
       'v14',
       [tag('Pulse'), tag('Lamp')],
-      [rung('r1', [contact('c1', 'P', 'Pulse')], output('COIL', 'Lamp'))],
+      [rung('r1', [contact('c1', 'NO', 'Pulse')], output('TONR', 'T1', { pt: 1000, qTag: 'Lamp' }))],
     )
     const result = compile(source)
     expect(result.errors).toHaveLength(1)
@@ -120,6 +122,23 @@ describe('编译诊断', () => {
       [rung('r1', [contact('c1', 'NO', 'Start')], output('TON', 'T1', { pt: 0 }))],
     )
     expect(compile(source).errors[0].message).toContain('PT 必须大于 0')
+  })
+
+  it('允许无条件 MOVE 和定时器梯级', () => {
+    const source = program(
+      'v14',
+      [tag('Source', 'INT', 1), tag('Target', 'INT', 0)],
+      [
+        rung('r1', [], output('MOVE', 'Target', { sourceTag: 'Source' })),
+        rung('r2', [], output('TON', 'T1', { pt: 100 })),
+      ],
+    )
+    expect(compile(source)).toEqual({ errors: [], warnings: [] })
+
+    let runtime = createRuntime(source)
+    runtime = step(source, runtime, 100)
+    expect(runtime.ints.Target).toBe(1)
+    expect(runtime.timers.T1.q).toBe(true)
   })
 })
 

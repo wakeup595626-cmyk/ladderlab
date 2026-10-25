@@ -76,6 +76,12 @@ const OUTPUT_LABELS: Record<OutputElement['kind'], string> = {
   TOF: '断开延时',
   TONR: '累计延时',
   CTU: '加计数',
+  MOVE: '整数传送',
+  ADD: '整数加法',
+  SUB: '整数减法',
+  SHL: '左移位',
+  ROL: '循环左移',
+  PATTERN: '教学灯字序列',
 }
 
 function contactSize(node: ContactNode): Size {
@@ -417,7 +423,8 @@ function renderOutput(output: OutputElement, context: DrawContext, rungId: strin
   const symbolX = isCoil ? size.width / 2 : 0
   const boxTop = centerY - 62
   const hasReset = output.kind === 'TONR' || output.kind === 'CTU'
-  const boxHeight = hasReset ? 140 : 124
+  const isTimer = output.kind === 'TON' || output.kind === 'TOF' || output.kind === 'TONR'
+  const boxHeight = hasReset || (!isTimer && output.kind !== 'CTU') ? 140 : 124
   const select = () => context.onSelect({ rungId, path: null })
 
   return (
@@ -459,15 +466,15 @@ function renderOutput(output: OutputElement, context: DrawContext, rungId: strin
       ) : (
         <g>
           <text className="ll-box-instance" x={size.width / 2} y="14" textAnchor="middle">
-            <tspan className="ll-box-comment">“{shorten(details.comment, 12)}”</tspan>
+            <tspan className="ll-box-comment">{isTimer || output.kind === 'CTU' ? shorten(output.tag, 12) : `“${shorten(details.comment, 12)}”`}</tspan>
             <tspan dx="14">{shorten(details.address, 12)}</tspan>
           </text>
           <path className={`ll-wire${powered ? ' is-on' : ''}`} d={`M 0 ${centerY} H 16 M ${size.width - 16} ${centerY} H ${size.width}`} />
           <rect className="ll-instruction-box" x="16" y={boxTop} width={size.width - 32} height={boxHeight} />
           <rect className="ll-box-heading" x="16" y={boxTop} width={size.width - 32} height="31" />
           <text className="ll-box-title" x={size.width / 2} y={boxTop + 23} textAnchor="middle">{output.kind}</text>
-          <text className="ll-pin-label" x="25" y={centerY + 6}>{output.kind === 'CTU' ? 'CU' : 'IN'}</text>
-          <text className="ll-pin-label" x={size.width - 25} y={centerY + 6} textAnchor="end">Q</text>
+          <text className="ll-pin-label" x="25" y={centerY + 6}>{output.kind === 'CTU' ? 'CU' : isTimer ? 'IN' : 'EN'}</text>
+          <text className="ll-pin-label" x={size.width - 25} y={centerY + 6} textAnchor="end">{isTimer || output.kind === 'CTU' ? 'Q' : 'OUT'}</text>
           {output.kind === 'CTU' ? (
             <g>
               <text className="ll-box-data" x="25" y={centerY + 40}>PV</text>
@@ -476,7 +483,7 @@ function renderOutput(output: OutputElement, context: DrawContext, rungId: strin
               <text className="ll-box-data" x={size.width - 25} y={centerY + 66} textAnchor="end">{shorten(output.resetTag || '—', 13)}</text>
               <text className="ll-box-value" x={size.width / 2} y={centerY + 40} textAnchor="middle">{context.runtime.counters[output.tag]?.cv ?? 0}</text>
             </g>
-          ) : (
+          ) : isTimer ? (
             <g>
               <text className="ll-box-data" x="25" y={centerY + 40}>PT</text>
               <text className="ll-box-data" x={size.width - 25} y={centerY + 40} textAnchor="end">{formatMilliseconds(output.pt ?? 0)}</text>
@@ -489,6 +496,24 @@ function renderOutput(output: OutputElement, context: DrawContext, rungId: strin
                   </text>
                 </g>
               )}
+            </g>
+          ) : output.kind === 'PATTERN' ? (
+            <g>
+              <text className="ll-box-data" x="25" y={centerY + 24}>PULSE</text>
+              <text className="ll-box-data" x={size.width - 25} y={centerY + 24} textAnchor="end">{shorten(output.pulseTag || '—', 10)}</text>
+              <text className="ll-box-data" x="25" y={centerY + 47}>NEXT / COUNT</text>
+              <text className="ll-box-value" x={size.width - 25} y={centerY + 47} textAnchor="end">{(context.runtime.patterns[output.id]?.index ?? 0) + 1} / {output.pattern?.length ?? 0}</text>
+              <text className="ll-box-data" x="25" y={centerY + 69}>OUT</text>
+              <text className="ll-box-value" x={size.width - 25} y={centerY + 69} textAnchor="end">{context.runtime.ints[output.tag] ?? 0}</text>
+            </g>
+          ) : (
+            <g>
+              <text className="ll-box-data" x="25" y={centerY + 24}>{output.kind === 'MOVE' ? 'SRC' : 'ACC'}</text>
+              <text className="ll-box-data" x={size.width - 25} y={centerY + 24} textAnchor="end">{shorten(output.sourceTag || (output.kind === 'MOVE' ? String(output.value ?? 0) : output.tag), 11)}</text>
+              {output.kind !== 'MOVE' && <text className="ll-box-data" x="25" y={centerY + 47}>{output.kind === 'ROL' || output.kind === 'SHL' ? 'N' : 'IN'}</text>}
+              {output.kind !== 'MOVE' && <text className="ll-box-data" x={size.width - 25} y={centerY + 47} textAnchor="end">{shorten(output.valueTag || String(output.value ?? 1), 11)}</text>}
+              <text className="ll-box-data" x="25" y={centerY + 69}>OUT</text>
+              <text className="ll-box-value" x={size.width - 25} y={centerY + 69} textAnchor="end">{context.runtime.ints[output.tag] ?? 0}</text>
             </g>
           )}
         </g>

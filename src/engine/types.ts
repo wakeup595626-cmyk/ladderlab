@@ -4,7 +4,7 @@ export type TagKind = 'BOOL' | 'INT'
 
 export type ContactKind = 'NO' | 'NC' | 'P' | 'N' | 'CMP'
 
-export type OutputKind = 'COIL' | 'SET' | 'RESET' | 'TON' | 'TOF' | 'TONR' | 'CTU'
+export type OutputKind = 'COIL' | 'SET' | 'RESET' | 'TON' | 'TOF' | 'TONR' | 'CTU' | 'MOVE' | 'ADD' | 'SUB' | 'SHL' | 'ROL' | 'PATTERN'
 
 export type CompareOp = '==' | '<>' | '>' | '>=' | '<' | '<='
 
@@ -20,6 +20,8 @@ export interface TagDef {
   kind: TagKind
   initial: boolean | number
   comment: string
+  /** INT 字节的 BOOL 位别名，例如 ShiftByte=%MB6、Step1=%M6.0。 */
+  bitOf?: string
 }
 
 export interface ContactNode {
@@ -45,6 +47,14 @@ export interface OutputElement {
   pt?: number
   pv?: number
   resetTag?: string
+  qTag?: string
+  valueTag?: string
+  sourceTag?: string
+  value?: number
+  /** PATTERN 的输入脉冲、当前步号（可选）和灯字序列。 */
+  pulseTag?: string
+  stepTag?: string
+  pattern?: number[]
 }
 
 export interface Rung {
@@ -95,6 +105,8 @@ export interface Runtime {
   edges: Record<string, boolean>
   timers: Record<string, TimerState>
   counters: Record<string, CounterState>
+  /** 通用序列功能盒保存下一拍索引和上一拍脉冲，不绑定具体实验。 */
+  patterns: Record<string, { index: number; prevIn: boolean }>
   nodePower: Record<string, boolean>
   outputPower: Record<string, boolean>
   rungPower: Record<string, boolean>

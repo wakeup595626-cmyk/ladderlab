@@ -83,6 +83,16 @@ function validateTagTable(ctx: Ctx) {
       warning(ctx, `INT 变量“${name}”的初始值不是整数，仿真时会按小数参与运算。`)
     }
 
+    if (tag.bitOf) {
+      const byte = ctx.tags.get(tag.bitOf)
+      const bit = /^%M\d+\.(\d)$/i.exec(tag.address)?.[1]
+      if (tag.kind !== 'BOOL' || !byte || byte.kind !== 'INT') {
+        error(ctx, `位别名“${name}”的 bitOf 必须引用一个 INT 字节变量。`)
+      } else if (bit === undefined || Number(bit) > 7) {
+        error(ctx, `位别名“${name}”必须使用 %M字节.0～7 地址。`)
+      }
+    }
+
     const address = tag.address.trim().toUpperCase()
     if (address) {
       const owner = seenAddresses.get(address)
@@ -105,7 +115,7 @@ function collectInstances(ctx: Ctx) {
     if (output.kind === 'CTU') {
       ctx.counters.add(output.tag)
     }
-    if (output.kind !== 'COIL' && output.kind !== 'SET' && output.kind !== 'RESET') {
+    if (output.kind === 'TON' || output.kind === 'TOF' || output.kind === 'TONR' || output.kind === 'CTU') {
       const name = output.tag.trim()
       if (!name) continue
       const previous = seen.get(name)
@@ -179,6 +189,13 @@ function checkOutput(ctx: Ctx, rungId: string, output: Program['rungs'][number][
     error(ctx, `指令 ${output.kind} 在当前档案 ${profile.shortName} 中不可用。`, rungId, output.id)
   }
 
+  const reference = (ref: string | undefined, expected: 'BOOL' | 'INT', label: string) => {
+    if (!ref) return
+    const tag = ctx.tags.get(ref)
+    if (!tag) error(ctx, `${label}“${ref}”不存在。`, rungId, output.id)
+    else if (tag.kind !== expected) error(ctx, `${label}“${ref}”必须是 ${expected}，当前是 ${tag.kind}。`, rungId, output.id)
+  }
+
   if (output.kind === 'COIL' || output.kind === 'SET' || output.kind === 'RESET') {
     const ref = output.tag.trim()
     const tag = ctx.tags.get(ref)
@@ -211,6 +228,9 @@ function checkOutput(ctx: Ctx, rungId: string, output: Program['rungs'][number][
     if (!Number.isFinite(output.pt ?? NaN) || (output.pt ?? 0) <= 0) {
       error(ctx, `${output.kind} ${output.tag || ''} 的预设时间 PT 必须大于 0。`, rungId, output.id)
     }
+    if (output.kind === 'TONR') reference(output.resetTag, 'BOOL', 'TONR 复位变量')
+    reference(output.qTag, 'BOOL', '状态输出变量')
+    reference(output.valueTag, 'INT', '数值输出变量')
     return
   }
 
@@ -222,12 +242,38 @@ function checkOutput(ctx: Ctx, rungId: string, output: Program['rungs'][number][
       error(ctx, `CTU ${output.tag || ''} 的预设值 PV 必须是大于 0 的整数。`, rungId, output.id)
     }
     if (output.resetTag) {
-      const reset = ctx.tags.get(output.resetTag)
-      if (!reset) {
-        error(ctx, `CTU 复位变量“${output.resetTag}”不存在。`, rungId, output.id)
-      } else if (reset.kind !== 'BOOL') {
-        error(ctx, `CTU 复位变量“${output.resetTag}”必须是 BOOL。`, rungId, output.id)
-      }
+      reference(output.resetTag, 'BOOL', 'CTU 复位变量')
+    }
+    reference(output.qTag, 'BOOL', '状态输出变量')
+    reference(output.valueTag, 'INT', '数值输出变量')
+    return
+  }
+
+  if (output.kind === 'MOVE' || output.kind === 'ADD' || output.kind === 'SUB' || output.kind === 'SHL' || output.kind === 'ROL') {
+    if (!output.tag.trim()) error(ctx, `${output.kind} 缺少目标 INT 变量。`, rungId, output.id)
+    else reference(output.tag, 'INT', `${output.kind} 目标变量`)
+    if (output.kind === 'MOVE' && output.sourceTag) reference(output.sourceTag, 'INT', 'MOVE 源变量')
+    if (output.kind !== 'MOVE') reference(output.valueTag, 'INT', `${output.kind} 操作数变量`)
+    if (!output.sourceTag && output.value !== undefined && !Number.isInteger(output.value)) {
+      error(ctx, `${output.kind} 的整数常量无效。`, rungId, output.id)
+    }
+    if ((output.kind === 'SHL' || output.kind === 'ROL') && output.value !== undefined && (output.value < 0 || output.value > 31)) {
+      error(ctx, `${output.kind} 的移位次数必须在 0～31 之间。`, rungId, output.id)
+    }
+    return
+  }
+
+  if (output.kind === 'PATTERN') {
+    reference(output.tag, 'INT', 'PATTERN 输出变量')
+    if (!output.pulseTag) error(ctx, 'PATTERN 缺少节拍 BOOL 变量。', rungId, output.id)
+    else if (output.pulseTag.endsWith('.Q') && (ctx.timers.has(output.pulseTag.slice(0, -2)) || ctx.counters.has(output.pulseTag.slice(0, -2)))) {
+      // 与触点相同，允许读取定时器或计数器实例的 Q 位。
+    } else reference(output.pulseTag, 'BOOL', 'PATTERN 节拍变量')
+    reference(output.stepTag, 'INT', 'PATTERN 步号变量')
+    if (!output.pattern?.length) {
+      error(ctx, 'PATTERN 至少需要一个灯字（0～255 的整数）。', rungId, output.id)
+    } else if (output.pattern.some((value) => !Number.isInteger(value) || value < 0 || value > 255)) {
+      error(ctx, 'PATTERN 的每个灯字都必须是 0～255 的整数。', rungId, output.id)
     }
   }
 }
@@ -251,9 +297,7 @@ export function compile(program: Program): CompileResult {
   }
 
   for (const rung of program.rungs) {
-    if (rung.nodes.length === 0) {
-      warning(ctx, `梯级“${rung.label || rung.id}”没有触点，输出将始终得电。`, rung.id)
-    }
+    // 无条件梯级是合法的常通能流，MOVE、TON 和 RESET 都可能需要每扫描执行。
     walkChain(rung.nodes, (node) => {
       if (node.type === 'contact') checkContact(ctx, rung.id, node)
     })

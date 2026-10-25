@@ -65,6 +65,11 @@ function rewriteRefs(program: Program, oldName: string, newName: string): Progra
         ...rung.output,
         tag: rewrote(rung.output.tag),
         resetTag: rung.output.resetTag ? rewrote(rung.output.resetTag) : rung.output.resetTag,
+        qTag: rung.output.qTag ? rewrote(rung.output.qTag) : rung.output.qTag,
+        valueTag: rung.output.valueTag ? rewrote(rung.output.valueTag) : rung.output.valueTag,
+        sourceTag: rung.output.sourceTag ? rewrote(rung.output.sourceTag) : rung.output.sourceTag,
+        pulseTag: rung.output.pulseTag ? rewrote(rung.output.pulseTag) : rung.output.pulseTag,
+        stepTag: rung.output.stepTag ? rewrote(rung.output.stepTag) : rung.output.stepTag,
       },
     })),
   }
@@ -109,6 +114,11 @@ export function tagUsage(program: Program, name: string): number {
     walk(rung.nodes)
     if (matches(rung.output.tag)) count += 1
     if (matches(rung.output.resetTag)) count += 1
+    if (matches(rung.output.qTag)) count += 1
+    if (matches(rung.output.valueTag)) count += 1
+    if (matches(rung.output.sourceTag)) count += 1
+    if (matches(rung.output.pulseTag)) count += 1
+    if (matches(rung.output.stepTag)) count += 1
   }
   return count
 }
@@ -232,7 +242,14 @@ export function duplicateRung(program: Program, rungId: string): Program {
     id: uid('r'),
     label: `${source.label} 副本`,
     nodes: source.nodes.map(cloneNode),
-    output: { ...source.output, id: uid('o') },
+    output: {
+      ...source.output,
+      id: uid('o'),
+      tag: ['TON', 'TOF', 'TONR'].includes(source.output.kind)
+        ? nextInstanceName(program, 'T')
+        : source.output.kind === 'CTU' ? nextInstanceName(program, 'C') : source.output.tag,
+      ...(source.output.pattern ? { pattern: [...source.output.pattern] } : {}),
+    },
   }
   const rungs = [...program.rungs]
   rungs.splice(index + 1, 0, copy)
@@ -355,19 +372,29 @@ export function updateOutput(program: Program, rungId: string, patch: Partial<Om
 }
 
 export function changeOutputKind(program: Program, rungId: string, kind: OutputKind): Program {
-  const rung = program.rungs.find((item) => item.id === rungId)
+  const next = ['MOVE', 'ADD', 'SUB', 'SHL', 'ROL', 'PATTERN'].includes(kind) ? ensureTag(program, 'INT') : program
+  const rung = next.rungs.find((item) => item.id === rungId)
   if (!rung) return program
   const base = rung.output
   let output: OutputElement
   if (kind === 'COIL' || kind === 'SET' || kind === 'RESET') {
-    const boolTag = program.tags.find((tag) => tag.kind === 'BOOL')
+    const boolTag = next.tags.find((tag) => tag.kind === 'BOOL')
     output = { id: base.id, kind, tag: boolTag?.name ?? '' }
   } else if (kind === 'CTU') {
-    output = { id: base.id, kind, tag: nextInstanceName(program, 'C'), pv: 5, resetTag: '' }
+    output = { id: base.id, kind, tag: nextInstanceName(next, 'C'), pv: 5, resetTag: '' }
+  } else if (kind === 'TON' || kind === 'TOF' || kind === 'TONR') {
+    output = { id: base.id, kind, tag: nextInstanceName(next, 'T'), pt: 3000 }
+  } else if (kind === 'PATTERN') {
+    const intTag = next.tags.find((tag) => tag.kind === 'INT')
+    const boolTag = next.tags.find((tag) => tag.kind === 'BOOL')
+    output = { id: base.id, kind, tag: intTag?.name ?? '', pulseTag: boolTag?.name ?? '', pattern: [1, 2, 4, 8] }
   } else {
-    output = { id: base.id, kind, tag: nextInstanceName(program, 'T'), pt: 3000 }
+    const intTag = next.tags.find((tag) => tag.kind === 'INT')
+    output = kind === 'MOVE'
+      ? { id: base.id, kind, tag: intTag?.name ?? '', value: 0 }
+      : { id: base.id, kind, tag: intTag?.name ?? '', value: 1 }
   }
-  return withRung(program, rungId, (item) => ({ ...item, output }))
+  return withRung(next, rungId, (item) => ({ ...item, output }))
 }
 
 export function changeContactKind(program: Program, rungId: string, path: number[], kind: ContactKind): Program {

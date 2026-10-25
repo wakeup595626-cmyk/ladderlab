@@ -24,9 +24,9 @@ export const PROFILES: Profile[] = [
     year: 2016,
     accent: '#248a3d',
     tagline: '经典指令集',
-    description: '基础教学子集：常开/常闭触点、线圈、置位复位、TON/TOF、CTU。',
-    contacts: ['NO', 'NC'],
-    outputs: ['COIL', 'SET', 'RESET', 'TON', 'TOF', 'CTU'],
+    description: '课程实验子集：位逻辑、边沿、比较、定时计数及整数传送移位。',
+    contacts: ['NO', 'NC', 'P', 'N', 'CMP'],
+    outputs: ['COIL', 'SET', 'RESET', 'TON', 'TOF', 'CTU', 'MOVE', 'ADD', 'SUB', 'SHL', 'ROL', 'PATTERN'],
   },
   {
     id: 'v21',
@@ -35,9 +35,9 @@ export const PROFILES: Profile[] = [
     year: 2025,
     accent: '#0071e3',
     tagline: '现代指令集',
-    description: '在 V14 基础上开放上升沿/下降沿触点、比较触点和累计型定时器 TONR。',
+    description: '课程实验指令子集：位逻辑、边沿、比较、定时计数、整数移位和累计定时。',
     contacts: ['NO', 'NC', 'P', 'N', 'CMP'],
-    outputs: ['COIL', 'SET', 'RESET', 'TON', 'TOF', 'TONR', 'CTU'],
+    outputs: ['COIL', 'SET', 'RESET', 'TON', 'TOF', 'TONR', 'CTU', 'MOVE', 'ADD', 'SUB', 'SHL', 'ROL', 'PATTERN'],
   },
 ]
 
