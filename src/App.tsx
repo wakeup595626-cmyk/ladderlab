@@ -1,12 +1,15 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 import Guide from './components/Guide'
-import { BoltIcon, HelpIcon } from './components/Icons'
+import { BoltIcon, GripIcon, LadderIcon, SlidersIcon } from './components/Icons'
 import Inspector, { type InspectorTab } from './components/Inspector'
 import LadderCanvas from './components/LadderCanvas'
-import Palette from './components/Palette'
+import LibraryDialog from './components/LibraryDialog'
+import ProjectSidebar from './components/ProjectSidebar'
+import QuickEditor from './components/QuickEditor'
 import StatusBar from './components/StatusBar'
-import Toolbar from './components/Toolbar'
+import TopBar from './components/TopBar'
+import { instructionLabel } from './components/instructionCatalog'
 import { compile } from './engine/compile'
 import { blankProgram, buildSample } from './engine/samples'
 import { createRuntime, step, writeRuntimeValue } from './engine/simulate'
@@ -17,7 +20,9 @@ import type {
   Runtime,
   Selection,
 } from './engine/types'
+import type { DragPayload, DropTarget } from './lib/dragTypes'
 import { downloadText, parseProgramText, serializeProgram } from './lib/io'
+import { useDragController } from './lib/useDragController'
 import {
   archiveRecoveryCopy,
   isRecoveryBackupIntact,
@@ -38,8 +43,13 @@ import {
   deleteNode,
   deleteRung,
   duplicateRung,
+  getNodeAtPath,
   insertContact,
+  insertNodeAt,
+  makeContactNode,
+  moveNode,
   moveRung,
+  moveRungTo,
   setProfile as setProgramProfile,
   setProjectName,
   updateRungLabel,
@@ -98,6 +108,32 @@ function archiveProgramVersion(program: Program): boolean {
   }
 }
 
+type MobilePanel = 'none' | 'instructions' | 'properties'
+
+interface QuickEditState {
+  selection: Selection
+  anchor: DOMRect | null
+}
+
+/** 拖放后重新定位同一个节点，避免依赖插入下标在清洗分支时发生变化。 */
+function findNodePath(program: Program, rungId: string, nodeId: string): number[] | null {
+  const rung = program.rungs.find((item) => item.id === rungId)
+  if (!rung) return null
+  const walk = (chain: Program['rungs'][number]['nodes'], prefix: number[]): number[] | null => {
+    for (let index = 0; index < chain.length; index += 1) {
+      const node = chain[index]
+      if (node.id === nodeId) return [...prefix, index]
+      if (node.type !== 'parallel') continue
+      for (let branch = 0; branch < node.branches.length; branch += 1) {
+        const found = walk(node.branches[branch], [...prefix, index, branch])
+        if (found) return found
+      }
+    }
+    return null
+  }
+  return walk(rung.nodes, [])
+}
+
 export default function App() {
   const [startup] = useState<LoadSavedProgramResult>(() => loadSavedProgram())
   const [initialProgram] = useState<Program>(() =>
@@ -131,6 +167,10 @@ export default function App() {
     null,
   )
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>('properties')
+  const [quickEdit, setQuickEdit] = useState<QuickEditState | null>(null)
+  const [mobilePanel, setMobilePanel] = useState<MobilePanel>('none')
+  const [inspectorOpen, setInspectorOpen] = useState(true)
+  const [libraryOpen, setLibraryOpen] = useState(false)
   const [guideOpen, setGuideOpen] = useState(() => {
     try {
       return !window.localStorage.getItem(GUIDE_KEY)
@@ -476,28 +516,162 @@ export default function App() {
     notify('仿真已复位，变量恢复初值')
   }
 
-  const insert = (kind: ContactKind) => {
+  const openInspector = (tab: InspectorTab) => {
+    setInspectorTab(tab)
+    if (window.matchMedia('(max-width: 1180px)').matches) {
+      setMobilePanel('properties')
+    } else {
+      setInspectorOpen(true)
+    }
+  }
+
+  const insert = useCallback((kind: ContactKind, slot?: { rungId: string; chain: number[]; index: number }) => {
+    if (slot) {
+      const made = makeContactNode(program, kind)
+      const next = insertNodeAt(made.program, slot.rungId, slot, made.node)
+      if (next === made.program) {
+        notify('这个位置不能放置触点')
+        return
+      }
+      commit(next)
+      const path = findNodePath(next, slot.rungId, made.node.id)
+      setSelection({ rungId: slot.rungId, path })
+      setMobilePanel('none')
+      notify(`${instructionLabel('contact', kind)}已放置`)
+      return
+    }
     const source = activeRungId ? program : addRung(program)
     const targetRung = activeRungId ?? source.rungs.at(-1)?.id
     if (!targetRung) return
     const next = insertContact(source, targetRung, selection?.rungId === targetRung ? selection.path : null, kind)
     commit(next)
     setSelection({ rungId: targetRung, path: null })
+    setMobilePanel('none')
     notify('触点已插入')
-  }
+  }, [activeRungId, commit, notify, program, selection])
 
-  const changeOutput = (kind: OutputKind) => {
-    if (!activeRungId) {
+  const changeOutput = (kind: OutputKind, targetRungId = activeRungId) => {
+    if (!targetRungId) {
       const next = addRung(program)
       const rung = next.rungs.at(-1)
       if (!rung) return
       commit(changeOutputKind(next, rung.id, kind))
       setSelection({ rungId: rung.id, path: null })
+      setMobilePanel('none')
       return
     }
-    commit(changeOutputKind(program, activeRungId, kind))
-    setSelection({ rungId: activeRungId, path: null })
+    commit(changeOutputKind(program, targetRungId, kind))
+    setSelection({ rungId: targetRungId, path: null })
+    setMobilePanel('none')
   }
+
+  const handleDrop = useCallback((payload: DragPayload, target: DropTarget) => {
+    if (target.type === 'rung') {
+      if (payload.type !== 'rung') {
+        notify('网络号位置只接受整条梯级')
+        return
+      }
+      commit(moveRungTo(program, payload.rungId, target.index))
+      setSelection({ rungId: payload.rungId, path: null })
+      notify('梯级顺序已调整')
+      return
+    }
+
+    if (payload.type === 'rung') {
+      notify('请把梯级拖到左侧网络号的位置')
+      return
+    }
+
+    const targetRung = program.rungs.find((rung) => rung.id === target.rungId)
+    if (!targetRung) return
+
+    if (target.type === 'output') {
+      if (payload.type === 'output') {
+        if (targetRung.output.kind === payload.outputKind) {
+          setSelection({ rungId: target.rungId, path: null })
+          return
+        }
+        commit(changeOutputKind(program, target.rungId, payload.outputKind))
+        setSelection({ rungId: target.rungId, path: null })
+        notify(`输出已改为${instructionLabel('output', payload.outputKind)}`)
+        return
+      }
+
+      const slot = { chain: [], index: targetRung.nodes.length }
+      if (payload.type === 'contact') {
+        insert(payload.contactKind, { ...slot, rungId: target.rungId })
+        return
+      }
+      const sourceNode = getNodeAtPath(program, payload.rungId, payload.path)
+      if (!sourceNode) {
+        notify('没有找到要移动的元件')
+        return
+      }
+      if (payload.rungId === target.rungId) {
+        const next = moveNode(program, payload.rungId, payload.path, slot)
+        if (next === program) {
+          notify('该元件已经位于末位')
+          return
+        }
+        commit(next)
+        const path = findNodePath(next, target.rungId, sourceNode.id)
+        setSelection({ rungId: target.rungId, path })
+        notify('元件已移到输出前')
+        return
+      }
+      const removed = deleteNode(program, payload.rungId, payload.path)
+      const next = insertNodeAt(removed, target.rungId, slot, sourceNode)
+      if (next === removed) {
+        notify('目标位置无法接收这个元件')
+        return
+      }
+      commit(next)
+      const path = findNodePath(next, target.rungId, sourceNode.id)
+      setSelection({ rungId: target.rungId, path })
+      notify('元件已移到另一条梯级')
+      return
+    }
+
+    const slot = { chain: target.chain, index: target.index }
+    if (payload.type === 'contact') {
+      insert(payload.contactKind, { ...slot, rungId: target.rungId })
+      return
+    }
+    if (payload.type === 'output') {
+      notify('输出指令请拖到线圈位置')
+      return
+    }
+
+    const sourceNode = getNodeAtPath(program, payload.rungId, payload.path)
+    if (!sourceNode) {
+      notify('没有找到要移动的元件')
+      return
+    }
+    if (payload.rungId === target.rungId) {
+      const next = moveNode(program, payload.rungId, payload.path, slot)
+      if (next === program) {
+        notify('这个位置不能接收当前元件')
+        return
+      }
+      commit(next)
+      const path = findNodePath(next, target.rungId, sourceNode.id)
+      setSelection({ rungId: target.rungId, path })
+      notify('元件位置已调整')
+      return
+    }
+    const removed = deleteNode(program, payload.rungId, payload.path)
+    const next = insertNodeAt(removed, target.rungId, slot, sourceNode)
+    if (next === removed) {
+      notify('目标位置无法接收这个元件')
+      return
+    }
+    commit(next)
+    const path = findNodePath(next, target.rungId, sourceNode.id)
+    setSelection({ rungId: target.rungId, path })
+    notify('元件已移到另一条梯级')
+  }, [commit, insert, notify, program])
+
+  const drag = useDragController(handleDrop)
 
   const insertRung = () => {
     const next = addRung(program)
@@ -540,7 +714,8 @@ export default function App() {
     pendingAutoRunRef.current = true
     commit(sample)
     setSelection(sample.rungs[0] ? { rungId: sample.rungs[0].id, path: null } : null)
-    setInspectorTab('tags')
+    openInspector('tags')
+    setMobilePanel('properties')
     closeGuide()
     notify('示例已开始运行：切到「变量表」，把 StartBtn 切成 TRUE')
   }
@@ -747,9 +922,22 @@ export default function App() {
     notify(`${name} 当前值已设为 ${value}`)
   }
 
+  const quickSelection = quickEdit?.selection ?? null
+  const quickEditValid = Boolean(
+    quickSelection
+      && program.rungs.some(
+        (rung) => rung.id === quickSelection.rungId
+          && (quickSelection.path === null || getNodeAtPath(program, rung.id, quickSelection.path) !== null),
+      ),
+  )
+
   return (
-    <div className="app-shell">
-      <Toolbar
+    <div
+      className="app-shell"
+      data-mobile-panel={mobilePanel}
+      data-inspector={inspectorOpen ? 'open' : 'closed'}
+    >
+      <TopBar
         projectName={program.name}
         profile={program.profile}
         running={running}
@@ -769,257 +957,301 @@ export default function App() {
         onImport={() => fileInputRef.current?.click()}
         onExport={exportProject}
         onGuide={() => setGuideOpen(true)}
+        onOpenLibrary={() => setLibraryOpen(true)}
+        onToggleSidebar={() => setMobilePanel((panel) => (panel === 'instructions' ? 'none' : 'instructions'))}
+        onToggleInspector={() => {
+          if (window.matchMedia('(max-width: 1180px)').matches) {
+            setMobilePanel((panel) => (panel === 'properties' ? 'none' : 'properties'))
+          } else {
+            setInspectorOpen((open) => !open)
+          }
+        }}
+        inspectorOpen={inspectorOpen}
       />
 
-      <main className="workspace">
-        <Palette
+      <div className="app-body">
+        <ProjectSidebar
+          program={program}
           profile={program.profile}
-          canInsert={Boolean(activeRungId)}
+          activeRungId={activeRungId}
           onInsertContact={insert}
           onChangeOutput={changeOutput}
+          onStartDrag={drag.start}
           onAddRung={insertRung}
-          onLoadSample={loadSample}
+          onOpenLibrary={() => setLibraryOpen(true)}
+          onOpenTags={() => openInspector('tags')}
+          onOpenGuide={() => setGuideOpen(true)}
+          onClose={() => setMobilePanel('none')}
         />
 
-        <section className="editor" ref={editorRef}>
-          {remoteConflict && (
-            <section
-              className="recovery-banner conflict-banner"
-              role="alert"
-              aria-labelledby="conflict-title"
-            >
-              <div className="recovery-copy">
-                <span className="recovery-eyebrow">多标签页冲突</span>
-                <strong id="conflict-title">另一个标签页保存了不同的工程</strong>
-                <span>本页自动保存已暂停。先选择保留哪一版，未被保留的一版会自动存成恢复副本。</span>
-                <span className="recovery-detail">
-                  另一版保存于 {formatBackupTime(remoteConflict.savedAt)}
-                </span>
-              </div>
-              <div className="recovery-actions">
-                <button type="button" className="conflict-adopt" onClick={adoptRemoteVersion}>
-                  载入另一标签页版本
-                </button>
-                <button type="button" className="conflict-keep" onClick={keepLocalVersion}>
-                  保留本页并覆盖
-                </button>
-              </div>
-            </section>
-          )}
-
-          {corruptProject && (
-            <section className="recovery-banner" role="alert" aria-labelledby="recovery-title">
-              <div className="recovery-copy">
-                <span className="recovery-eyebrow">本机工程恢复</span>
-                <strong id="recovery-title">本地工程数据无法读取，自动保存已暂停</strong>
-                <span>
-                  原工程不会被空白工程覆盖。
-                  {backupIntact
-                    ? ' 原始内容已保留为浏览器内恢复副本。'
-                    : rawDownloaded
-                      ? ' 原始内容已下载到本机。'
-                      : ' 浏览器内额外备份不可用，必须先下载原始内容。'}
-                </span>
-                <span>
-                  {hasRecoveryCandidate
-                    ? '当前工程已准备好；接受后会写入本机存储并恢复自动保存。'
-                    : '请先通过工具栏导入备份，或直接在下方工作区重建工程，再接受当前工程。'}
-                </span>
-                <span className="recovery-detail">{corruptProject.message}</span>
-              </div>
-              <div className="recovery-actions">
-                <button
-                  type="button"
-                  className="recovery-download"
-                  onClick={downloadCorruptBackup}
-                  disabled={!corruptProject.raw}
-                >
-                  下载损坏备份
-                </button>
-                <button
-                  type="button"
-                  className="recovery-accept"
-                  onClick={acceptRecoveredProject}
-                  disabled={!hasRecoveryCandidate || !originalContentKept}
-                  title={originalContentKept ? undefined : '请先下载损坏工程原始内容'}
-                >
-                  接受当前工程并恢复自动保存
-                </button>
-                <button
-                  type="button"
-                  className="recovery-discard"
-                  onClick={discardCorruptProject}
-                  disabled={!originalContentKept}
-                  title={originalContentKept ? undefined : '请先下载损坏工程原始内容'}
-                >
-                  放弃损坏工程并新建
-                </button>
-              </div>
-            </section>
-          )}
-
-          {!corruptProject && backups.length > 0 && !backupsDismissed && (
-            <section className="backup-strip" aria-labelledby="backup-title">
-              <div className="backup-strip-head">
-                <div className="backup-strip-copy">
-                  <span>本机恢复副本</span>
-                  <strong id="backup-title">保留着 {backups.length} 份工程快照</strong>
-                  <small>可以直接下载，或载入为当前工程；载入后会自动保存。</small>
-                </div>
-                <button
-                  type="button"
-                  className="backup-dismiss"
-                  onClick={() => setBackupsDismissed(true)}
-                >
-                  稍后再说
-                </button>
-              </div>
-              <ul className="backup-list">
-                {backups.map((backup) => {
-                  const label = formatBackupTime(backup.savedAt)
-                  return (
-                    <li key={backup.key}>
-                      <div className="backup-meta">
-                        <strong>{label}</strong>
-                        <span>{formatBackupSize(backup.bytes)}</span>
-                      </div>
-                      <div className="backup-actions">
-                        <button
-                          type="button"
-                          onClick={() => downloadBackup(backup)}
-                          aria-label={`下载 ${label} 的恢复副本`}
-                        >
-                          下载
-                        </button>
-                        <button
-                          type="button"
-                          className="backup-restore"
-                          onClick={() => restoreBackup(backup)}
-                          aria-label={`载入 ${label} 的恢复副本`}
-                        >
-                          载入
-                        </button>
-                      </div>
-                    </li>
-                  )
-                })}
-              </ul>
-            </section>
-          )}
-
-          <div className="editor-heading">
-            <div>
-              <span className="eyebrow">程序块 Main [OB1] · 梯形图 LAD</span>
-              <h1>{program.name || '未命名项目'}</h1>
+        <section className="sheet" aria-label="程序块 Main [OB1]">
+          <div className="sheet-tabbar">
+            <div className="sheet-tabgroup">
+              <span className="sheet-tab">PLC_1</span>
+              <span className="sheet-tab-sep" aria-hidden="true">/</span>
+              <span className="sheet-tab">程序块</span>
+              <span className="sheet-tab-sep" aria-hidden="true">/</span>
+              <span className="sheet-tab is-active">Main [OB1]</span>
             </div>
-            <div className="editor-facts">
-              <span><b>{program.rungs.length}</b> 梯级</span>
-              <span><b>{program.tags.length}</b> 变量</span>
-              <span className={running ? 'scan-live' : ''}>
-                <i />{running ? '运行中' : '已停止'}
+            <div className="sheet-meta">
+              <span className={running ? 'sheet-state is-live' : 'sheet-state'}>
+                <i aria-hidden="true" />
+                {running ? '运行中' : '离线'}
               </span>
-              <button type="button" className="editor-help" onClick={() => setGuideOpen(true)}>
-                <HelpIcon size={15} />
-                怎么用
-              </button>
+              <span className="sheet-language">梯形图 LAD</span>
             </div>
           </div>
 
-          {compileResult.errors.length > 0 && (
-            <div className="compile-banner">
-              <strong>工程有 {compileResult.errors.length} 个错误，仿真已阻止。</strong>
-              <span>打开右侧“诊断”面板逐项定位。</span>
-            </div>
-          )}
+          <div className="sheet-body">
+            <main className="program-pane" ref={editorRef}>
+              {remoteConflict && (
+                <section
+                  className="recovery-banner conflict-banner"
+                  role="alert"
+                  aria-labelledby="conflict-title"
+                >
+                  <div className="recovery-copy">
+                    <span className="recovery-tag">多标签页冲突</span>
+                    <strong id="conflict-title">另一个标签页保存了不同的工程</strong>
+                    <span>本页自动保存已暂停。先选择保留哪一版，未被保留的一版会自动存成恢复副本。</span>
+                    <span className="recovery-detail">
+                      另一版保存于 {formatBackupTime(remoteConflict.savedAt)}
+                    </span>
+                  </div>
+                  <div className="recovery-actions">
+                    <button type="button" className="conflict-adopt" onClick={adoptRemoteVersion}>
+                      载入另一标签页版本
+                    </button>
+                    <button type="button" className="conflict-keep" onClick={keepLocalVersion}>
+                      保留本页并覆盖
+                    </button>
+                  </div>
+                </section>
+              )}
 
-          {compileResult.errors.length === 0 && !running && (
-            <div className="run-hint">
-              <span className="run-hint-icon"><BoltIcon size={18} /></span>
-              <div className="run-hint-copy">
-                <strong>第一次用？从这里开始</strong>
-                <span>点「运行仿真」，再到「变量表」把输入位切成 TRUE，就能看到绿色能流。</span>
+              {corruptProject && (
+                <section className="recovery-banner" role="alert" aria-labelledby="recovery-title">
+                  <div className="recovery-copy">
+                    <span className="recovery-tag">本机工程恢复</span>
+                    <strong id="recovery-title">本地工程数据无法读取，自动保存已暂停</strong>
+                    <span>
+                      原工程不会被空白工程覆盖。
+                      {backupIntact
+                        ? ' 原始内容已保留为浏览器内恢复副本。'
+                        : rawDownloaded
+                          ? ' 原始内容已下载到本机。'
+                          : ' 浏览器内额外备份不可用，必须先下载原始内容。'}
+                    </span>
+                    <span>
+                      {hasRecoveryCandidate
+                        ? '当前工程已准备好；接受后会写入本机存储并恢复自动保存。'
+                        : '请先通过「更多」菜单导入备份，或直接在下方工作区重建工程，再接受当前工程。'}
+                    </span>
+                    <span className="recovery-detail">{corruptProject.message}</span>
+                  </div>
+                  <div className="recovery-actions">
+                    <button
+                      type="button"
+                      className="recovery-download"
+                      onClick={downloadCorruptBackup}
+                      disabled={!corruptProject.raw}
+                    >
+                      下载损坏备份
+                    </button>
+                    <button
+                      type="button"
+                      className="recovery-accept"
+                      onClick={acceptRecoveredProject}
+                      disabled={!hasRecoveryCandidate || !originalContentKept}
+                      title={originalContentKept ? undefined : '请先下载损坏工程原始内容'}
+                    >
+                      接受当前工程并恢复自动保存
+                    </button>
+                    <button
+                      type="button"
+                      className="recovery-discard"
+                      onClick={discardCorruptProject}
+                      disabled={!originalContentKept}
+                      title={originalContentKept ? undefined : '请先下载损坏工程原始内容'}
+                    >
+                      放弃损坏工程并新建
+                    </button>
+                  </div>
+                </section>
+              )}
+
+              {!corruptProject && backups.length > 0 && !backupsDismissed && (
+                <section className="backup-strip" aria-labelledby="backup-title">
+                  <div className="backup-strip-head">
+                    <div className="backup-strip-copy">
+                      <span>本机恢复副本</span>
+                      <strong id="backup-title">保留着 {backups.length} 份工程快照</strong>
+                      <small>可以直接下载，或载入为当前工程；载入后会自动保存。</small>
+                    </div>
+                    <button
+                      type="button"
+                      className="backup-dismiss"
+                      onClick={() => setBackupsDismissed(true)}
+                    >
+                      稍后再说
+                    </button>
+                  </div>
+                  <ul className="backup-list">
+                    {backups.map((backup) => {
+                      const label = formatBackupTime(backup.savedAt)
+                      return (
+                        <li key={backup.key}>
+                          <div className="backup-meta">
+                            <strong>{label}</strong>
+                            <span>{formatBackupSize(backup.bytes)}</span>
+                          </div>
+                          <div className="backup-actions">
+                            <button
+                              type="button"
+                              onClick={() => downloadBackup(backup)}
+                              aria-label={'下载 ' + label + ' 的恢复副本'}
+                            >
+                              下载
+                            </button>
+                            <button
+                              type="button"
+                              className="backup-restore"
+                              onClick={() => restoreBackup(backup)}
+                              aria-label={'载入 ' + label + ' 的恢复副本'}
+                            >
+                              载入
+                            </button>
+                          </div>
+                        </li>
+                      )
+                    })}
+                  </ul>
+                </section>
+              )}
+
+              <div className="program-heading">
+                <div className="program-heading-copy">
+                  <h1>{program.name || '未命名项目'}</h1>
+                  <p>单击元件修改参数，从左侧拖入指令，或拖动已有元件调整位置。</p>
+                </div>
+                <div className="program-facts" aria-label="程序概况">
+                  <span><b>{program.rungs.length}</b> 梯级</span>
+                  <span><b>{program.tags.length}</b> 变量</span>
+                  <span className={running ? 'fact-live' : ''}>
+                    <i aria-hidden="true" />{running ? '扫描中' : '已停止'}
+                  </span>
+                </div>
               </div>
-              <div className="run-hint-actions">
-                <button type="button" className="hint-primary" onClick={runToggle}>
-                  运行仿真
-                </button>
-                {firstInput && (
-                  <button type="button" className="hint-link" onClick={() => toggleBool(firstInput.name)}>
-                    切换 {firstInput.name}
-                  </button>
-                )}
-              </div>
-            </div>
-          )}
 
-          {compileResult.errors.length === 0 && running && (
-            <div className="run-hint is-live">
-              <span className="run-hint-icon"><BoltIcon size={18} /></span>
-              <div className="run-hint-copy">
-                <strong>正在扫描</strong>
-                <span>到右侧「变量表」点击输入位的 TRUE / FALSE，绿色导线就是当前通电的路径。</span>
-              </div>
-            </div>
-          )}
+              {compileResult.errors.length > 0 && (
+                <div className="compile-banner" role="alert">
+                  <strong>工程有 {compileResult.errors.length} 个错误，仿真已阻止。</strong>
+                  <span>打开右侧「诊断」面板逐项定位。</span>
+                </div>
+              )}
 
-          <LadderCanvas
-            program={program}
-            runtime={runtime}
-            selection={selection}
-            onSelect={setSelection}
-            onDeleteNode={(rungId, path) => {
-              commit(deleteNode(program, rungId, path))
-              setSelection({ rungId, path: null })
-            }}
-            onWrapParallel={(rungId, path) => {
-              commit(wrapInParallel(program, rungId, path))
-              notify('已创建并联分支')
-            }}
-            onCollapseParallel={(rungId, path) => {
-              commit(collapseParallel(program, rungId, path))
-              notify('并联已收起为第一条支路')
-            }}
-            onDuplicateRung={copyRung}
-            onDeleteRung={removeRung}
-            onMoveRung={(rungId, delta) => commit(moveRung(program, rungId, delta))}
-            onAddRung={insertRung}
-          />
+              {compileResult.errors.length === 0 && !running && (
+                <div className="run-hint">
+                  <BoltIcon size={18} className="run-hint-mark" aria-hidden="true" />
+                  <div className="run-hint-copy">
+                    <strong>第一次用？从这里开始</strong>
+                    <span>点「运行」，再到「变量表」把输入位切成 TRUE，就能看到绿色能流。</span>
+                  </div>
+                  <div className="run-hint-actions">
+                    <button type="button" className="hint-primary" onClick={runToggle}>
+                      运行仿真
+                    </button>
+                    {firstInput && (
+                      <button type="button" className="hint-link" onClick={() => toggleBool(firstInput.name)}>
+                        切换 {firstInput.name}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
 
-          <div className="editor-footer">
-            <label>
-              当前梯级名称
-              <input
-                value={activeRung?.label ?? ''}
-                disabled={!activeRung}
-                onChange={(event) => {
-                  if (activeRung) commit(updateRungLabel(program, activeRung.id, event.target.value))
+              {compileResult.errors.length === 0 && running && (
+                <div className="run-hint is-live">
+                  <BoltIcon size={18} className="run-hint-mark" aria-hidden="true" />
+                  <div className="run-hint-copy">
+                    <strong>正在扫描</strong>
+                    <span>到右侧「变量表」点击输入位的 TRUE / FALSE，绿色导线就是当前通电的路径。</span>
+                  </div>
+                </div>
+              )}
+
+              <LadderCanvas
+                program={program}
+                runtime={runtime}
+                selection={selection}
+                dragTarget={drag.target}
+                isDragging={Boolean(drag.drag)}
+                onSelect={(next) => {
+                  setSelection(next)
+                  setQuickEdit(null)
                 }}
+                onEdit={(next, anchor) => {
+                  setSelection(next)
+                  setQuickEdit({ selection: next, anchor })
+                }}
+                onStartDrag={drag.start}
+                onRenameRung={(rungId, label) => commit(updateRungLabel(program, rungId, label))}
+                onDeleteNode={(rungId, path) => {
+                  commit(deleteNode(program, rungId, path))
+                  setSelection({ rungId, path: null })
+                  setQuickEdit(null)
+                }}
+                onWrapParallel={(rungId, path) => {
+                  commit(wrapInParallel(program, rungId, path))
+                  setQuickEdit(null)
+                  notify('已创建并联分支，可把另一条触点拖进新支路')
+                }}
+                onCollapseParallel={(rungId, path) => {
+                  commit(collapseParallel(program, rungId, path))
+                  setQuickEdit(null)
+                  notify('并联已收起为第一条支路')
+                }}
+                onDuplicateRung={copyRung}
+                onDeleteRung={removeRung}
+                onMoveRung={(rungId, delta) => commit(moveRung(program, rungId, delta))}
+                onAddRung={insertRung}
               />
-            </label>
-            <span>
-              {corruptProject
-                ? '自动保存已暂停：请先处理上方恢复提示；导出 JSON 可长期归档。'
-                : remoteConflict
-                  ? '自动保存已暂停：请先选择要保留的多标签页版本。'
-                : '编辑后会自动保存到本机浏览器；导出 JSON 可长期归档。'}
-            </span>
+
+              <footer className="editor-footer">
+                <p className="footer-hint">点击梯级标题即可改名；拖动左侧手柄可调整梯级顺序。</p>
+                <p className="save-note">
+                  {corruptProject
+                    ? '自动保存已暂停：请先处理上方恢复提示；导出 JSON 可长期归档。'
+                    : remoteConflict
+                      ? '自动保存已暂停：请先选择要保留的多标签页版本。'
+                      : '编辑后会自动保存到本机浏览器；导出 JSON 可长期归档。'}
+                </p>
+              </footer>
+            </main>
+
+            <Inspector
+              program={program}
+              runtime={runtime}
+              selection={selection}
+              compileResult={compileResult}
+              onProgram={commit}
+              onSelect={(next) => {
+                setSelection(next)
+                setQuickEdit(null)
+              }}
+              onToggleBool={toggleBool}
+              onSetInt={setInt}
+              onNotify={notify}
+              tab={inspectorTab}
+              onTabChange={setInspectorTab}
+              onClose={() => {
+                setMobilePanel('none')
+                setInspectorOpen(false)
+              }}
+            />
           </div>
         </section>
-
-        <Inspector
-          program={program}
-          runtime={runtime}
-          selection={selection}
-          compileResult={compileResult}
-          onProgram={commit}
-          onSelect={setSelection}
-          onToggleBool={toggleBool}
-          onSetInt={setInt}
-          onNotify={notify}
-          tab={inspectorTab}
-          onTabChange={setInspectorTab}
-        />
-      </main>
+      </div>
 
       <StatusBar
         profile={program.profile}
@@ -1032,6 +1264,45 @@ export default function App() {
         saveBlocked={Boolean(corruptProject) || Boolean(remoteConflict)}
       />
 
+      <nav className="mobile-tabbar" aria-label="工作区面板">
+        <button
+          type="button"
+          className={mobilePanel === 'none' ? 'mobile-tab-action is-active' : 'mobile-tab-action'}
+          onClick={() => setMobilePanel('none')}
+          aria-pressed={mobilePanel === 'none'}
+        >
+          <LadderIcon size={18} />
+          <span>程序</span>
+        </button>
+        <button
+          type="button"
+          className={mobilePanel === 'instructions' ? 'mobile-tab-action is-active' : 'mobile-tab-action'}
+          onClick={() => setMobilePanel((panel) => (panel === 'instructions' ? 'none' : 'instructions'))}
+          aria-pressed={mobilePanel === 'instructions'}
+        >
+          <GripIcon size={18} />
+          <span>指令</span>
+        </button>
+        <button
+          type="button"
+          className={mobilePanel === 'properties' ? 'mobile-tab-action is-active' : 'mobile-tab-action'}
+          onClick={() => setMobilePanel((panel) => (panel === 'properties' ? 'none' : 'properties'))}
+          aria-pressed={mobilePanel === 'properties'}
+        >
+          <SlidersIcon size={18} />
+          <span>属性</span>
+        </button>
+      </nav>
+
+      {mobilePanel !== 'none' && (
+        <button
+          type="button"
+          className="mobile-scrim"
+          onClick={() => setMobilePanel('none')}
+          aria-label="关闭面板"
+        />
+      )}
+
       <input
         ref={fileInputRef}
         type="file"
@@ -1040,7 +1311,46 @@ export default function App() {
         onChange={(event) => void importProject(event.target.files?.[0])}
       />
 
+      <LibraryDialog
+        open={libraryOpen}
+        onClose={() => setLibraryOpen(false)}
+        onLoadSample={(id) => {
+          setLibraryOpen(false)
+          loadSample(id)
+        }}
+      />
+
       <Guide open={guideOpen} onClose={closeGuide} onStartDemo={startDemo} />
+
+      {quickEdit && quickEditValid && (
+        <QuickEditor
+          program={program}
+          runtime={runtime}
+          selection={quickEdit.selection}
+          anchor={quickEdit.anchor}
+          onProgram={commit}
+          onClose={() => setQuickEdit(null)}
+          onNotify={notify}
+          onOpenInspector={() => {
+            openInspector('properties')
+            setQuickEdit(null)
+          }}
+          onDeleteOutput={() => {
+            removeRung(quickEdit.selection.rungId)
+            setQuickEdit(null)
+          }}
+        />
+      )}
+
+      {drag.drag && (
+        <div
+          className="drag-ghost"
+          aria-hidden="true"
+          style={{ left: drag.drag.x, top: drag.drag.y }}
+        >
+          {drag.drag.label}
+        </div>
+      )}
 
       {toast && (
         <div className="toast" key={toast.id} role="status">
@@ -1049,4 +1359,5 @@ export default function App() {
       )}
     </div>
   )
+
 }

@@ -243,3 +243,102 @@ export function ArrowRightIcon(props: IconProps) {
     </IconBase>
   )
 }
+
+export function GripIcon(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <circle cx="9" cy="7" r="1" fill="currentColor" stroke="none" />
+      <circle cx="15" cy="7" r="1" fill="currentColor" stroke="none" />
+      <circle cx="9" cy="12" r="1" fill="currentColor" stroke="none" />
+      <circle cx="15" cy="12" r="1" fill="currentColor" stroke="none" />
+      <circle cx="9" cy="17" r="1" fill="currentColor" stroke="none" />
+      <circle cx="15" cy="17" r="1" fill="currentColor" stroke="none" />
+    </IconBase>
+  )
+}
+
+export function MenuIcon(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <path d="M4 7h16M4 12h16M4 17h16" />
+    </IconBase>
+  )
+}
+
+export function MoreIcon(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <circle cx="5.5" cy="12" r="1.2" fill="currentColor" stroke="none" />
+      <circle cx="12" cy="12" r="1.2" fill="currentColor" stroke="none" />
+      <circle cx="18.5" cy="12" r="1.2" fill="currentColor" stroke="none" />
+    </IconBase>
+  )
+}
+
+export function SearchIcon(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <circle cx="10.5" cy="10.5" r="6.5" />
+      <path d="m15.5 15.5 4.2 4.2" />
+    </IconBase>
+  )
+}
+
+export function ChevronDownIcon(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <path d="m6 9 6 6 6-6" />
+    </IconBase>
+  )
+}
+
+export function ArrowUpIcon(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <path d="M12 19V5m0 0L6.5 10.5M12 5l5.5 5.5" />
+    </IconBase>
+  )
+}
+
+export function ArrowDownIcon(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <path d="M12 5v14m0 0 5.5-5.5M12 19l-5.5-5.5" />
+    </IconBase>
+  )
+}
+
+export function CopyIcon(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <rect x="8" y="8" width="12" height="12" rx="1.8" />
+      <path d="M16 8V5.8A1.8 1.8 0 0 0 14.2 4H5.8A1.8 1.8 0 0 0 4 5.8v8.4A1.8 1.8 0 0 0 5.8 16H8" />
+    </IconBase>
+  )
+}
+
+export function TrashIcon(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <path d="M4.5 7h15M9 7V4.8A1.3 1.3 0 0 1 10.3 3.5h3.4A1.3 1.3 0 0 1 15 4.8V7M6.5 7l.9 12.2A1.4 1.4 0 0 0 8.8 20.5h6.4a1.4 1.4 0 0 0 1.4-1.3L17.5 7M10 11v5.5M14 11v5.5" />
+    </IconBase>
+  )
+}
+
+export function FolderIcon(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <path d="M3.8 7.2A1.8 1.8 0 0 1 5.6 5.4h4l1.8 2h7A1.8 1.8 0 0 1 20.2 9v7.8a1.8 1.8 0 0 1-1.8 1.8H5.6a1.8 1.8 0 0 1-1.8-1.8Z" />
+    </IconBase>
+  )
+}
+
+export function CpuIcon(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <rect x="6" y="6" width="12" height="12" rx="1.8" />
+      <rect x="9" y="9" width="6" height="6" rx="1" />
+      <path d="M9 3v3M15 3v3M9 18v3M15 18v3M3 9h3M3 15h3M18 9h3M18 15h3" />
+    </IconBase>
+  )
+}

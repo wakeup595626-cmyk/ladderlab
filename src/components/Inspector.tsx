@@ -22,6 +22,7 @@ import {
   updateTag,
   wrapInParallel,
 } from '../state/programOps'
+import { CheckCircleIcon, CloseIcon, PointerIcon } from './Icons'
 
 interface InspectorProps {
   program: Program
@@ -35,6 +36,7 @@ interface InspectorProps {
   onNotify: (message: string) => void
   tab: InspectorTab
   onTabChange: (tab: InspectorTab) => void
+  onClose?: () => void
 }
 
 export type InspectorTab = 'properties' | 'tags' | 'diagnostics'
@@ -237,7 +239,7 @@ function TagsPanel({
     <div className="tags-panel">
       <div className="tags-toolbar">
         <div>
-          <span className="eyebrow">符号与地址</span>
+          <span className="panel-label">符号与地址</span>
           <h3>PLC 变量表</h3>
         </div>
         <div className="button-row compact-row">
@@ -328,6 +330,7 @@ function TagsPanel({
                       className={runtime.bools[tag.name] ? 'live-value on' : 'live-value'}
                       onClick={() => onToggleBool(tag.name)}
                       title="点击切换仿真值"
+                      aria-label={`切换 ${tag.name} 仿真值`}
                     >
                       {readDisplay(program, runtime, tag.name)}
                     </button>
@@ -394,7 +397,7 @@ function DiagnosticsPanel({
     <div className="diagnostics-panel">
       <div className="panel-heading compact-heading">
         <div>
-          <span className="eyebrow">编译检查</span>
+          <span className="panel-label">编译检查</span>
           <h3>诊断信息</h3>
         </div>
         <span className={compileResult.errors.length ? 'compile-state error' : 'compile-state'}>
@@ -404,7 +407,7 @@ function DiagnosticsPanel({
 
       {items.length === 0 ? (
         <div className="empty-diagnostics">
-          <span>✓</span>
+          <CheckCircleIcon className="empty-check" />
           <strong>没有发现问题</strong>
           <p>可以运行仿真。修改工程后会自动重新检查。</p>
         </div>
@@ -459,6 +462,7 @@ export default function Inspector({
   onNotify,
   tab,
   onTabChange,
+  onClose,
 }: InspectorProps) {
   const rung = selection ? program.rungs.find((item) => item.id === selection.rungId) : undefined
   const node = selection?.path ? getNodeAtPath(program, selection.rungId, selection.path) : null
@@ -485,6 +489,14 @@ export default function Inspector({
 
   return (
     <aside className="inspector">
+      <div className="inspector-mobile-head">
+        <strong>属性与变量</strong>
+        {onClose && (
+          <button type="button" className="icon-button" aria-label="关闭属性面板" onClick={onClose}>
+            <CloseIcon />
+          </button>
+        )}
+      </div>
       <div className="inspector-context">
         <span className="context-label">{context.label}</span>
         <strong title={context.value}>{context.value}</strong>
@@ -580,7 +592,7 @@ function PropertiesPanel({
   if (!selectedRung) {
     return (
       <div className="empty-inspector">
-        <span className="empty-icon">⌁</span>
+        <PointerIcon className="empty-icon" />
         <h3>选择一个元件</h3>
         <p>点击梯形图中的触点、并联块或输出，在这里修改参数。运行后可观察绿色能流。</p>
         <div className="tip-card">

@@ -13,6 +13,12 @@ import type {
 import { uid } from '../lib/uid'
 import { byteAddressLength, parseBitAddress, parseByteAddress } from '../engine/references'
 
+export interface InsertSlot {
+  /** 偶数长度：[] 为根链，[i, b] 为第 i 个并联节点的第 b 支路，依此类推。 */
+  chain: number[]
+  index: number
+}
+
 export function nextTagName(program: Program, kind: TagKind): string {
   const base = kind === 'BOOL' ? 'Tag' : 'Count'
   const names = new Set(program.tags.map((tag) => tag.name))
@@ -165,6 +171,114 @@ function sanitizeChain(chain: LadderNode[]): LadderNode[] {
   return next
 }
 
+function isChainPath(path: number[]): boolean {
+  return path.length % 2 === 0 && path.every((part) => Number.isInteger(part) && part >= 0)
+}
+
+function chainAtPath(nodes: LadderNode[], path: number[]): LadderNode[] | null {
+  if (!isChainPath(path)) return null
+  let chain = nodes
+  for (let offset = 0; offset < path.length; offset += 2) {
+    const node = chain[path[offset]]
+    if (!node || node.type !== 'parallel') return null
+    const branch = node.branches[path[offset + 1]]
+    if (!branch) return null
+    chain = branch
+  }
+  return chain
+}
+
+function resolveNodeAtPath(nodes: LadderNode[], path: number[]): { node: LadderNode; chain: LadderNode[] } | null {
+  if (path.length === 0 || path.length % 2 === 0) return null
+  let chain = nodes
+  for (let offset = 0; offset < path.length; offset += 2) {
+    const index = path[offset]
+    if (!Number.isInteger(index) || index < 0 || index >= chain.length) return null
+    const node = chain[index]
+    if (offset === path.length - 1) return { node, chain }
+    const branchIndex = path[offset + 1]
+    if (node.type !== 'parallel' || !Number.isInteger(branchIndex) || branchIndex < 0) return null
+    const branch = node.branches[branchIndex]
+    if (!branch) return null
+    chain = branch
+  }
+  return null
+}
+
+function insertAtPath(chain: LadderNode[], path: number[], index: number, node: LadderNode): LadderNode[] | null {
+  if (!isChainPath(path) || !Number.isInteger(index) || index < 0) return null
+  if (path.length === 0) {
+    if (index > chain.length) return null
+    return [...chain.slice(0, index), node, ...chain.slice(index)]
+  }
+  const [nodeIndex, branchIndex, ...rest] = path
+  const target = chain[nodeIndex]
+  if (!target || target.type !== 'parallel') return null
+  const branch = target.branches[branchIndex]
+  if (!branch) return null
+  const nextBranch = insertAtPath(branch, rest, index, node)
+  if (!nextBranch) return null
+  return chain.map((item, position) =>
+    position === nodeIndex
+      ? { ...target, branches: target.branches.map((itemBranch, i) => (i === branchIndex ? nextBranch : itemBranch)) }
+      : item,
+  )
+}
+
+function removeNodeAtPath(
+  chain: LadderNode[],
+  path: number[],
+): { nodes: LadderNode[]; node: LadderNode } | null {
+  if (path.length === 0 || path.length % 2 === 0) return null
+  const [nodeIndex, branchIndex, ...rest] = path
+  const target = chain[nodeIndex]
+  if (!target) return null
+  if (rest.length === 0) {
+    return {
+      nodes: chain.filter((_, position) => position !== nodeIndex),
+      node: target,
+    }
+  }
+  if (target.type !== 'parallel') return null
+  const branch = target.branches[branchIndex]
+  if (!branch) return null
+  const removed = removeNodeAtPath(branch, rest)
+  if (!removed) return null
+  return {
+    node: removed.node,
+    nodes: chain.map((item, position) =>
+      position === nodeIndex
+        ? { ...target, branches: target.branches.map((itemBranch, i) => (i === branchIndex ? removed.nodes : itemBranch)) }
+        : item,
+    ),
+  }
+}
+
+function startsWithPath(path: number[], prefix: number[]): boolean {
+  return path.length >= prefix.length && prefix.every((part, index) => path[index] === part)
+}
+
+function sameCompare(left: ContactNode['compare'], right: ContactNode['compare']): boolean {
+  return left === right || Boolean(left && right && left.op === right.op && left.value === right.value)
+}
+
+function sameNode(left: LadderNode, right: LadderNode): boolean {
+  if (left.type !== right.type || left.id !== right.id) return false
+  if (left.type === 'contact') {
+    return right.type === 'contact'
+      && left.kind === right.kind
+      && left.tag === right.tag
+      && sameCompare(left.compare, right.compare)
+  }
+  return right.type === 'parallel'
+    && left.branches.length === right.branches.length
+    && left.branches.every((branch, index) => sameNodes(branch, right.branches[index]))
+}
+
+function sameNodes(left: LadderNode[], right: LadderNode[]): boolean {
+  return left.length === right.length && left.every((node, index) => sameNode(node, right[index]))
+}
+
 function mapChain(chain: LadderNode[], path: number[], fn: (node: LadderNode) => LadderNode | null): LadderNode[] {
   if (path.length === 0) return chain
   const [index, ...rest] = path
@@ -205,6 +319,16 @@ function insertAfter(chain: LadderNode[], path: number[], node: LadderNode): Lad
       ? { ...target, branches: target.branches.map((b, i) => (i === branchIndex ? nextBranch : b)) }
       : item,
   )
+}
+
+export function insertNodeAt(program: Program, rungId: string, slot: InsertSlot, node: LadderNode): Program {
+  const rung = program.rungs.find((item) => item.id === rungId)
+  if (!rung) return program
+  const inserted = insertAtPath(rung.nodes, slot.chain, slot.index, node)
+  if (!inserted) return program
+  const nodes = sanitizeChain(inserted)
+  if (sameNodes(nodes, rung.nodes)) return program
+  return withRung(program, rungId, (item) => ({ ...item, nodes }))
 }
 
 export function getNodeAtPath(program: Program, rungId: string, path: number[] | null): LadderNode | null {
@@ -280,6 +404,70 @@ export function deleteRung(program: Program, rungId: string): Program {
   return { ...program, rungs: program.rungs.filter((rung) => rung.id !== rungId) }
 }
 
+export function moveNode(program: Program, rungId: string, from: number[], to: InsertSlot): Program {
+  const rung = program.rungs.find((item) => item.id === rungId)
+  if (!rung) return program
+  const source = resolveNodeAtPath(rung.nodes, from)
+  const targetChain = chainAtPath(rung.nodes, to.chain)
+  if (!source || !targetChain || !Number.isInteger(to.index) || to.index < 0 || to.index > targetChain.length) {
+    return program
+  }
+
+  // 目标链以完整源节点路径开头，表示目标是该节点自己的子树，必须拒绝。
+  if (startsWithPath(to.chain, from)) return program
+
+  const sourceChain = from.slice(0, -1)
+  const sourceIndex = from[from.length - 1]
+  const nextChain = [...to.chain]
+  let nextIndex = to.index
+
+  // 删除只会让同一父链中源节点之后的节点索引左移。
+  if (nextChain.length > sourceChain.length && startsWithPath(nextChain, sourceChain)) {
+    const position = sourceChain.length
+    if (nextChain[position] > sourceIndex) nextChain[position] -= 1
+  }
+  // 同一链内先删后插：源在目标之前时，插入点同步左移一位。
+  if (nextChain.length === sourceChain.length && startsWithPath(nextChain, sourceChain) && sourceIndex < nextIndex) {
+    nextIndex -= 1
+  }
+
+  const removed = removeNodeAtPath(rung.nodes, from)
+  if (!removed) return program
+  const inserted = insertAtPath(removed.nodes, nextChain, nextIndex, source.node)
+  if (!inserted) return program
+  const nodes = sanitizeChain(inserted)
+  if (sameNodes(nodes, rung.nodes)) return program
+  return withRung(program, rungId, (item) => ({ ...item, nodes }))
+}
+
+export function moveNodeBy(program: Program, rungId: string, path: number[], delta: -1 | 1): Program {
+  const rung = program.rungs.find((item) => item.id === rungId)
+  if (!rung) return program
+  const source = resolveNodeAtPath(rung.nodes, path)
+  if (!source) return program
+  const sourceIndex = path[path.length - 1]
+  if ((delta === -1 && sourceIndex === 0) || (delta === 1 && sourceIndex === source.chain.length - 1)) {
+    return program
+  }
+
+  // 目标索引取原链的插入边界：后移一位需越过相邻节点，因此加 2。
+  return moveNode(program, rungId, path, {
+    chain: path.slice(0, -1),
+    index: delta === -1 ? sourceIndex - 1 : sourceIndex + 2,
+  })
+}
+
+export function moveRungTo(program: Program, rungId: string, targetIndex: number): Program {
+  const index = program.rungs.findIndex((rung) => rung.id === rungId)
+  if (index < 0 || !Number.isFinite(targetIndex)) return program
+  const target = Math.max(0, Math.min(program.rungs.length - 1, Math.trunc(targetIndex)))
+  if (target === index) return program
+  const rungs = [...program.rungs]
+  const [rung] = rungs.splice(index, 1)
+  rungs.splice(target, 0, rung)
+  return { ...program, rungs }
+}
+
 export function moveRung(program: Program, rungId: string, delta: -1 | 1): Program {
   const index = program.rungs.findIndex((rung) => rung.id === rungId)
   const target = index + delta
@@ -292,6 +480,38 @@ export function moveRung(program: Program, rungId: string, delta: -1 | 1): Progr
 
 function ensureTag(program: Program, kind: TagKind): Program {
   return program.tags.some((tag) => tag.kind === kind) ? program : addTag(program, kind)
+}
+
+export function makeContactNode(
+  program: Program,
+  kind: ContactKind,
+): { program: Program; node: ContactNode } {
+  const tagKind: TagKind = kind === 'CMP' ? 'INT' : 'BOOL'
+  const next = ensureTag(program, tagKind)
+  const tag = next.tags.find((item) => item.kind === tagKind)
+  const node: ContactNode = {
+    type: 'contact',
+    id: uid('c'),
+    kind,
+    tag: tag?.name ?? '',
+    ...(kind === 'CMP' ? { compare: { op: '>=', value: 1 } } : {}),
+  }
+  return { program: next, node }
+}
+
+export function insertContactAt(
+  program: Program,
+  rungId: string,
+  slot: InsertSlot,
+  kind: ContactKind,
+): Program {
+  const rung = program.rungs.find((item) => item.id === rungId)
+  const chain = rung ? chainAtPath(rung.nodes, slot.chain) : null
+  if (!rung || !chain || !Number.isInteger(slot.index) || slot.index < 0 || slot.index > chain.length) {
+    return program
+  }
+  const made = makeContactNode(program, kind)
+  return insertNodeAt(made.program, rungId, slot, made.node)
 }
 
 export function insertContact(
