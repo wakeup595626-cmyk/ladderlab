@@ -482,13 +482,54 @@ function ensureTag(program: Program, kind: TagKind): Program {
   return program.tags.some((tag) => tag.kind === kind) ? program : addTag(program, kind)
 }
 
+/** 已经出现在程序里的变量名，用来避免新元件默认复用同一个变量。 */
+function referencedTags(program: Program): Set<string> {
+  const used = new Set<string>()
+  const walk = (nodes: LadderNode[]) => {
+    for (const node of nodes) {
+      if (node.type === 'contact') {
+        if (node.tag) used.add(node.tag)
+      } else if (node.type === 'parallel') {
+        node.branches.forEach(walk)
+      }
+    }
+  }
+  for (const rung of program.rungs) {
+    walk(rung.nodes)
+    if (rung.output.tag) used.add(rung.output.tag)
+  }
+  return used
+}
+
+/** 新元件优先挑一个还没被引用的同类变量，避免出现两个同名触点。 */
+export function pickDefaultTag(program: Program, kind: TagKind): TagDef | undefined {
+  const sameKind = program.tags.filter((tag) => tag.kind === kind)
+  if (!sameKind.length) return undefined
+  const used = referencedTags(program)
+  return sameKind.find((tag) => !used.has(tag.name))
+}
+
+function tagForNewContact(
+  program: Program,
+  kind: TagKind,
+): { program: Program; tag: TagDef | undefined } {
+  let next = ensureTag(program, kind)
+  let tag = pickDefaultTag(next, kind)
+  if (tag) return { program: next, tag }
+  const existing = new Set(next.tags.map((item) => item.id))
+  next = addTag(next, kind)
+  tag = next.tags.find((item) => !existing.has(item.id))
+  return { program: next, tag }
+}
+
 export function makeContactNode(
   program: Program,
   kind: ContactKind,
 ): { program: Program; node: ContactNode } {
   const tagKind: TagKind = kind === 'CMP' ? 'INT' : 'BOOL'
-  const next = ensureTag(program, tagKind)
-  const tag = next.tags.find((item) => item.kind === tagKind)
+  const made = tagForNewContact(program, tagKind)
+  const next = made.program
+  const tag = made.tag
   const node: ContactNode = {
     type: 'contact',
     id: uid('c'),
@@ -520,8 +561,10 @@ export function insertContact(
   path: number[] | null,
   kind: ContactKind,
 ): Program {
-  let next = ensureTag(program, kind === 'CMP' ? 'INT' : 'BOOL')
-  const tag = next.tags.find((item) => item.kind === (kind === 'CMP' ? 'INT' : 'BOOL'))
+  const tagKind: TagKind = kind === 'CMP' ? 'INT' : 'BOOL'
+  const made = tagForNewContact(program, tagKind)
+  const tag = made.tag
+  let next = made.program
   const node: LadderNode = {
     type: 'contact',
     id: uid('c'),

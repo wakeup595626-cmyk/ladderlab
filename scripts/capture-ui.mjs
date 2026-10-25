@@ -1,4 +1,4 @@
-/** 交互式 UI 快速验证：需要 preview:4173 与 Edge 的 CDP 端口 9222。 */
+/** 交互式 UI 快速验证：需要 preview 服务与 Edge 的 CDP 端口 9222。 */
 import { writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 
@@ -76,7 +76,7 @@ async function click(selector) {
   if (!clicked) throw new Error(`找不到元素：${selector}`)
 }
 
-// 首次访问会打开使用指南；验收主界面时先关掉它。
+// 如果使用指南正开着，先关掉它，再进入可编辑工作台。
 await evaluate(`(() => {
   const backdrop = document.querySelector('.guide-backdrop')
   if (!backdrop) return 'not-open'
@@ -86,27 +86,21 @@ await evaluate(`(() => {
 await sleep(300)
 await evaluate(`window.scrollTo({ top: 0, left: 0, behavior: 'instant' })`)
 
-await evaluate(`([...document.querySelectorAll('.sample-card')].find((card) => card.textContent.includes('启保停'))).click()`)
-await sleep(350)
-await click('.run-button')
-await sleep(350)
-await click('.inspector-tabs button:nth-child(2)')
-await sleep(250)
+await click('.wb-coach-demo')
+await sleep(800)
 
 const startButton = `(() => {
-  const card = [...document.querySelectorAll('.tag-card')].find((item) => item.querySelector('.tag-name-input')?.value === 'StartBtn')
+  const card = [...document.querySelectorAll('.tag-card')].find((item) => item.querySelector('input')?.value === 'StartBtn')
   const button = card?.querySelector('.live-value')
   if (!button) return false
   button.click(); return true
 })()`
 if (!(await evaluate(startButton))) throw new Error('变量表里找不到 StartBtn')
-await sleep(250)
-await evaluate(startButton)
-await sleep(500)
+await sleep(700)
 
 const state = await evaluate(`({
   rungPowered: [...document.querySelectorAll('.ll-rung')].filter((rung) => rung.classList.contains('is-powered')).length,
-  motor: [...document.querySelectorAll('.tag-card')].find((card) => card.querySelector('.tag-name-input')?.value === 'Motor')?.querySelector('.live-value')?.textContent.trim(),
+  motor: [...document.querySelectorAll('.tag-card')].find((card) => card.querySelector('input')?.value === 'Motor')?.querySelector('.live-value')?.textContent.trim(),
   scan: document.querySelector('.status-bar')?.innerText,
   overflow: {
     tags: (() => { const el = document.querySelector('.tag-list'); return el ? el.scrollWidth > el.clientWidth : null })(),

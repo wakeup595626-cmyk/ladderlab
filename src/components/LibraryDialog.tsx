@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import { COURSE_LABS } from '../engine/courseLabs'
 import { SAMPLES } from '../engine/samples'
+import { useModalFocus } from '../lib/useModalFocus'
 import { CloseIcon, SearchIcon } from './Icons'
 
 export interface LibraryDialogProps {
@@ -10,32 +11,14 @@ export interface LibraryDialogProps {
 }
 
 export default function LibraryDialog({ open, onClose, onLoadSample }: LibraryDialogProps) {
+  if (!open) return null
+  return <LibraryDialogContent onClose={onClose} onLoadSample={onLoadSample} />
+}
+
+function LibraryDialogContent({ onClose, onLoadSample }: Omit<LibraryDialogProps, 'open'>) {
   const [query, setQuery] = useState('')
   const searchRef = useRef<HTMLInputElement>(null)
-  const onCloseRef = useRef(onClose)
-
-  useEffect(() => {
-    onCloseRef.current = onClose
-  }, [onClose])
-
-  useEffect(() => {
-    if (!open) return
-
-    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
-    setQuery('')
-    searchRef.current?.focus()
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onCloseRef.current()
-    }
-    document.addEventListener('keydown', handleKeyDown)
-    return () => {
-      document.removeEventListener('keydown', handleKeyDown)
-      previousFocus?.focus()
-    }
-  }, [open])
-
-  if (!open) return null
+  const dialogRef = useModalFocus<HTMLElement>(true, onClose, searchRef)
 
   const normalizedQuery = query.trim().toLocaleLowerCase()
   const matches = (name: string, description: string) =>
@@ -49,11 +32,13 @@ export default function LibraryDialog({ open, onClose, onLoadSample }: LibraryDi
     <div
       className="library-backdrop"
       role="presentation"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) onClose()
+      onPointerDown={(event) => {
+        if (event.target !== event.currentTarget) return
+        event.preventDefault()
+        onClose()
       }}
     >
-      <section className="library-dialog" role="dialog" aria-modal="true" aria-labelledby="library-title">
+      <section ref={dialogRef} className="library-dialog" role="dialog" aria-modal="true" aria-labelledby="library-title" tabIndex={-1}>
         <header className="library-head">
           <div>
             <h2 id="library-title">实验与示例</h2>

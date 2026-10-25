@@ -1,0 +1,1826 @@
+/* LadderLab workspace chrome
+   A quiet engineering frame around one working sheet. Chrome is deliberately
+   flat: rules define structure, the ladder diagram carries the visual weight. */
+
+.wb-shell {
+  --ground: #f3f5f0;
+  --surface: #ffffff;
+  --raised: #f7f8f4;
+  --active: #ecefe8;
+  --frame: #eef1eb;
+  --frame-ink: #222820;
+  --border: #dfe3d8;
+  --rule: #eaede4;
+  --control: #c7cdc1;
+  --text: #171b17;
+  --muted: #4f574c;
+  --faint: #626a5e;
+  --accent: #176a78;
+  --accent-ink: #0e4b55;
+  --accent-wash: #e7f1f1;
+  --positive: #1b7047;
+  --positive-wash: #e7f3eb;
+  --negative: #b42a2e;
+  --negative-wash: #fbeceb;
+  --warning: #855811;
+  --warning-wash: #fbf3e3;
+  --radius-card: 6px;
+  --radius-control: 5px;
+  --radius-sheet: 10px;
+  --row-height: 42px;
+  display: flex;
+  width: 100%;
+  height: 100vh;
+  height: 100dvh;
+  min-width: 0;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--ground);
+  color: var(--text);
+}
+
+body[data-drag-kind] {
+  -webkit-user-select: none;
+  user-select: none;
+  cursor: grabbing;
+}
+
+/* ------------------------------------------------------------------ top */
+
+.wb-shell .wb-topbar {
+  position: relative;
+  z-index: 60;
+  display: flex;
+  height: 56px;
+  flex: 0 0 56px;
+  align-items: center;
+  gap: 16px;
+  padding: 0 24px;
+  border-bottom: 1px solid var(--border);
+  background: var(--frame);
+}
+
+.wb-shell .wb-brand {
+  flex: 0 0 auto;
+  gap: 8px;
+}
+
+.wb-shell .brand-mark {
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
+  border: 1px solid var(--control);
+  border-radius: 5px;
+  background: var(--surface);
+  color: var(--accent-ink);
+}
+
+.wb-shell .brand-mark svg {
+  width: 17px;
+  height: 17px;
+}
+
+.wb-brand-name {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  line-height: 1;
+}
+
+.wb-brand-name strong {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-project-name {
+  display: flex;
+  min-width: 0;
+  max-width: 360px;
+  flex: 0 1 300px;
+  align-items: center;
+}
+
+.wb-project-name input {
+  width: 100%;
+  height: 34px;
+  padding: 0 9px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text);
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+.wb-project-name input:hover {
+  border-color: var(--border);
+  background: var(--surface);
+}
+
+.wb-project-name input:focus {
+  border-color: var(--control);
+  background: var(--surface);
+  outline: 2px solid var(--accent-wash);
+  outline-offset: 0;
+}
+
+.wb-topbar-actions {
+  display: flex;
+  min-width: 0;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.wb-project-button {
+  display: inline-flex;
+  height: 36px;
+  align-items: center;
+  gap: 7px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.wb-project-button svg {
+  color: var(--muted);
+}
+
+.wb-project-button:hover {
+  border-color: var(--control);
+  background: var(--raised);
+}
+
+.wb-shell .wb-run-toggle {
+  min-width: 88px;
+  height: 36px;
+  gap: 6px;
+  padding: 0 15px;
+  border: 1px solid var(--accent-ink);
+  border-radius: 5px;
+  background: var(--accent);
+  color: var(--surface);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.wb-shell .wb-run-toggle:hover:not(:disabled) {
+  border-color: var(--accent-ink);
+  background: var(--accent-ink);
+}
+
+.wb-shell .wb-run-toggle.is-running,
+.wb-shell .wb-run-toggle.is-running:hover:not(:disabled) {
+  border-color: var(--positive);
+  background: var(--positive);
+}
+
+.wb-shell .wb-run-toggle:disabled {
+  border-color: var(--border);
+  background: var(--active);
+  color: var(--faint);
+}
+
+.wb-shell .wb-more .icon-button {
+  width: 36px;
+  height: 36px;
+}
+
+.wb-more-menu.topbar-menu {
+  width: 252px;
+  gap: 0;
+  padding: 3px;
+  border-color: var(--control);
+  background: var(--surface);
+  box-shadow: 0 18px 42px rgba(23, 27, 23, 0.16);
+}
+
+.wb-menu-group {
+  display: grid;
+  gap: 1px;
+  padding: 4px 0;
+}
+
+.wb-menu-group + .wb-menu-group {
+  border-top: 1px solid var(--rule);
+}
+
+.wb-menu-label {
+  padding: 5px 10px 3px;
+  color: var(--faint);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+}
+
+.wb-menu-group > button {
+  min-height: 36px;
+  gap: 8px;
+  padding: 0 10px;
+  font-size: 13px;
+}
+
+.wb-speed-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px 5px;
+  color: var(--faint);
+  font-size: 12px;
+}
+
+.wb-speed-row > span {
+  min-width: 42px;
+  flex: 0 0 auto;
+}
+
+.wb-speed-row button {
+  width: auto;
+  height: 30px;
+  min-height: 30px;
+  flex: 0 0 auto;
+  justify-content: center;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.wb-speed-row button.is-active {
+  border-color: var(--accent);
+  background: var(--accent-wash);
+  color: var(--accent-ink);
+  font-weight: 600;
+}
+
+/* -------------------------------------------------------------- document */
+
+.wb-documentbar {
+  display: flex;
+  height: 54px;
+  flex: 0 0 54px;
+  align-items: center;
+  gap: 20px;
+  padding: 0 24px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.wb-doc-tab {
+  display: flex;
+  min-width: 0;
+  height: 34px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 11px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--ground);
+  color: var(--accent-ink);
+}
+
+.wb-doc-tab h1 {
+  margin: 0;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.wb-doc-meta {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 14px;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+.wb-doc-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.wb-doc-state i {
+  width: 7px;
+  height: 7px;
+  border: 1px solid var(--control);
+  border-radius: 50%;
+  background: transparent;
+}
+
+.wb-doc-state.is-live {
+  color: var(--positive);
+  font-weight: 600;
+}
+
+.wb-doc-state.is-live i {
+  border-color: var(--positive);
+  background: var(--positive);
+}
+
+.wb-doc-errors.is-error {
+  color: var(--negative);
+  font-weight: 600;
+}
+
+.wb-doc-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 3px;
+  margin-left: auto;
+}
+
+.wb-doc-action {
+  display: inline-flex;
+  height: 36px;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.wb-doc-action:hover {
+  border-color: var(--border);
+  background: var(--raised);
+  color: var(--text);
+}
+
+.wb-doc-action.is-active,
+.wb-doc-action.is-active:hover {
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--border));
+  background: var(--accent-wash);
+  color: var(--accent-ink);
+}
+
+.wb-doc-action svg {
+  color: var(--faint);
+}
+
+.wb-doc-divider {
+  width: 1px;
+  height: 22px;
+  margin: 0 5px;
+  background: var(--border);
+}
+
+.wb-doc-actions .icon-button {
+  width: 36px;
+  height: 36px;
+}
+
+/* ---------------------------------------------------------- instruction */
+
+.wb-instruction-strip {
+  display: flex;
+  min-height: 56px;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 16px;
+  padding: 7px 24px;
+  overflow: hidden;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.wb-instruction-intro {
+  display: flex;
+  min-width: 68px;
+  flex: 0 0 auto;
+}
+
+.wb-instruction-intro h2 {
+  margin: 0;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.wb-instruction-tools {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.wb-instruction-list {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 7px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.wb-instruction-list::-webkit-scrollbar {
+  display: none;
+}
+
+.wb-instruction-button {
+  display: inline-flex;
+  height: 42px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13px;
+  white-space: nowrap;
+  cursor: grab;
+  touch-action: none;
+}
+
+.wb-instruction-button:hover:not(:disabled) {
+  border-color: var(--control);
+  background: var(--accent-wash);
+  color: var(--accent-ink);
+}
+
+.wb-instruction-button:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+
+.wb-instruction-button:active:not(:disabled) {
+  cursor: grabbing;
+}
+
+.wb-instruction-symbol {
+  display: inline-grid;
+  min-width: 44px;
+  height: 25px;
+  place-items: center;
+  padding: 0 5px;
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  background: var(--raised);
+  color: var(--accent-ink);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.wb-drag-mark {
+  color: var(--faint);
+  opacity: 0.55;
+}
+
+.wb-all-mark {
+  display: inline-grid;
+  width: 25px;
+  height: 25px;
+  place-items: center;
+  border: 1px solid var(--control);
+  border-radius: 4px;
+  font-size: 17px;
+  line-height: 1;
+}
+
+.wb-instruction-button.is-all {
+  flex: 0 0 auto;
+  cursor: pointer;
+}
+
+/* ---------------------------------------------------------------- coach */
+
+.wb-coach {
+  display: flex;
+  min-height: 48px;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 18px;
+  padding: 8px 24px;
+  border-bottom: 1px solid #cfdcd9;
+  background: var(--accent-wash);
+  color: var(--accent-ink);
+  font-size: 13px;
+}
+
+.wb-coach-path {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 22px;
+  margin: 0;
+}
+
+.wb-coach-path > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  white-space: nowrap;
+}
+
+.wb-coach-path b {
+  display: inline-grid;
+  width: 21px;
+  height: 21px;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--accent) 34%, transparent);
+  border-radius: 50%;
+  background: var(--surface);
+  color: var(--accent-ink);
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.wb-coach-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.wb-coach-demo,
+.wb-coach-dismiss {
+  display: inline-flex;
+  height: 34px;
+  align-items: center;
+  gap: 5px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--accent-ink);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.wb-coach-demo {
+  border-color: color-mix(in srgb, var(--accent) 32%, transparent);
+  background: var(--surface);
+  font-weight: 600;
+}
+
+.wb-coach-demo:hover,
+.wb-coach-dismiss:hover {
+  border-color: var(--accent);
+  background: var(--surface);
+}
+
+/* ------------------------------------------------------------ workbench */
+
+.wb-workbench {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  background: var(--ground);
+}
+
+.wb-program-pane {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 20px 24px 32px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24'%3E%3Ccircle cx='1' cy='1' r='1' fill='%23c7cdc1' fill-opacity='.24'/%3E%3C/svg%3E");
+  background-position: 0 0;
+  background-size: 24px 24px;
+  overscroll-behavior: contain;
+}
+
+.wb-program-inner {
+  display: flex;
+  width: 100%;
+  max-width: 1360px;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0 auto;
+}
+
+.wb-compile-banner {
+  display: flex;
+  min-height: 44px;
+  align-items: center;
+  gap: 16px;
+  padding: 8px 12px;
+  border: 1px solid color-mix(in srgb, var(--negative) 38%, var(--border));
+  border-radius: var(--radius-card);
+  background: var(--negative-wash);
+  color: var(--negative);
+  font-size: 13px;
+}
+
+.wb-compile-banner strong {
+  font-weight: 600;
+}
+
+.wb-compile-banner button {
+  min-height: 32px;
+  margin-left: auto;
+  padding: 0 10px;
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--negative);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+/* ----------------------------------------------------------- status bar */
+
+.wb-statusbar.status-bar {
+  display: flex;
+  height: 34px;
+  flex: 0 0 34px;
+  align-items: center;
+  gap: 16px;
+  padding: 0 24px;
+  border-top: 1px solid var(--border);
+  background: var(--frame);
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.wb-statusbar .run-state {
+  font-size: 12px;
+}
+
+.wb-statusbar .save-state {
+  color: var(--faint);
+  font-size: 12px;
+}
+
+/* ---------------------------------------------------------- mobile tabs */
+
+.wb-tabbar.mobile-tabbar {
+  display: none;
+}
+
+.wb-tabbar .mobile-tab-action {
+  min-height: 56px;
+  font-size: 12px;
+}
+
+/* -------------------------------------------------------------- drawers */
+
+.wb-drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 86;
+  background: color-mix(in srgb, var(--frame-ink) 28%, transparent);
+}
+
+.wb-drawer-backdrop.is-left {
+  display: flex;
+  justify-content: flex-start;
+}
+
+.wb-project-drawer {
+  display: flex;
+  width: min(340px, 92vw);
+  height: 100%;
+  flex-direction: column;
+  overflow-y: auto;
+  border-right: 1px solid var(--control);
+  background: var(--surface);
+  box-shadow: 18px 0 40px rgba(23, 27, 23, 0.12);
+}
+
+.wb-drawer-head {
+  display: flex;
+  min-height: 88px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 18px 14px 20px;
+  border-bottom: 1px solid var(--border);
+  background: var(--raised);
+}
+
+.wb-drawer-head h2 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+}
+
+.wb-drawer-head p {
+  margin: 3px 0 0;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+.wb-drawer-close {
+  width: 40px;
+  height: 40px;
+}
+
+.wb-project-tree {
+  flex: 0 0 auto;
+  padding: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.wb-project-device {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 6px 11px;
+}
+
+.wb-device-mark {
+  display: inline-grid;
+  width: 38px;
+  height: 28px;
+  place-items: center;
+  border: 1px solid var(--control);
+  border-radius: 4px;
+  background: var(--raised);
+  color: var(--accent-ink);
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 500;
+}
+
+.wb-project-device > div {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.wb-project-device strong {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.wb-project-device small {
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+.wb-project-branch {
+  display: grid;
+  gap: 3px;
+  padding-left: 12px;
+  border-left: 1px solid var(--border);
+  margin-left: 18px;
+}
+
+.wb-tree-item {
+  display: flex;
+  width: 100%;
+  min-height: 46px;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 9px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+  text-align: left;
+  cursor: pointer;
+}
+
+.wb-tree-item > span {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.wb-tree-item strong {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.wb-tree-item small {
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+.wb-tree-item:hover,
+.wb-tree-item.is-active {
+  border-color: var(--border);
+  background: var(--raised);
+}
+
+.wb-tree-item.is-active {
+  color: var(--accent-ink);
+}
+
+.wb-tree-item.is-active strong {
+  color: var(--accent-ink);
+}
+
+.wb-drawer-section {
+  flex: 0 0 auto;
+  padding: 15px 18px;
+  border-bottom: 1px solid var(--border);
+}
+
+.wb-drawer-section h3 {
+  margin: 0 0 9px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.wb-project-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.wb-project-actions button {
+  display: flex;
+  min-width: 0;
+  min-height: 54px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.wb-project-actions button:hover {
+  border-color: var(--control);
+  background: var(--raised);
+  color: var(--text);
+}
+
+.wb-help-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.wb-help-links button {
+  display: inline-flex;
+  min-height: 36px;
+  align-items: center;
+  gap: 5px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.wb-drawer-foot {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: auto;
+  padding: 18px;
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+.wb-drawer-foot strong {
+  color: var(--text);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+/* --------------------------------------------------- instruction drawer */
+
+.wb-instruction-drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 84;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: color-mix(in srgb, var(--frame-ink) 30%, transparent);
+}
+
+.wb-instruction-drawer-backdrop .project-sidebar {
+  position: relative;
+  top: auto;
+  right: auto;
+  bottom: auto;
+  left: auto;
+  width: min(760px, 100%);
+  height: min(78dvh, 680px);
+  padding: 14px;
+  border: 1px solid var(--control);
+  border-radius: var(--radius-sheet);
+  background: var(--surface);
+  box-shadow: 0 24px 70px rgba(23, 27, 23, 0.2);
+  visibility: visible;
+  pointer-events: auto;
+  transform: none;
+}
+
+.wb-instruction-drawer-backdrop .sidebar-mobile-head {
+  display: flex;
+  min-height: 42px;
+  margin-bottom: 10px;
+}
+
+.wb-instruction-drawer-backdrop .sidebar-mobile-head h2 {
+  font-size: 16px;
+}
+
+.wb-instruction-drawer-backdrop .instruction-copy small {
+  display: none;
+}
+
+.wb-instruction-drawer-backdrop .instruction-row {
+  min-height: 46px;
+}
+
+.wb-instruction-drawer-backdrop .instruction-grip {
+  color: var(--control);
+}
+
+/* ----------------------------------------------------------- inspector */
+
+.wb-context-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 88;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.wb-context-scrim {
+  position: absolute;
+  inset: 0;
+  padding: 0;
+  border: 0;
+  background: color-mix(in srgb, var(--frame-ink) 26%, transparent);
+  cursor: default;
+}
+
+.wb-context-panel {
+  position: relative;
+  width: min(400px, 94vw);
+  height: 100%;
+  overflow: hidden;
+  border-left: 1px solid var(--control);
+  background: var(--surface);
+  box-shadow: -18px 0 44px rgba(23, 27, 23, 0.12);
+}
+
+.wb-context-panel .inspector {
+  position: static;
+  width: 100%;
+  height: 100%;
+  border-left: 0;
+  visibility: visible;
+  pointer-events: auto;
+  transform: none;
+}
+
+.wb-context-panel .inspector-mobile-head {
+  display: flex;
+  min-height: 48px;
+}
+
+/* --------------------------------------------------------------- about */
+
+.wb-about {
+  width: min(560px, 100%);
+  max-height: calc(100dvh - 48px);
+  overflow-y: auto;
+  border: 1px solid var(--control);
+  border-radius: var(--radius-sheet);
+  background: var(--surface);
+}
+
+.wb-about-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 22px 22px 17px;
+  border-bottom: 1px solid var(--border);
+}
+
+.wb-about-head h2 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.wb-about-head p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.wb-about-list {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 6px 22px;
+}
+
+.wb-about-list > div {
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr);
+  gap: 14px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+.wb-about-list dt {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.wb-about-list dd {
+  margin: 0;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.wb-about-note {
+  margin: 0;
+  padding: 13px 22px 18px;
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+/* --------------------------------------------- supporting code surfaces */
+
+.wb-shell .ll-program-sheet {
+  border-color: var(--border);
+}
+
+.wb-shell .ll-rung-header {
+  min-height: 44px;
+  background: var(--raised);
+}
+
+.wb-shell .ll-rung-name {
+  font-size: 13px;
+}
+
+.wb-shell .ll-power-state {
+  font-size: 12px;
+}
+
+.wb-shell .ll-node-name,
+.wb-shell .ll-output-name {
+  font-size: 13px;
+}
+
+.wb-shell .ll-node-address,
+.wb-shell .ll-output-address {
+  font-size: 11px;
+}
+
+.wb-shell .ll-add-rung {
+  align-self: flex-start;
+  min-height: 44px;
+  padding-right: 18px;
+  background: transparent;
+  font-size: 13px;
+}
+
+.wb-shell .toast {
+  z-index: 120;
+}
+
+/* ------------------------------------------------------------ responsive */
+
+@media (max-width: 1180px) {
+  .wb-context-layer {
+    align-items: flex-end;
+  }
+
+  .wb-context-panel {
+    width: 100%;
+    height: min(78dvh, 660px);
+    border-top: 1px solid var(--control);
+    border-left: 0;
+    border-radius: 12px 12px 0 0;
+    box-shadow: 0 -18px 48px rgba(23, 27, 23, 0.15);
+  }
+}
+
+/* On a desktop the variable sheet docks beside the program instead of covering
+   it: the ladder stays fully readable, and the panel no longer behaves like a
+   modal (no scrim, no focus trap). */
+@media (min-width: 1025px) {
+  .wb-shell[data-inspector='open'] .wb-documentbar,
+  .wb-shell[data-inspector='open'] .wb-instruction-strip,
+  .wb-shell[data-inspector='open'] .wb-coach {
+    padding-right: 424px;
+  }
+
+  .wb-shell[data-inspector='open'] .wb-workbench {
+    padding-right: 400px;
+  }
+
+  .wb-context-layer {
+    top: 56px;
+    bottom: 34px;
+    left: auto;
+    width: 400px;
+    display: block;
+  }
+
+  .wb-context-scrim {
+    display: none;
+  }
+
+  .wb-context-panel {
+    width: 100%;
+    height: 100%;
+    border-top: 0;
+    border-left: 1px solid var(--border);
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  .wb-context-panel .inspector-mobile-head {
+    min-height: 52px;
+    border-bottom: 1px solid var(--rule);
+  }
+}
+
+/* Keep the common instructions legible when the variable sheet takes 400px.
+   Less frequent instructions stay available from the always-visible “all”
+   entry instead of leaving a half-clipped button at the right edge. */
+@media (min-width: 1025px) and (max-width: 1180px) {
+  .wb-shell[data-inspector='open'] .wb-instruction-intro {
+    display: none;
+  }
+
+  .wb-shell[data-inspector='open'] .wb-instruction-list {
+    gap: 5px;
+  }
+
+  .wb-shell[data-inspector='open'] .wb-instruction-list .wb-instruction-button {
+    padding-inline: 8px;
+  }
+
+  .wb-shell[data-inspector='open'] .wb-instruction-list .wb-instruction-symbol {
+    min-width: 36px;
+  }
+
+  .wb-shell[data-inspector='open'] .wb-instruction-list .wb-instruction-button:nth-child(n + 4) {
+    display: none;
+  }
+}
+
+@media (min-width: 1181px) and (max-width: 1359px) {
+  .wb-shell[data-inspector='open'] .wb-instruction-list {
+    gap: 5px;
+  }
+
+  .wb-shell[data-inspector='open'] .wb-instruction-list .wb-instruction-button {
+    padding-inline: 9px;
+  }
+
+  .wb-shell[data-inspector='open'] .wb-instruction-list .wb-instruction-symbol {
+    min-width: 38px;
+  }
+
+  .wb-shell[data-inspector='open'] .wb-instruction-list .wb-instruction-button:nth-child(5) {
+    display: none;
+  }
+}
+
+@media (max-width: 900px) {
+  .wb-documentbar {
+    padding: 0 18px;
+  }
+
+  .wb-instruction-strip {
+    gap: 12px;
+    padding: 9px 18px;
+  }
+
+  .wb-instruction-intro {
+    min-width: 0;
+  }
+
+  .wb-instruction-intro h2 {
+    font-size: 13px;
+  }
+
+  .wb-instruction-tools {
+    gap: 6px;
+  }
+
+  .wb-instruction-list {
+    gap: 5px;
+  }
+
+  .wb-instruction-button {
+    gap: 6px;
+    padding: 0 8px;
+    font-size: 12px;
+  }
+
+  .wb-instruction-symbol {
+    min-width: 32px;
+    padding: 0 3px;
+    font-size: 10.5px;
+  }
+
+  .wb-drag-mark {
+    display: none;
+  }
+
+  .wb-coach {
+    padding-inline: 18px;
+  }
+
+  .wb-coach-path {
+    gap: 14px;
+  }
+
+  .wb-program-pane {
+    padding: 18px 18px 28px;
+  }
+
+  .wb-statusbar.status-bar {
+    padding-inline: 18px;
+  }
+}
+
+@media (max-width: 720px) {
+  .wb-shell .wb-topbar {
+    gap: 10px;
+    padding: 0 16px;
+  }
+
+  .wb-brand-name {
+    display: none;
+  }
+
+  .wb-project-name {
+    flex: 1 1 auto;
+  }
+
+  .wb-project-name input {
+    height: 40px;
+    padding-inline: 6px;
+  }
+
+  .wb-project-button {
+    width: 42px;
+    height: 42px;
+    justify-content: center;
+    padding: 0;
+  }
+
+  .wb-project-button span {
+    display: none;
+  }
+
+  .wb-shell .wb-run-toggle {
+    min-width: 76px;
+    height: 42px;
+    padding-inline: 11px;
+  }
+
+  .wb-shell .wb-more .icon-button {
+    width: 42px;
+    height: 42px;
+  }
+
+  .wb-documentbar {
+    height: 54px;
+    flex-basis: 54px;
+    gap: 12px;
+    padding: 0 16px;
+  }
+
+  .wb-doc-tab {
+    height: 34px;
+  }
+
+  .wb-doc-tab h1 {
+    font-size: 15px;
+  }
+
+  .wb-doc-meta {
+    margin-left: auto;
+  }
+
+  .wb-doc-actions {
+    display: none;
+  }
+
+  .wb-instruction-strip {
+    display: none;
+  }
+
+  .wb-coach {
+    min-height: 0;
+    flex-wrap: wrap;
+    gap: 6px 12px;
+    padding: 9px 16px;
+    font-size: 12.5px;
+  }
+
+  .wb-coach-path {
+    width: 100%;
+    flex-wrap: wrap;
+    gap: 5px 12px;
+  }
+
+  .wb-coach-actions {
+    width: 100%;
+    justify-content: flex-end;
+  }
+
+  .wb-coach-demo,
+  .wb-coach-dismiss {
+    min-height: 40px;
+  }
+
+  .wb-program-pane {
+    padding: 14px 16px 24px;
+  }
+
+  .wb-program-inner {
+    gap: 9px;
+  }
+
+  .wb-statusbar.status-bar {
+    height: 30px;
+    flex-basis: 30px;
+    gap: 10px;
+    padding-inline: 16px;
+    font-size: 11.5px;
+  }
+
+  .wb-tabbar.mobile-tabbar {
+    position: relative;
+    z-index: 70;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    flex: 0 0 auto;
+    padding-bottom: env(safe-area-inset-bottom);
+    border-top: 1px solid var(--border);
+    background: var(--surface);
+  }
+
+  .wb-tabbar .mobile-tab-action {
+    min-height: 56px;
+  }
+
+  .wb-tabbar .mobile-tab-action.is-active {
+    border-top-color: var(--accent);
+    background: var(--accent-wash);
+    color: var(--accent-ink);
+  }
+
+  .wb-drawer-backdrop.is-left {
+    align-items: flex-end;
+  }
+
+  .wb-project-drawer {
+    width: 100%;
+    height: min(82dvh, 680px);
+    border-top: 1px solid var(--control);
+    border-right: 0;
+    border-radius: 12px 12px 0 0;
+    box-shadow: 0 -18px 48px rgba(23, 27, 23, 0.16);
+  }
+
+  .wb-instruction-drawer-backdrop {
+    align-items: flex-end;
+    padding: 0;
+  }
+
+  .wb-instruction-drawer-backdrop .project-sidebar {
+    width: 100%;
+    height: min(82dvh, 680px);
+    border-right: 0;
+    border-bottom: 0;
+    border-left: 0;
+    border-radius: 12px 12px 0 0;
+    box-shadow: 0 -18px 48px rgba(23, 27, 23, 0.16);
+  }
+
+  .wb-about-head {
+    padding: 19px 18px 15px;
+  }
+
+  .wb-about-list {
+    padding-inline: 18px;
+  }
+
+  .wb-about-note {
+    padding-inline: 18px;
+  }
+
+  .wb-shell .ll-rung-menu > summary {
+    width: 40px;
+    height: 40px;
+  }
+}
+
+@media (max-width: 480px) {
+  .wb-doc-meta {
+    font-size: 11.5px;
+  }
+
+  .wb-coach-path > span:first-child {
+    flex-basis: 100%;
+  }
+
+  .wb-project-actions button {
+    font-size: 11px;
+  }
+
+  .wb-about-list > div {
+    grid-template-columns: 46px minmax(0, 1fr);
+    gap: 10px;
+  }
+}
+
+@media (pointer: coarse) {
+  .wb-project-name input {
+    height: 44px;
+  }
+
+  .wb-shell .ll-rung-name {
+    min-height: 44px;
+  }
+
+  .wb-project-button,
+  .wb-shell .wb-run-toggle,
+  .wb-shell .wb-more .icon-button,
+  .wb-doc-action,
+  .wb-doc-actions .icon-button,
+  .wb-instruction-button,
+  .wb-coach-demo,
+  .wb-coach-dismiss,
+  .wb-help-links button,
+  .wb-compile-banner button {
+    min-height: 44px;
+  }
+
+  .sidebar-close,
+  .sidebar-add-rung {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  /* 触摸设备没有 hover，拖动手柄必须常显，否则无从发现。 */
+  .ll-node-grip {
+    opacity: 0.7;
+  }
+
+  .ll-rung-drag {
+    touch-action: none;
+  }
+}
+
+/* ================================================= simplification pass ===
+   Everything below tightens the first-run experience: one short coach line on
+   phones, a monitor-first variable sheet, 44px touch targets and a full-width
+   "add rung" row. Chrome stays quiet; the diagram keeps the weight. */
+
+/* -------------------------------------------------- coach, phone layout */
+
+.wb-coach-compact {
+  display: none;
+}
+
+@media (max-width: 720px) {
+  .wb-coach {
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px 6px 16px;
+  }
+
+  .wb-coach-path {
+    display: none;
+  }
+
+  .wb-coach-compact {
+    display: block;
+    min-width: 0;
+    flex: 1 1 auto;
+    margin: 0;
+    color: var(--accent-ink);
+    font-size: 11.5px;
+    line-height: 1.45;
+    letter-spacing: 0.005em;
+  }
+
+  .wb-coach-compact i {
+    padding: 0 3px;
+    color: color-mix(in srgb, var(--accent) 62%, transparent);
+    font-style: normal;
+  }
+
+  .wb-coach-actions {
+    width: auto;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: flex-end;
+    margin-left: 0;
+  }
+
+  .wb-coach-demo {
+    height: 44px;
+    min-height: 44px;
+    padding: 0 10px;
+    font-size: 12px;
+  }
+
+  .wb-coach-dismiss {
+    width: 44px;
+    min-width: 44px;
+    height: 44px;
+    min-height: 44px;
+    justify-content: center;
+    padding: 0;
+  }
+
+  .wb-coach-dismiss span {
+    display: none;
+  }
+}
+
+/* ------------------------------------------------ variables, phone sheet */
+
+.tags-monitor {
+  display: none;
+}
+
+@media (max-width: 1024px) {
+  /* The bottom sheet competes with the coaching strip; hide it while open. */
+  .app-shell[data-inspector="open"] .wb-coach {
+    display: none;
+  }
+}
+
+@media (max-width: 720px) {
+  /* Keep the bottom navigation reachable while a sheet is open. */
+  .wb-context-layer,
+  .wb-instruction-drawer-backdrop {
+    bottom: calc(56px + env(safe-area-inset-bottom));
+  }
+
+  .wb-context-panel {
+    height: min(58dvh, 520px);
+  }
+
+  .wb-context-scrim {
+    background: color-mix(in srgb, var(--frame-ink) 12%, transparent);
+  }
+
+  .tag-list {
+    display: none;
+  }
+
+  .tags-monitor {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .tag-monitor-card {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface);
+  }
+
+  .tag-monitor-card.is-expanded {
+    border-color: var(--control);
+  }
+
+  .tag-monitor-row {
+    display: grid;
+    min-height: 56px;
+    grid-template-columns: minmax(0, 1fr) 76px 52px;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 6px 4px 10px;
+  }
+
+  .tag-monitor-id {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 1px;
+  }
+
+  .tag-monitor-id strong {
+    overflow: hidden;
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 13px;
+    font-weight: 600;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .tag-monitor-id span {
+    overflow: hidden;
+    color: var(--faint);
+    font-family: var(--mono);
+    font-size: 10.5px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .tag-monitor-row .live-value {
+    width: 100%;
+    min-height: 44px;
+    font-size: 11.5px;
+  }
+
+  .tag-monitor-int {
+    width: 100%;
+    min-height: 44px;
+  }
+
+  .tag-monitor-edit {
+    min-height: 44px;
+    border: 1px solid transparent;
+    border-radius: 5px;
+    background: transparent;
+    color: var(--accent-ink);
+    font-size: 12px;
+  }
+
+  .tag-monitor-edit:hover {
+    border-color: var(--control);
+    background: var(--accent-wash);
+  }
+
+  .tag-monitor-editor {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    padding: 10px;
+    border-top: 1px solid var(--rule);
+  }
+
+  .tag-monitor-editor label {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 4px;
+    color: var(--faint);
+    font-size: 11px;
+  }
+
+  .tag-monitor-editor .table-input {
+    width: 100%;
+    min-height: 44px;
+  }
+
+  .tag-monitor-comment {
+    grid-column: 1 / -1;
+  }
+
+  .tag-monitor-actions {
+    display: flex;
+    grid-column: 1 / -1;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    color: var(--faint);
+    font-size: 11px;
+  }
+
+  .tag-monitor-delete {
+    min-height: 44px;
+    padding: 0 12px;
+    border: 1px solid color-mix(in srgb, var(--negative) 38%, transparent);
+    border-radius: 5px;
+    background: transparent;
+    color: var(--negative);
+    font-size: 12px;
+  }
+
+  .tag-monitor-delete:disabled {
+    border-color: var(--rule);
+    color: var(--faint);
+    opacity: 0.6;
+  }
+}
+
+/* -------------------------------------------------------- add-rung row */
+
+.wb-shell .ll-add-rung {
+  align-self: stretch;
+  width: 100%;
+  justify-content: center;
+  border-style: dashed;
+  background: transparent;
+  color: var(--muted);
+}
+
+.wb-shell .ll-add-rung:hover {
+  border-color: var(--accent);
+  background: var(--accent-wash);
+  color: var(--accent-ink);
+}
+
+/* --------------------------------------------------- touch ergonomics */
+
+@media (pointer: coarse) {
+  .wb-shell .wb-instruction-button:not(:disabled) {
+    touch-action: none;
+  }
+
+  .wb-shell .wb-project-button,
+  .wb-shell .wb-more .icon-button,
+  .wb-shell .wb-doc-actions .icon-button,
+  .wb-shell .wb-drawer-close,
+  .wb-shell .inspector-mobile-head .icon-button,
+  .wb-shell .qe-close,
+  .wb-shell .guide-close,
+  .wb-shell .library-close,
+  .wb-shell .icon-button {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .wb-shell .ll-rung-menu > summary {
+    width: 44px;
+    height: 44px;
+  }
+
+  .wb-shell .ll-rung-menu-panel button {
+    min-height: 44px;
+  }
+
+  .wb-shell .ll-add-rung {
+    min-height: 48px;
+  }
+
+  .wb-shell .delete-mini {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .wb-shell .table-input,
+  .wb-shell .qe-input,
+  .wb-shell .qe-segments button,
+  .wb-shell .qe-quiet,
+  .wb-shell .qe-danger,
+  .wb-shell .qe-chips button,
+  .wb-shell .guide-primary,
+  .wb-shell .guide-secondary,
+  .wb-shell .secondary-button,
+  .wb-shell .inspector-tabs button,
+  .wb-shell .wb-menu-group > button,
+  .wb-shell .wb-speed-row button,
+  .wb-shell .library-item,
+  .wb-shell .instruction-row {
+    min-height: 44px;
+  }
+}
+
+/* Drag handles must claim the gesture themselves: the node grip's hit rect is
+   the pointer target, and a coarse pointer otherwise pans the sheet instead. */
+.wb-shell .ll-drag-handle-hit {
+  touch-action: none;
+}
+
+/* Keep the touch origin mounted while a drag is in flight. The transparent
+   backdrop must not swallow the pointer that the canvas now needs. */
+.wb-instruction-drawer-backdrop.is-dragging {
+  opacity: 0;
+  pointer-events: none;
+}

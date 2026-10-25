@@ -12,7 +12,9 @@
 
 ## 令牌来源
 
-src/index.css 是唯一令牌源。新增界面直接使用其中的语义变量，不复制十六进制值。
+令牌分两层：`src/index.css` 定义基础语义变量，`src/Shell.css` 在工程工作台范围内覆盖
+与密度相关的值。当前界面实际生效的是后者，下表列出的是运行时取值。新增界面直接使用
+语义变量，不复制十六进制值。
 
 | 类别 | 来源令牌 | 使用方式 |
 | --- | --- | --- |
@@ -20,9 +22,9 @@ src/index.css 是唯一令牌源。新增界面直接使用其中的语义变量
 | 纸面色 | --surface、--raised、--active | 程序纸面、工具区和选中状态 |
 | 边界 | --border、--rule、--control | 框架分隔、纸面细线和可操作控件边界 |
 | 语义色 | --accent、--positive、--negative、--warning 及各 wash 色 | 主操作、能流与正常状态、故障、提醒 |
-| 圆角 | --radius-sheet: 16px、--radius-card: 8px、--radius-control: 6px | 纸面、内容区域与按钮/输入框 |
+| 圆角 | --radius-sheet: 10px、--radius-card: 6px、--radius-control: 5px（index.css 基础值为 16 / 8 / 6px） | 纸面、内容区域与按钮/输入框 |
 | 字体 | --sans、--mono | 界面文字使用 IBM Plex Sans；地址、数值、代码和诊断使用 IBM Plex Mono |
-| 间距 | --gap: 24px、--pad: 24px、--row-height: 48px、--control-height: 32px | 统一布局节奏、行高和控件高度 |
+| 间距 | --gap: 24px、--pad: 24px、--row-height: 42px、--control-height: 32px | 统一布局节奏、行高和控件高度 |
 
 字体文件位于 src/assets/fonts/，由 CSS 本地引用；拉丁字形使用 IBM Plex，中文回退到系统中文无衬线字体。OFL 许可证随字体文件保存。
 

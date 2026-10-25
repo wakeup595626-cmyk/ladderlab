@@ -17,15 +17,20 @@
   width: 100%;
   min-width: 0;
   max-width: 100%;
-  overflow: hidden;
+  overflow: visible;
   border: 1px solid var(--border);
   border-radius: var(--radius-card);
   background: var(--surface);
 }
 
 .ll-rung {
+  position: relative;
   min-width: 0;
   background: var(--surface);
+}
+
+.ll-rung:has(.ll-rung-menu[open]) {
+  z-index: 2;
 }
 
 .ll-rung + .ll-rung {
@@ -130,7 +135,7 @@
   align-items: center;
   gap: 5px;
   color: var(--muted);
-  font-size: 11px;
+  font-size: 12px;
   white-space: nowrap;
 }
 
@@ -152,18 +157,51 @@
   background: var(--positive);
 }
 
-.ll-rung-tools {
-  display: flex;
+.ll-rung-menu {
+  position: relative;
   flex: 0 0 auto;
-  gap: 2px;
-  padding: 2px;
-  border: 1px solid var(--border);
+}
+
+.ll-rung-menu > summary {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  color: var(--muted);
+  cursor: pointer;
+  list-style: none;
+}
+
+.ll-rung-menu > summary::-webkit-details-marker {
+  display: none;
+}
+
+.ll-rung-menu > summary:hover,
+.ll-rung-menu > summary:focus-visible,
+.ll-rung-menu[open] > summary {
+  border-color: var(--control);
+  background: var(--surface);
+  color: var(--accent-ink);
+  outline: none;
+}
+
+.ll-rung-menu-panel {
+  position: absolute;
+  z-index: 6;
+  top: calc(100% + 4px);
+  right: 0;
+  display: grid;
+  width: 144px;
+  padding: 4px;
+  border: 1px solid var(--control);
   border-radius: var(--radius-control);
   background: var(--surface);
 }
 
-.ll-rung-tools button,
-.ll-inline-actions button,
+.ll-rung-menu-panel button,
 .ll-add-rung,
 .ll-empty-board button {
   border: 1px solid transparent;
@@ -174,22 +212,15 @@
   cursor: pointer;
 }
 
-.ll-rung-tools button {
-  display: grid;
-  width: 30px;
-  height: 30px;
-  padding: 0;
-  place-items: center;
+.ll-rung-menu-panel button {
+  min-height: 36px;
+  padding: 6px 10px;
+  border: 0;
+  text-align: left;
 }
 
-.ll-rung-tools button svg {
-  pointer-events: none;
-}
-
-.ll-rung-tools button:hover:not(:disabled),
-.ll-rung-tools button:focus-visible:not(:disabled),
-.ll-inline-actions button:hover,
-.ll-inline-actions button:focus-visible,
+.ll-rung-menu-panel button:hover:not(:disabled),
+.ll-rung-menu-panel button:focus-visible:not(:disabled),
 .ll-add-rung:hover,
 .ll-add-rung:focus-visible,
 .ll-empty-board button:hover,
@@ -200,45 +231,20 @@
   outline: none;
 }
 
-.ll-rung-tools button:disabled {
+.ll-rung-menu-panel button:disabled {
   cursor: default;
   opacity: 0.34;
 }
 
-.ll-rung-tools button.is-danger:hover,
-.ll-rung-tools button.is-danger:focus-visible,
-.ll-inline-actions button.is-danger:hover,
-.ll-inline-actions button.is-danger:focus-visible {
-  border-color: var(--negative);
-  background: var(--negative-wash);
+.ll-rung-menu-panel button.is-danger {
   color: var(--negative);
 }
 
-.ll-inline-actions {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 7px;
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--border);
-  background: var(--accent-wash);
-  color: var(--muted);
-  font-size: 11px;
-}
-
-.ll-inline-actions > span {
-  margin-right: auto;
-  color: var(--accent-ink);
-  font-weight: 600;
-}
-
-.ll-inline-actions button {
-  min-height: 32px;
-  padding: 4px 10px;
-  border-color: var(--control);
-  background: var(--surface);
-  color: var(--accent-ink);
-  font-size: 12px;
+.ll-rung-menu-panel button.is-danger:hover,
+.ll-rung-menu-panel button.is-danger:focus-visible {
+  border-color: var(--negative);
+  background: var(--negative-wash);
+  color: var(--negative);
 }
 
 .ll-svg-scroll {
@@ -266,15 +272,6 @@
   border: 2px solid var(--raised);
   border-radius: 999px;
   background: var(--control);
-}
-
-.ll-scroll-note {
-  display: none;
-  margin: 0;
-  padding: 2px 12px 7px;
-  color: var(--faint);
-  font-size: 11px;
-  text-align: right;
 }
 
 .ll-diagram {
@@ -407,14 +404,6 @@
 .ll-output-address {
   fill: var(--muted);
   font-family: var(--mono);
-  font-size: 11px;
-  pointer-events: none;
-}
-
-.ll-node-comment,
-.ll-output-comment {
-  fill: var(--muted);
-  font-family: var(--sans);
   font-size: 11px;
   pointer-events: none;
 }
@@ -665,35 +654,12 @@
     gap: 4px;
   }
 
-  .ll-rung-tools {
-    padding: 1px;
-  }
-
-  .ll-rung-tools button {
-    width: 28px;
-    height: 30px;
-  }
-
-  .ll-inline-actions {
-    padding: 8px 10px;
-  }
-
-  .ll-inline-actions > span {
-    width: 100%;
-  }
-
-  .ll-scroll-note {
-    display: block;
-  }
-
   .ll-node-name,
   .ll-output-name,
   .ll-compare-value,
   .ll-edge-mark,
   .ll-node-address,
   .ll-output-address,
-  .ll-node-comment,
-  .ll-output-comment,
   .ll-box-title,
   .ll-pin-label,
   .ll-box-data,
@@ -719,38 +685,17 @@
     height: 44px;
   }
 
-  .ll-rung-tools button {
+  .ll-rung-menu > summary {
     width: 44px;
     height: 44px;
   }
 
-  .ll-inline-actions button,
   .ll-add-rung,
   .ll-empty-board button {
     min-height: 44px;
   }
 
-  .ll-inline-actions button {
-    padding: 8px 14px;
-  }
-
   .ll-node-grip {
     opacity: 0.55;
-  }
-}
-
-@media (max-width: 720px) and (pointer: coarse) {
-  .ll-rung-header {
-    flex-wrap: wrap;
-    align-items: flex-start;
-  }
-
-  .ll-rung-title {
-    flex-basis: calc(100% - 8px);
-  }
-
-  .ll-rung-header-right {
-    width: 100%;
-    justify-content: flex-end;
   }
 }

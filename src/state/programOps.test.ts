@@ -6,6 +6,7 @@ import {
   moveNode,
   moveNodeBy,
   moveRungTo,
+  pickDefaultTag,
 } from './programOps'
 import type {
   ContactKind,
@@ -196,6 +197,35 @@ describe('programOps 拖放操作', () => {
     expect(ordinary.program.tags.filter((item) => item.kind === 'BOOL')).toHaveLength(1)
     expect(ordinary.node.kind).toBe('NO')
     expect(ordinary.node.tag).toBe(ordinary.program.tags.find((item) => item.kind === 'BOOL')?.name)
+  })
+
+  it('pickDefaultTag 只返回尚未被引用的同类变量', () => {
+    const tags = [tag('Start'), tag('Stop'), tag('Motor')]
+    const source = program(
+      [rung('r1', [contact('a', 'Start')])],
+      tags,
+    )
+
+    expect(pickDefaultTag(source, 'BOOL')?.name).toBe('Stop')
+    expect(pickDefaultTag(source, 'INT')).toBeUndefined()
+
+    const allUsed = program(
+      [rung('r1', [contact('a', 'Start'), contact('b', 'Stop'), contact('c', 'Motor')])],
+      tags,
+    )
+    expect(pickDefaultTag(allUsed, 'BOOL')).toBeUndefined()
+  })
+
+  it('makeContactNode 在同类变量全部占用时新建变量而不是重复引用', () => {
+    const source = program(
+      [rung('r1', [contact('a', 'Start'), contact('b', 'Stop')])],
+      [tag('Start'), tag('Stop')],
+    )
+
+    const made = makeContactNode(source, 'NO')
+    expect(made.program.tags).toHaveLength(3)
+    expect(made.node.tag).toBe('Tag1')
+    expect(made.program.tags.filter((item) => item.name === made.node.tag)).toHaveLength(1)
   })
 
   it('insertContactAt 使用新建触点并插到指定位置', () => {

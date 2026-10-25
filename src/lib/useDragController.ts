@@ -15,6 +15,10 @@ export interface DragController {
   start: (event: ReactPointerEvent, payload: DragPayload, label: string) => void
 }
 
+export interface DragControllerOptions {
+  onDragStart?: () => void
+}
+
 interface PendingDrag {
   payload: DragPayload
   label: string
@@ -33,17 +37,25 @@ function targetKey(target: DropTarget | null): string {
  * 统一的鼠标 / 触控拖放内核。拖动超过 6px 才真正开始，单击仍然保留原有行为；
  * 投放点由画布上的 data-drop 属性声明，因而侧栏、程序块和网络头可以共用一个控制器。
  */
-export function useDragController(onDrop: (payload: DragPayload, target: DropTarget) => void): DragController {
+export function useDragController(
+  onDrop: (payload: DragPayload, target: DropTarget) => void,
+  options: DragControllerOptions = {},
+): DragController {
   const [drag, setDrag] = useState<DragViewState | null>(null)
   const [target, setTarget] = useState<DropTarget | null>(null)
   const pendingRef = useRef<PendingDrag | null>(null)
   const targetRef = useRef<DropTarget | null>(null)
   const onDropRef = useRef(onDrop)
+  const onDragStartRef = useRef(options.onDragStart)
   const cleanupRef = useRef<(() => void) | null>(null)
 
   useEffect(() => {
     onDropRef.current = onDrop
   }, [onDrop])
+
+  useEffect(() => {
+    onDragStartRef.current = options.onDragStart
+  }, [options.onDragStart])
 
   const finish = useCallback((commit: boolean) => {
     const pending = pendingRef.current
@@ -91,23 +103,56 @@ export function useDragController(onDrop: (payload: DragPayload, target: DropTar
     const move = (native: PointerEvent) => {
       const current = pendingRef.current
       if (!current || native.pointerId !== current.pointerId) return
-      const dx = native.clientX - current.startX
-      const dy = native.clientY - current.startY
+      // Touch has its own non-passive listener below: SVG children do not
+      // honour touch-action in Chromium, so the browser would cancel the
+      // pointer as soon as the finger starts panning the sheet.
+      if (current.touch) return
+      native.preventDefault()
+      updateFromPoint(native.clientX, native.clientY)
+    }
+
+    // A drawer may still be unmounting on the first move. Walk the visual
+    // stack so the canvas below it can become a valid drop target at once.
+    const updateFromPoint = (x: number, y: number) => {
+      const current = pendingRef.current
+      if (!current) return
+      const dx = x - current.startX
+      const dy = y - current.startY
       if (!current.active) {
         if (Math.hypot(dx, dy) < 6) return
         current.active = true
+        onDragStartRef.current?.()
         document.body.dataset.dragKind = current.payload.type
       }
-      native.preventDefault()
-      setDrag({ payload: current.payload, label: current.label, x: native.clientX, y: native.clientY })
-      const hit = document.elementFromPoint(native.clientX, native.clientY)
-      const drop = hit instanceof Element ? hit.closest('[data-drop]') : null
-      // SVG <g> 与 HTML 元素都可能承载投放点，用 getAttribute 同时兼容两者。
+      setDrag({ payload: current.payload, label: current.label, x, y })
+      const hit = document.elementsFromPoint(x, y)
+        .map((element) => element.closest('[data-drop]'))
+        .find((element): element is Element => element instanceof Element)
+      const drop = hit ?? null
       const next = parseDropTarget(drop?.getAttribute('data-drop') ?? null)
       if (targetKey(next) !== targetKey(targetRef.current)) {
         targetRef.current = next
         setTarget(next)
       }
+    }
+
+    const touchMove = (native: TouchEvent) => {
+      if (!pendingRef.current) return
+      const point = native.touches[0]
+      if (!point) return
+      // The gesture belongs to the drag handle: keep the page still.
+      native.preventDefault()
+      updateFromPoint(point.clientX, point.clientY)
+    }
+
+    const touchEnd = (native: TouchEvent) => {
+      if (native.touches.length > 0) return
+      finish(true)
+    }
+
+    const touchCancel = (native: TouchEvent) => {
+      if (native.touches.length > 0) return
+      finish(false)
     }
 
     const up = (native: PointerEvent) => {
@@ -117,6 +162,9 @@ export function useDragController(onDrop: (payload: DragPayload, target: DropTar
 
     const cancel = (native: PointerEvent) => {
       if (native.pointerId !== pending.pointerId) return
+      // Touch drags are driven by touch events; a pointercancel here only
+      // means Chromium started (and we stopped) a pan.
+      if (pending.touch) return
       finish(false)
     }
 
@@ -126,14 +174,21 @@ export function useDragController(onDrop: (payload: DragPayload, target: DropTar
     window.addEventListener('pointerup', up)
     window.addEventListener('pointercancel', cancel)
     window.addEventListener('blur', blur)
+    if (pending.touch) {
+      window.addEventListener('touchmove', touchMove, { passive: false })
+      window.addEventListener('touchend', touchEnd)
+      window.addEventListener('touchcancel', touchCancel)
+    }
     cleanupRef.current = () => {
       window.removeEventListener('pointermove', move)
       window.removeEventListener('pointerup', up)
       window.removeEventListener('pointercancel', cancel)
       window.removeEventListener('blur', blur)
+      window.removeEventListener('touchmove', touchMove)
+      window.removeEventListener('touchend', touchEnd)
+      window.removeEventListener('touchcancel', touchCancel)
     }
 
-    if (touch) event.preventDefault()
   }, [finish])
 
   useEffect(() => () => finish(false), [finish])

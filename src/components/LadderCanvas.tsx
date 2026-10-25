@@ -15,11 +15,8 @@ import type {
 } from '../engine/types'
 import type { DragPayload, DropTarget } from '../lib/dragTypes'
 import {
-  ArrowDownIcon,
-  ArrowUpIcon,
-  CopyIcon,
   GripIcon,
-  TrashIcon,
+  MoreIcon,
 } from './Icons'
 import './LadderCanvas.css'
 
@@ -28,12 +25,10 @@ export interface LadderCanvasProps {
   runtime: Runtime
   selection: Selection | null
   onSelect: (selection: Selection) => void
-  onDeleteNode: (rungId: string, path: number[]) => void
-  onWrapParallel: (rungId: string, path: number[]) => void
-  onCollapseParallel: (rungId: string, path: number[]) => void
   onDuplicateRung: (rungId: string) => void
   onDeleteRung: (rungId: string) => void
   onMoveRung: (rungId: string, delta: -1 | 1) => void
+  onMoveNode: (rungId: string, path: number[], delta: -1 | 1) => void
   onAddRung: () => void
   dragTarget?: DropTarget | null
   isDragging?: boolean
@@ -59,8 +54,10 @@ interface DrawContext {
   dragTarget: DropTarget | null
   dragSource: string | null
   rungId: string
+  metrics: LadderMetrics
   onSelect: (selection: Selection) => void
   onEdit?: (selection: Selection, anchor: DOMRect) => void
+  onMoveNode: (rungId: string, path: number[], delta: -1 | 1) => void
   beginDrag: (
     event: ReactPointerEvent<SVGGElement>,
     payload: DragPayload,
@@ -69,27 +66,102 @@ interface DrawContext {
   ) => void
 }
 
-const SLOT_W = 22
-const CONTACT_W = 132
-const CONTACT_H = 92
-const CONTACT_LINE_Y = 50
-const COMPARE_W = 180
-const COIL_W = 112
-const COIL_H = 92
-const COIL_LINE_Y = 50
-const BOX_W = 236
-const BOX_H = 168
-const BOX_LINE_Y = 80
-const EMPTY_CHAIN_W = 150
-const EMPTY_CHAIN_H = 92
-const EMPTY_CHAIN_LINE_Y = 50
-const PARALLEL_GUTTER = 10
-const PARALLEL_GAP = 8
-const PROGRAM_MIN_W = 720
-const RAIL_LEFT = 18
-const RAIL_RIGHT = 18
-const CHAIN_LEFT = 42
-const CHAIN_TO_OUTPUT = 36
+interface LadderMetrics {
+  slotW: number
+  contactW: number
+  contactH: number
+  contactLineY: number
+  compareW: number
+  coilW: number
+  coilH: number
+  coilLineY: number
+  boxW: number
+  boxH: number
+  boxLineY: number
+  emptyChainW: number
+  emptyChainH: number
+  emptyChainLineY: number
+  parallelGutter: number
+  parallelGap: number
+  minWidth: number
+  railLeft: number
+  railRight: number
+  chainLeft: number
+  chainToOutput: number
+  outputToRail: number
+  nameChars: number
+  addressChars: number
+  boxChars: number
+}
+
+/* Vertical rhythm is shared by both densities so labels never collide; only the
+   horizontal footprint and the number of visible characters change on phones. */
+const DEFAULT_METRICS: LadderMetrics = {
+  slotW: 22,
+  contactW: 132,
+  contactH: 92,
+  contactLineY: 50,
+  compareW: 180,
+  coilW: 112,
+  coilH: 92,
+  coilLineY: 50,
+  boxW: 236,
+  boxH: 168,
+  boxLineY: 80,
+  emptyChainW: 150,
+  emptyChainH: 92,
+  emptyChainLineY: 50,
+  parallelGutter: 10,
+  parallelGap: 8,
+  minWidth: 600,
+  railLeft: 18,
+  railRight: 18,
+  chainLeft: 42,
+  chainToOutput: 36,
+  outputToRail: 42,
+  nameChars: 16,
+  addressChars: 18,
+  boxChars: 28,
+}
+
+const COMPACT_METRICS: LadderMetrics = {
+  slotW: 12,
+  contactW: 86,
+  contactH: 92,
+  contactLineY: 50,
+  compareW: 128,
+  coilW: 80,
+  coilH: 92,
+  coilLineY: 50,
+  boxW: 168,
+  boxH: 168,
+  boxLineY: 80,
+  emptyChainW: 92,
+  emptyChainH: 92,
+  emptyChainLineY: 50,
+  parallelGutter: 7,
+  parallelGap: 6,
+  minWidth: 312,
+  railLeft: 6,
+  railRight: 6,
+  chainLeft: 14,
+  chainToOutput: 10,
+  outputToRail: 12,
+  nameChars: 10,
+  addressChars: 12,
+  boxChars: 18,
+}
+
+/* The standard sheet needs about 600px for a two-contact rung plus its coil.
+   Below that the compact sheet is used, so density changes exactly when the
+   tighter drawing starts to fit and no single-pixel jump forces a scrollbar. */
+const STANDARD_SHEET_WIDTH = 600
+
+function metricsFor(availableWidth: number): LadderMetrics {
+  return availableWidth > 0 && availableWidth < STANDARD_SHEET_WIDTH
+    ? COMPACT_METRICS
+    : DEFAULT_METRICS
+}
 
 const CONTACT_LABELS: Record<ContactNode['kind'], string> = {
   NO: '常开触点',
@@ -115,26 +187,26 @@ const OUTPUT_LABELS: Record<OutputElement['kind'], string> = {
   PATTERN: '教学灯字序列',
 }
 
-function contactSize(node: ContactNode): Size {
+function contactSize(node: ContactNode, m: LadderMetrics): Size {
   return {
-    width: node.kind === 'CMP' ? COMPARE_W : CONTACT_W,
-    height: CONTACT_H,
-    lineY: CONTACT_LINE_Y,
+    width: node.kind === 'CMP' ? m.compareW : m.contactW,
+    height: m.contactH,
+    lineY: m.contactLineY,
   }
 }
 
-function outputSize(output: OutputElement): Size {
+function outputSize(output: OutputElement, m: LadderMetrics): Size {
   return output.kind === 'COIL' || output.kind === 'SET' || output.kind === 'RESET'
-    ? { width: COIL_W, height: COIL_H, lineY: COIL_LINE_Y }
-    : { width: BOX_W, height: BOX_H, lineY: BOX_LINE_Y }
+    ? { width: m.coilW, height: m.coilH, lineY: m.coilLineY }
+    : { width: m.boxW, height: m.boxH, lineY: m.boxLineY }
 }
 
-function measureChain(chain: LadderNode[]): Size {
+function measureChain(chain: LadderNode[], m: LadderMetrics): Size {
   if (chain.length === 0) {
     return {
-      width: EMPTY_CHAIN_W,
-      height: EMPTY_CHAIN_H,
-      lineY: EMPTY_CHAIN_LINE_Y,
+      width: m.emptyChainW,
+      height: m.emptyChainH,
+      lineY: m.emptyChainLineY,
     }
   }
 
@@ -142,35 +214,35 @@ function measureChain(chain: LadderNode[]): Size {
   let top = 0
   let bottom = 0
   for (const node of chain) {
-    const size = measureNode(node)
+    const size = measureNode(node, m)
     nodeWidth += size.width
     top = Math.max(top, size.lineY)
     bottom = Math.max(bottom, size.height - size.lineY)
   }
 
   return {
-    width: SLOT_W * (chain.length + 1) + nodeWidth,
+    width: m.slotW * (chain.length + 1) + nodeWidth,
     height: top + bottom,
     lineY: top,
   }
 }
 
-function measureNode(node: LadderNode): Size {
-  if (node.type === 'contact') return contactSize(node)
+function measureNode(node: LadderNode, m: LadderMetrics): Size {
+  if (node.type === 'contact') return contactSize(node, m)
   if (node.branches.length === 0) {
     return {
-      width: EMPTY_CHAIN_W + PARALLEL_GUTTER * 2,
-      height: EMPTY_CHAIN_H,
-      lineY: EMPTY_CHAIN_LINE_Y,
+      width: m.emptyChainW + m.parallelGutter * 2,
+      height: m.emptyChainH,
+      lineY: m.emptyChainLineY,
     }
   }
 
-  const branches = node.branches.map(measureChain)
+  const branches = node.branches.map((branch) => measureChain(branch, m))
   return {
-    width: Math.max(...branches.map((branch) => branch.width)) + PARALLEL_GUTTER * 2,
+    width: Math.max(...branches.map((branch) => branch.width)) + m.parallelGutter * 2,
     height:
       branches.reduce((total, branch) => total + branch.height, 0)
-      + PARALLEL_GAP * (branches.length - 1),
+      + m.parallelGap * (branches.length - 1),
     lineY: branches[0].lineY,
   }
 }
@@ -206,6 +278,10 @@ function tagDetails(tags: TagDef[], reference: string) {
     comment: tag?.comment || '未填写注释',
     kind: tag?.kind ?? '—',
   }
+}
+
+function visibleAddress(name: string, address: string): string | null {
+  return address.replace(/^%/, '') === name ? null : address
 }
 
 function formatTime(value: number): string {
@@ -250,6 +326,16 @@ function slotMatches(
     && pathsEqual(target.chain, chain)
 }
 
+function nodeMatches(
+  target: DropTarget | null,
+  rungId: string,
+  path: number[],
+): boolean {
+  return target?.type === 'node'
+    && target.rungId === rungId
+    && pathsEqual(target.path, path)
+}
+
 function renderSlot(
   context: DrawContext,
   chain: number[],
@@ -257,6 +343,7 @@ function renderSlot(
   lineY: number,
   powered: boolean,
 ): ReactNode {
+  const slotW = context.metrics.slotW
   const target: DropTarget = {
     type: 'slot',
     rungId: context.rungId,
@@ -277,24 +364,24 @@ function renderSlot(
         className="ll-slot-hit"
         x="0"
         y={lineY - 22}
-        width={SLOT_W}
+        width={slotW}
         height="44"
       />
       <rect
         className="ll-slot-wide-hit"
-        x={SLOT_W / -2}
+        x={slotW / -2}
         y={lineY - 22}
-        width={SLOT_W * 2}
+        width={slotW * 2}
         height="44"
       />
       <line
         className={'ll-wire' + (powered ? ' is-on' : '')}
         x1="0"
         y1={lineY}
-        x2={SLOT_W}
+        x2={slotW}
         y2={lineY}
       />
-      <g className="ll-slot-plus" transform={'translate(' + SLOT_W / 2 + ' ' + lineY + ')'}>
+      <g className="ll-slot-plus" transform={'translate(' + slotW / 2 + ' ' + lineY + ')'}>
         <rect x="-8" y="-8" width="16" height="16" rx="3" />
         <path d="M -5 0 H 5 M 0 -5 V 5" />
       </g>
@@ -309,6 +396,7 @@ function renderNodeGrip(width: number, height: number) {
     <g className="ll-node-grip" data-drag-handle aria-hidden="true">
       <rect
         className="ll-drag-handle-hit"
+        style={{ touchAction: 'none' }}
         x={width - 44}
         y="0"
         width="44"
@@ -339,14 +427,18 @@ function renderContact(
   path: number[],
   incomingPower: boolean,
 ): ReactNode {
-  const size = contactSize(node)
+  const m = context.metrics
+  const size = contactSize(node, m)
   const selected = isSelected(context, path)
   const powered = context.runtime.nodePower[node.id] === true
   const details = tagDetails(context.tags, node.tag)
+  const address = visibleAddress(details.name, details.address)
   const centerX = size.width / 2
   const selection = { rungId: context.rungId, path }
   const sourceKey = 'node:' + context.rungId + ':' + path.join('.')
   const source = context.dragSource === sourceKey
+  const nodeTarget: DropTarget = { type: 'node', rungId: context.rungId, path }
+  const dropActive = !source && nodeMatches(context.dragTarget, context.rungId, path)
 
   return (
     <g
@@ -357,21 +449,32 @@ function renderContact(
         powered ? 'is-powered' : '',
         selected ? 'is-selected' : '',
         source ? 'is-drag-source' : '',
+        dropActive ? 'is-drop-target' : '',
       ].filter(Boolean).join(' ')}
+      data-drop={JSON.stringify(nodeTarget)}
       role="button"
       tabIndex={0}
       aria-label={
         CONTACT_LABELS[node.kind] + '，' + details.name + '，'
         + details.address + '，点击编辑'
       }
+      aria-keyshortcuts="ArrowLeft ArrowRight"
+      data-node-id={node.id}
       onClick={(event) => {
         event.stopPropagation()
         selectAndEdit(context, selection, event.currentTarget)
       }}
-      onKeyDown={(event) => activateWithKeyboard(
-        event,
-        () => selectAndEdit(context, selection, event.currentTarget),
-      )}
+      onKeyDown={(event) => {
+        if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+          event.preventDefault()
+          context.onMoveNode(context.rungId, path, event.key === 'ArrowLeft' ? -1 : 1)
+          return
+        }
+        activateWithKeyboard(
+          event,
+          () => selectAndEdit(context, selection, event.currentTarget),
+        )
+      }}
       onPointerDown={(event) => {
         event.stopPropagation()
         context.beginDrag(
@@ -396,11 +499,11 @@ function renderContact(
       />
       <path
         className={'ll-wire ll-wire-in' + (incomingPower ? ' is-on' : '')}
-        d={'M 0 ' + CONTACT_LINE_Y + ' H ' + (centerX - 10)}
+        d={'M 0 ' + m.contactLineY + ' H ' + (centerX - 10)}
       />
       <path
         className={'ll-wire ll-wire-out' + (powered ? ' is-on' : '')}
-        d={'M ' + (centerX + 10) + ' ' + CONTACT_LINE_Y + ' H ' + size.width}
+        d={'M ' + (centerX + 10) + ' ' + m.contactLineY + ' H ' + size.width}
       />
 
       {node.kind === 'CMP' ? (
@@ -419,7 +522,7 @@ function renderContact(
             y="55"
             textAnchor="middle"
           >
-            {shorten(node.tag || '未绑定', 10) + ' '
+            {shorten(node.tag || '未绑定', m.nameChars - 2) + ' '
               + (node.compare?.op ?? '>=') + ' '
               + (node.compare?.value ?? 0)}
           </text>
@@ -463,14 +566,13 @@ function renderContact(
       )}
 
       <text className="ll-node-name" x={centerX} y="15" textAnchor="middle">
-        {shorten(details.name, 16)}
+        {shorten(details.name, m.nameChars)}
       </text>
-      <text className="ll-node-address" x={centerX} y="29" textAnchor="middle">
-        {shorten(details.address, 18)}
-      </text>
-      <text className="ll-node-comment" x={centerX} y="83" textAnchor="middle">
-        {shorten(details.comment, 22)}
-      </text>
+      {address && (
+        <text className="ll-node-address" x={centerX} y="29" textAnchor="middle">
+          {shorten(address, m.addressChars)}
+        </text>
+      )}
       {renderNodeGrip(size.width, size.height)}
       <rect
         className="ll-selection-box"
@@ -510,7 +612,8 @@ function renderChain(
   chainPath: number[],
   incomingPower: boolean,
 ): ReactNode {
-  const size = measureChain(chain)
+  const m = context.metrics
+  const size = measureChain(chain, m)
 
   if (chain.length === 0) {
     return (
@@ -530,13 +633,13 @@ function renderChain(
         {renderSlot(context, chainPath, index, size.lineY, currentPower)}
       </g>,
     )
-    cursorX += SLOT_W
+    cursorX += m.slotW
 
-    const nodeSize = measureNode(node)
+    const nodeSize = measureNode(node, m)
     const nodeY = size.lineY - nodeSize.lineY
     parts.push(
       <g
-        key={node.id + '-node-' + index}
+        key={node.id}
         transform={'translate(' + cursorX + ', ' + nodeY + ')'}
       >
         {renderNode(node, context, [...chainPath, index], currentPower)}
@@ -560,14 +663,16 @@ function renderOutput(
   context: DrawContext,
   rungId: string,
 ): ReactNode {
-  const size = outputSize(output)
+  const m = context.metrics
+  const size = outputSize(output, m)
   const selected = isSelected(context, null)
   const powered = context.runtime.outputPower[output.id] === true
   const q = readOutputQ(output, context.runtime)
   const details = tagDetails(context.tags, output.tag)
+  const address = visibleAddress(details.name, details.address)
   const isCoil = output.kind === 'COIL' || output.kind === 'SET' || output.kind === 'RESET'
   const isTimer = output.kind === 'TON' || output.kind === 'TOF' || output.kind === 'TONR'
-  const centerY = isCoil ? COIL_LINE_Y : BOX_LINE_Y
+  const centerY = isCoil ? m.coilLineY : m.boxLineY
   const symbolX = size.width / 2
   const boxTop = 34
   const boxHeight = 124
@@ -587,6 +692,7 @@ function renderOutput(
         isDropTarget ? 'is-drop-target' : '',
       ].filter(Boolean).join(' ')}
       data-drop={JSON.stringify({ type: 'output', rungId })}
+      data-output-id={output.id}
       role="button"
       tabIndex={0}
       aria-label={
@@ -644,23 +750,22 @@ function renderOutput(
             {output.kind === 'SET' ? 'S' : output.kind === 'RESET' ? 'R' : ''}
           </text>
           <text className="ll-output-name" x={symbolX} y="14" textAnchor="middle">
-            {shorten(details.name, 16)}
+            {shorten(details.name, m.nameChars)}
           </text>
-          <text className="ll-output-address" x={symbolX} y="28" textAnchor="middle">
-            {shorten(details.address, 18)}
-          </text>
-          <text className="ll-output-comment" x={symbolX} y="84" textAnchor="middle">
-            {shorten(details.comment, 20)}
-          </text>
+          {address && (
+            <text className="ll-output-address" x={symbolX} y="28" textAnchor="middle">
+              {shorten(address, m.addressChars)}
+            </text>
+          )}
         </g>
       ) : (
         <g>
           <text className="ll-output-name" x={symbolX} y="14" textAnchor="middle">
-            {shorten(isTimer || output.kind === 'CTU' ? output.tag : details.name, 28)}
+            {shorten(isTimer || output.kind === 'CTU' ? output.tag : details.name, m.boxChars)}
           </text>
-          {!isTimer && output.kind !== 'CTU' && (
+          {!isTimer && output.kind !== 'CTU' && address && (
             <text className="ll-output-address" x={symbolX} y="27" textAnchor="middle">
-              {shorten(details.address, 28)}
+              {shorten(address, m.boxChars)}
             </text>
           )}
           <path
@@ -752,7 +857,7 @@ function renderOutput(
                 y={centerY + 22}
                 textAnchor="end"
               >
-                {shorten(output.pulseTag || '—', 11)}
+                {shorten(output.pulseTag || '—', m.nameChars - 2)}
               </text>
               <text className="ll-box-data" x="25" y={centerY + 43}>NEXT</text>
               <text
@@ -815,37 +920,17 @@ function renderOutput(
   )
 }
 
-function findSelectedNode(
+function measureRung(
   rung: Program['rungs'][number],
-  selection: Selection | null,
-): LadderNode | null {
-  if (!selection || selection.rungId !== rung.id || selection.path === null) return null
-  let chain = rung.nodes
-  let node: LadderNode | null = null
-  for (let index = 0; index < selection.path.length; index += 2) {
-    node = chain[selection.path[index]] ?? null
-    if (!node) return null
-    if (index + 1 < selection.path.length) {
-      if (node.type !== 'parallel') return null
-      chain = node.branches[selection.path[index + 1]] ?? []
-    }
-  }
-  return node
-}
-
-function describeNode(node: LadderNode): string {
-  return node.type === 'contact'
-    ? CONTACT_LABELS[node.kind] + ' · ' + (node.tag || '未绑定')
-    : '并联分支 · ' + node.branches.length + ' 条支路'
-}
-
-function measureRung(rung: Program['rungs'][number], availableWidth: number) {
-  const chain = measureChain(rung.nodes)
-  const output = outputSize(rung.output)
-  const chainX = RAIL_LEFT + CHAIN_LEFT
-  const naturalWidth = chainX + chain.width + CHAIN_TO_OUTPUT
-    + output.width + 42 + RAIL_RIGHT
-  const width = Math.max(PROGRAM_MIN_W, naturalWidth, Math.ceil(availableWidth))
+  availableWidth: number,
+  m: LadderMetrics,
+) {
+  const chain = measureChain(rung.nodes, m)
+  const output = outputSize(rung.output, m)
+  const chainX = m.railLeft + m.chainLeft
+  const naturalWidth = chainX + chain.width + m.chainToOutput
+    + output.width + m.outputToRail + m.railRight
+  const width = Math.max(m.minWidth, naturalWidth, Math.ceil(availableWidth))
   const top = Math.max(chain.lineY, output.lineY)
   const bottom = Math.max(chain.height - chain.lineY, output.height - output.lineY)
   const height = top + bottom + 22
@@ -854,7 +939,7 @@ function measureRung(rung: Program['rungs'][number], availableWidth: number) {
     chain,
     output,
     chainX,
-    outputX: width - RAIL_RIGHT - 42 - output.width,
+    outputX: width - m.railRight - m.outputToRail - output.width,
     width,
     naturalWidth,
     height,
@@ -864,14 +949,53 @@ function measureRung(rung: Program['rungs'][number], availableWidth: number) {
   }
 }
 
+function collectNodeIds(nodes: LadderNode[]): string[] {
+  return nodes.flatMap((node) => (
+    node.type === 'contact'
+      ? [node.id]
+      : [node.id, ...node.branches.flatMap(collectNodeIds)]
+  ))
+}
+
+/** 插入后把新元件和输出一起带入视野，窄屏下不会只露出元件的一半。 */
+function revealInserted(
+  container: HTMLDivElement,
+  target: Element,
+  companion: Element | null,
+) {
+  const box = container.getBoundingClientRect()
+  const targetBox = target.getBoundingClientRect()
+  const companionBox = companion?.getBoundingClientRect()
+  const padding = 14
+  const left = companionBox ? Math.min(targetBox.left, companionBox.left) : targetBox.left
+  const right = companionBox ? Math.max(targetBox.right, companionBox.right) : targetBox.right
+  let desired = container.scrollLeft
+
+  if (right - left <= box.width - padding * 2) {
+    desired += (left + right) / 2 - (box.left + box.width / 2)
+  } else if (
+    targetBox.right > box.right - padding
+    || targetBox.left < box.left + padding
+  ) {
+    desired += (targetBox.left + targetBox.right) / 2 - (box.left + box.width / 2)
+  }
+
+  const maxScroll = Math.max(0, container.scrollWidth - container.clientWidth)
+  const next = Math.max(0, Math.min(maxScroll, Math.round(desired)))
+  if (Math.abs(next - container.scrollLeft) < 2) return
+  container.scrollTo({
+    left: next,
+    behavior: window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+      ? 'auto'
+      : 'smooth',
+  })
+}
+
 interface RungSectionProps {
   rung: Program['rungs'][number]
   index: number
   total: number
   context: DrawContext
-  onDeleteNode: (rungId: string, path: number[]) => void
-  onWrapParallel: (rungId: string, path: number[]) => void
-  onCollapseParallel: (rungId: string, path: number[]) => void
   onDuplicateRung: (rungId: string) => void
   onDeleteRung: (rungId: string) => void
   onMoveRung: (rungId: string, delta: -1 | 1) => void
@@ -883,9 +1007,6 @@ function RungSection({
   index,
   total,
   context,
-  onDeleteNode,
-  onWrapParallel,
-  onCollapseParallel,
   onDuplicateRung,
   onDeleteRung,
   onMoveRung,
@@ -893,12 +1014,15 @@ function RungSection({
 }: RungSectionProps) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const cancelRenameRef = useRef(false)
-  const [availableWidth, setAvailableWidth] = useState(PROGRAM_MIN_W)
-  const [titleDraft, setTitleDraft] = useState(rung.label || '未命名梯级')
-  const layout = measureRung(rung, availableWidth)
+  const seenNodesRef = useRef<Set<string> | null>(null)
+  const seenOutputRef = useRef<string | null>(null)
+  const [availableWidth, setAvailableWidth] = useState(0)
+  const [titleDraft, setTitleDraft] = useState<string | null>(null)
+  const titleValue = titleDraft ?? rung.label ?? '未命名梯级'
+  const metrics = metricsFor(availableWidth)
+  const layout = measureRung(rung, availableWidth, metrics)
+  const rungContext: DrawContext = { ...context, rungId: rung.id, metrics }
   const powered = context.runtime.rungPower[rung.id] === true
-  const selectedNode = findSelectedNode(rung, context.selection)
-  const selectedPath = context.selection?.rungId === rung.id ? context.selection.path : null
   const draggedRungId = context.dragSource?.startsWith('rung:')
     ? context.dragSource.slice(5)
     : null
@@ -916,21 +1040,39 @@ function RungSection({
     return () => observer.disconnect()
   }, [])
 
-  useEffect(() => {
-    setTitleDraft(rung.label || '未命名梯级')
-  }, [rung.id, rung.label])
+  useLayoutEffect(() => {
+    const container = scrollRef.current
+    if (!container) return
+    const ids = collectNodeIds(rung.nodes)
+    const previous = seenNodesRef.current
+    const previousOutput = seenOutputRef.current
+    seenNodesRef.current = new Set(ids)
+    seenOutputRef.current = rung.output.id
+    if (!previous) return
+
+    const addedId = ids.find((id) => !previous.has(id))
+    const outputChanged = previousOutput !== null && previousOutput !== rung.output.id
+    if (!addedId && !outputChanged) return
+
+    const nodes = Array.from(
+      container.querySelectorAll<SVGGraphicsElement>('[data-node-id]'),
+    )
+    const output = container.querySelector<SVGGraphicsElement>('[data-output-id]')
+    const target = addedId ? nodes.find((node) => node.dataset.nodeId === addedId) : null
+    const focus = target ?? (outputChanged ? output : null)
+    if (!focus) return
+    revealInserted(container, focus, output && focus !== output ? output : null)
+  }, [rung.nodes, rung.output.id])
 
   function commitTitle() {
+    if (titleDraft === null) return
+    setTitleDraft(null)
     if (cancelRenameRef.current) {
       cancelRenameRef.current = false
-      setTitleDraft(rung.label || '未命名梯级')
       return
     }
     const nextLabel = titleDraft.trim()
-    if (!nextLabel || !onRenameRung) {
-      setTitleDraft(rung.label || '未命名梯级')
-      return
-    }
+    if (!nextLabel || !onRenameRung) return
     if (nextLabel !== rung.label) onRenameRung(rung.id, nextLabel)
   }
 
@@ -967,7 +1109,7 @@ function RungSection({
           <span className="ll-rung-marker" aria-hidden="true" />
           <input
             className="ll-rung-name"
-            value={titleDraft}
+            value={titleValue}
             readOnly={!onRenameRung}
             aria-label={'重命名梯级 ' + (index + 1)}
             data-no-rung-drag
@@ -981,6 +1123,7 @@ function RungSection({
               } else if (event.key === 'Escape') {
                 event.preventDefault()
                 cancelRenameRef.current = true
+                setTitleDraft(null)
                 event.currentTarget.blur()
               }
             }}
@@ -991,74 +1134,70 @@ function RungSection({
             className={'ll-power-state' + (powered ? ' is-on' : '')}
             title={powered ? '回路通电' : '回路断开'}
           >
-            <i />{powered ? '能流接通' : '回路断开'}
+            <i />{powered ? '通电' : '断开'}
           </span>
-          <div className="ll-rung-tools" aria-label="梯级操作" data-no-rung-drag>
-            <button
-              type="button"
-              title="上移梯级"
-              aria-label="上移梯级"
-              disabled={index === 0}
-              onClick={() => onMoveRung(rung.id, -1)}
-            >
-              <ArrowUpIcon size={16} />
-            </button>
-            <button
-              type="button"
-              title="下移梯级"
-              aria-label="下移梯级"
-              disabled={index === total - 1}
-              onClick={() => onMoveRung(rung.id, 1)}
-            >
-              <ArrowDownIcon size={16} />
-            </button>
-            <button
-              type="button"
-              title="复制梯级"
-              aria-label="复制梯级"
-              onClick={() => onDuplicateRung(rung.id)}
-            >
-              <CopyIcon size={16} />
-            </button>
-            <button
-              type="button"
-              className="is-danger"
-              title="删除梯级"
-              aria-label="删除梯级"
-              onClick={() => onDeleteRung(rung.id)}
-            >
-              <TrashIcon size={16} />
-            </button>
-          </div>
+          <details
+            className="ll-rung-menu"
+            data-no-rung-drag
+            onBlur={(event) => {
+              if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+                event.currentTarget.removeAttribute('open')
+              }
+            }}
+            onKeyDown={(event) => {
+              if (event.key !== 'Escape') return
+              event.currentTarget.removeAttribute('open')
+              event.currentTarget.querySelector('summary')?.focus()
+            }}
+          >
+            <summary aria-label="梯级操作" title="梯级操作">
+              <MoreIcon size={17} />
+            </summary>
+            <div className="ll-rung-menu-panel" role="menu" aria-label="梯级操作">
+              <button
+                type="button"
+                role="menuitem"
+                disabled={index === 0}
+                onClick={(event) => {
+                  event.currentTarget.closest('details')?.removeAttribute('open')
+                  onMoveRung(rung.id, -1)
+                }}
+              >
+                上移
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                disabled={index === total - 1}
+                onClick={(event) => {
+                  event.currentTarget.closest('details')?.removeAttribute('open')
+                  onMoveRung(rung.id, 1)
+                }}
+              >
+                下移
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={(event) => {
+                  event.currentTarget.closest('details')?.removeAttribute('open')
+                  onDuplicateRung(rung.id)
+                }}
+              >
+                复制梯级
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                className="is-danger"
+                onClick={() => onDeleteRung(rung.id)}
+              >
+                删除梯级
+              </button>
+            </div>
+          </details>
         </div>
       </header>
-
-      {selectedPath !== null && selectedNode && (
-        <div className="ll-inline-actions">
-          <span>已选：{describeNode(selectedNode)}</span>
-          <button
-            type="button"
-            onClick={() => onWrapParallel(rung.id, selectedPath)}
-          >
-            并联新支路
-          </button>
-          {selectedNode.type === 'parallel' && (
-            <button
-              type="button"
-              onClick={() => onCollapseParallel(rung.id, selectedPath)}
-            >
-              收起为单支路
-            </button>
-          )}
-          <button
-            type="button"
-            className="is-danger"
-            onClick={() => onDeleteNode(rung.id, selectedPath)}
-          >
-            删除元件
-          </button>
-        </div>
-      )}
 
       <div className="ll-svg-scroll" ref={scrollRef}>
         <svg
@@ -1072,20 +1211,20 @@ function RungSection({
         >
           <line
             className="ll-rail"
-            x1={RAIL_LEFT}
+            x1={metrics.railLeft}
             y1="0"
-            x2={RAIL_LEFT}
+            x2={metrics.railLeft}
             y2={layout.height}
           />
           <line
             className="ll-power-wire is-on"
-            x1={RAIL_LEFT}
+            x1={metrics.railLeft}
             y1={layout.centerY}
             x2={layout.chainX}
             y2={layout.centerY}
           />
           <g transform={'translate(' + layout.chainX + ', ' + layout.chainY + ')'}>
-            {renderChain(rung.nodes, context, [], true)}
+            {renderChain(rung.nodes, rungContext, [], true)}
           </g>
           <line
             className={'ll-power-wire' + (powered ? ' is-on' : '')}
@@ -1095,25 +1234,24 @@ function RungSection({
             y2={layout.centerY}
           />
           <g transform={'translate(' + layout.outputX + ', ' + layout.outputY + ')'}>
-            {renderOutput(rung.output, context, rung.id)}
+            {renderOutput(rung.output, rungContext, rung.id)}
           </g>
           <line
             className="ll-rail"
-            x1={layout.width - RAIL_RIGHT}
+            x1={layout.width - metrics.railRight}
             y1="0"
-            x2={layout.width - RAIL_RIGHT}
+            x2={layout.width - metrics.railRight}
             y2={layout.height}
           />
           <line
             className={'ll-power-wire' + (powered ? ' is-on' : '')}
             x1={layout.outputX + layout.output.width}
             y1={layout.centerY}
-            x2={layout.width - RAIL_RIGHT}
+            x2={layout.width - metrics.railRight}
             y2={layout.centerY}
           />
         </svg>
       </div>
-      <p className="ll-scroll-note">左右滑动查看完整回路</p>
     </article>
   )
 }
@@ -1123,12 +1261,10 @@ export default function LadderCanvas({
   runtime,
   selection,
   onSelect,
-  onDeleteNode,
-  onWrapParallel,
-  onCollapseParallel,
   onDuplicateRung,
   onDeleteRung,
   onMoveRung,
+  onMoveNode,
   onAddRung,
   dragTarget = null,
   isDragging = false,
@@ -1161,8 +1297,10 @@ export default function LadderCanvas({
     dragTarget,
     dragSource,
     rungId: '',
+    metrics: DEFAULT_METRICS,
     onSelect,
     onEdit,
+    onMoveNode,
     beginDrag,
   }
 
@@ -1184,9 +1322,6 @@ export default function LadderCanvas({
               index={index}
               total={program.rungs.length}
               context={{ ...context, rungId: rung.id }}
-              onDeleteNode={onDeleteNode}
-              onWrapParallel={onWrapParallel}
-              onCollapseParallel={onCollapseParallel}
               onDuplicateRung={onDuplicateRung}
               onDeleteRung={onDeleteRung}
               onMoveRung={onMoveRung}
@@ -1209,17 +1344,18 @@ function renderParallel(
   path: number[],
   incomingPower: boolean,
 ): ReactNode {
-  const size = measureNode(node)
-  const branchSizes = node.branches.map(measureChain)
+  const m = context.metrics
+  const size = measureNode(node, m)
+  const branchSizes = node.branches.map((branch) => measureChain(branch, m))
   const selected = isSelected(context, path)
   const sourceKey = 'node:' + context.rungId + ':' + path.join('.')
   const source = context.dragSource === sourceKey
-  const splitX = PARALLEL_GUTTER / 2
-  const collectX = size.width - PARALLEL_GUTTER / 2
+  const splitX = m.parallelGutter / 2
+  const collectX = size.width - m.parallelGutter / 2
   let branchY = 0
   const placements = branchSizes.map((branch) => {
     const y = branchY
-    branchY += branch.height + PARALLEL_GAP
+    branchY += branch.height + m.parallelGap
     return { y, centerY: y + branch.lineY }
   })
   const entryY = size.lineY
@@ -1239,14 +1375,23 @@ function renderParallel(
       role="button"
       tabIndex={0}
       aria-label={'并联分支，' + node.branches.length + ' 条支路，点击编辑'}
+      aria-keyshortcuts="ArrowLeft ArrowRight"
+      data-node-id={node.id}
       onClick={(event) => {
         event.stopPropagation()
         selectAndEdit(context, selection, event.currentTarget)
       }}
-      onKeyDown={(event) => activateWithKeyboard(
-        event,
-        () => selectAndEdit(context, selection, event.currentTarget),
-      )}
+      onKeyDown={(event) => {
+        if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+          event.preventDefault()
+          context.onMoveNode(context.rungId, path, event.key === 'ArrowLeft' ? -1 : 1)
+          return
+        }
+        activateWithKeyboard(
+          event,
+          () => selectAndEdit(context, selection, event.currentTarget),
+        )
+      }}
       onPointerDown={(event) => {
         event.stopPropagation()
         context.beginDrag(
@@ -1282,11 +1427,11 @@ function renderParallel(
             <path
               className={'ll-wire' + (incomingPower ? ' is-on' : '')}
               d={'M ' + splitX + ' ' + placement.centerY
-                + ' H ' + PARALLEL_GUTTER}
+                + ' H ' + m.parallelGutter}
             />
             <path
               className={'ll-wire' + (branchPower ? ' is-on' : '')}
-              d={'M ' + (PARALLEL_GUTTER + branchSizes[index].width) + ' '
+              d={'M ' + (m.parallelGutter + branchSizes[index].width) + ' '
                 + placement.centerY + ' H ' + collectX}
             />
           </g>
@@ -1302,7 +1447,7 @@ function renderParallel(
         return (
           <g
             key={node.id + '-branch-' + index}
-            transform={'translate(' + PARALLEL_GUTTER + ', ' + placement.y + ')'}
+            transform={'translate(' + m.parallelGutter + ', ' + placement.y + ')'}
           >
             {renderChain(branch, context, [...path, index], incomingPower)}
           </g>

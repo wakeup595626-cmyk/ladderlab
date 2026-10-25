@@ -1,3 +1,4 @@
+import { useRef, useState } from 'react'
 import { getProfile, supportsContact, supportsOutput } from '../engine/profiles'
 import type {
   CompileResult,
@@ -22,6 +23,7 @@ import {
   updateTag,
   wrapInParallel,
 } from '../state/programOps'
+import { useModalFocus } from '../lib/useModalFocus'
 import { CheckCircleIcon, CloseIcon, PointerIcon } from './Icons'
 
 interface InspectorProps {
@@ -36,7 +38,8 @@ interface InspectorProps {
   onNotify: (message: string) => void
   tab: InspectorTab
   onTabChange: (tab: InspectorTab) => void
-  onClose?: () => void
+  onClose: () => void
+  docked?: boolean
 }
 
 export type InspectorTab = 'properties' | 'tags' | 'diagnostics'
@@ -231,6 +234,7 @@ function TagsPanel({
   onToggleBool: (name: string) => void
   onSetInt: (name: string, value: number) => void
 }) {
+  const [expandedTag, setExpandedTag] = useState<string | null>(null)
   const instances = program.rungs
     .map((rung) => rung.output)
     .filter((output) => runtime.timers[output.tag] || runtime.counters[output.tag])
@@ -252,7 +256,7 @@ function TagsPanel({
         </div>
       </div>
 
-      <p className="panel-note">名称和地址在离开输入框后生效。点运行值可以在 FALSE / TRUE 之间切换，模拟按钮或开关。</p>
+      <p className="panel-note">点 TRUE / FALSE 立即切换仿真输入；展开可改名称和地址。</p>
 
       <div className="tag-list" aria-label="PLC 变量表">
         {program.tags.map((tag) => {
@@ -345,6 +349,124 @@ function TagsPanel({
                   )}
                 </label>
               </div>
+            </article>
+          )
+        })}
+      </div>
+
+      <div className="tags-monitor" aria-label="PLC 变量监视">
+        {program.tags.map((tag) => {
+          const usage = tagUsage(program, tag.name)
+          const expanded = expandedTag === tag.id
+          const editorId = `tag-monitor-editor-${tag.id}`
+          return (
+            <article className={expanded ? 'tag-monitor-card is-expanded' : 'tag-monitor-card'} key={tag.id}>
+              <div className="tag-monitor-row">
+                <div className="tag-monitor-id">
+                  <strong>{tag.name}</strong>
+                  <span>{tag.address} · {tag.kind}</span>
+                </div>
+                {tag.kind === 'BOOL' ? (
+                  <button
+                    type="button"
+                    className={runtime.bools[tag.name] ? 'live-value on' : 'live-value'}
+                    onClick={() => onToggleBool(tag.name)}
+                    aria-pressed={Boolean(runtime.bools[tag.name])}
+                    aria-label={`切换 ${tag.name} 仿真值，当前 ${readDisplay(program, runtime, tag.name)}`}
+                  >
+                    {readDisplay(program, runtime, tag.name)}
+                  </button>
+                ) : (
+                  <input
+                    key={`${tag.id}-monitor-runtime-${runtime.ints[tag.name] ?? 0}`}
+                    className="table-input mono tag-monitor-int"
+                    type="number"
+                    defaultValue={runtime.ints[tag.name] ?? 0}
+                    aria-label={`${tag.name} 运行值`}
+                    onBlur={(event) => onSetInt(tag.name, Number(event.target.value) || 0)}
+                  />
+                )}
+                <button
+                  type="button"
+                  className="tag-monitor-edit"
+                  aria-expanded={expanded}
+                  aria-controls={editorId}
+                  aria-label={`${expanded ? '收起' : '编辑'} ${tag.name}`}
+                  onClick={() => setExpandedTag(expanded ? null : tag.id)}
+                >
+                  {expanded ? '收起' : '编辑'}
+                </button>
+              </div>
+
+              {expanded && (
+                <div className="tag-monitor-editor" id={editorId}>
+                  <label>
+                    <span>名称</span>
+                    <input
+                      key={`${tag.id}-monitor-name-${tag.name}`}
+                      className="table-input mono"
+                      defaultValue={tag.name}
+                      onBlur={(event) => {
+                        const name = event.target.value.trim()
+                        if (name && name !== tag.name) onProgram(updateTag(program, tag.id, { name }))
+                      }}
+                      spellCheck={false}
+                    />
+                  </label>
+                  <label>
+                    <span>地址</span>
+                    <input
+                      key={`${tag.id}-monitor-address-${tag.address}`}
+                      className="table-input mono"
+                      defaultValue={tag.address}
+                      onBlur={(event) => onProgram(updateTag(program, tag.id, { address: event.target.value.toUpperCase() }))}
+                      spellCheck={false}
+                    />
+                  </label>
+                  <label>
+                    <span>初值</span>
+                    {tag.kind === 'BOOL' ? (
+                      <select
+                        className="table-input"
+                        defaultValue={tag.initial ? 'true' : 'false'}
+                        onChange={(event) => onProgram(updateTag(program, tag.id, { initial: event.target.value === 'true' }))}
+                      >
+                        <option value="false">FALSE</option>
+                        <option value="true">TRUE</option>
+                      </select>
+                    ) : (
+                      <input
+                        key={`${tag.id}-monitor-initial-${tag.initial}`}
+                        className="table-input mono"
+                        type="number"
+                        defaultValue={Number(tag.initial)}
+                        onBlur={(event) => onProgram(updateTag(program, tag.id, { initial: Number(event.target.value) }))}
+                      />
+                    )}
+                  </label>
+                  <label className="tag-monitor-comment">
+                    <span>注释</span>
+                    <input
+                      key={`${tag.id}-monitor-comment-${tag.comment}`}
+                      className="table-input"
+                      defaultValue={tag.comment}
+                      placeholder="可选"
+                      onBlur={(event) => onProgram(updateTag(program, tag.id, { comment: event.target.value }))}
+                    />
+                  </label>
+                  <div className="tag-monitor-actions">
+                    <span>{usage > 0 ? `已被引用 ${usage} 次` : '未被引用'}</span>
+                    <button
+                      type="button"
+                      className="tag-monitor-delete"
+                      disabled={usage > 0}
+                      onClick={() => onProgram(deleteTag(program, tag.id))}
+                    >
+                      删除变量
+                    </button>
+                  </div>
+                </div>
+              )}
             </article>
           )
         })}
@@ -463,7 +585,11 @@ export default function Inspector({
   tab,
   onTabChange,
   onClose,
+  docked = false,
 }: InspectorProps) {
+  const closeRef = useRef<HTMLButtonElement>(null)
+  // A docked panel is part of the page, so it must not trap focus or steal it.
+  const dialogRef = useModalFocus<HTMLElement>(!docked, onClose, closeRef)
   const rung = selection ? program.rungs.find((item) => item.id === selection.rungId) : undefined
   const node = selection?.path ? getNodeAtPath(program, selection.rungId, selection.path) : null
   const activeProfile = getProfile(program.profile)
@@ -488,11 +614,11 @@ export default function Inspector({
         : { label: '正在编辑', value: editingLabel }
 
   return (
-    <aside className="inspector">
+    <aside className="inspector" ref={dialogRef} tabIndex={-1}>
       <div className="inspector-mobile-head">
         <strong>属性与变量</strong>
         {onClose && (
-          <button type="button" className="icon-button" aria-label="关闭属性面板" onClick={onClose}>
+          <button ref={closeRef} type="button" className="icon-button" aria-label="关闭属性面板" onClick={onClose}>
             <CloseIcon />
           </button>
         )}
@@ -501,11 +627,32 @@ export default function Inspector({
         <span className="context-label">{context.label}</span>
         <strong title={context.value}>{context.value}</strong>
       </div>
-      <div className="inspector-tabs" role="tablist">
+      <div
+        className="inspector-tabs"
+        role="tablist"
+        aria-label="属性与变量"
+        onKeyDown={(event) => {
+          const order: InspectorTab[] = ['properties', 'tags', 'diagnostics']
+          const current = order.indexOf(tab)
+          let next = -1
+          if (event.key === 'ArrowRight') next = (current + 1) % order.length
+          else if (event.key === 'ArrowLeft') next = (current - 1 + order.length) % order.length
+          else if (event.key === 'Home') next = 0
+          else if (event.key === 'End') next = order.length - 1
+          if (next < 0) return
+          event.preventDefault()
+          onTabChange(order[next])
+          const buttons = event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]')
+          buttons[next]?.focus()
+        }}
+      >
         <button
           type="button"
           role="tab"
+          id="inspector-tab-properties"
+          aria-controls="inspector-panel-properties"
           aria-selected={tab === 'properties'}
+          tabIndex={tab === 'properties' ? 0 : -1}
           className={tab === 'properties' ? 'active' : ''}
           onClick={() => onTabChange('properties')}
         >
@@ -514,7 +661,10 @@ export default function Inspector({
         <button
           type="button"
           role="tab"
+          id="inspector-tab-tags"
+          aria-controls="inspector-panel-tags"
           aria-selected={tab === 'tags'}
+          tabIndex={tab === 'tags' ? 0 : -1}
           className={tab === 'tags' ? 'active' : ''}
           onClick={() => onTabChange('tags')}
         >
@@ -523,7 +673,10 @@ export default function Inspector({
         <button
           type="button"
           role="tab"
+          id="inspector-tab-diagnostics"
+          aria-controls="inspector-panel-diagnostics"
           aria-selected={tab === 'diagnostics'}
+          tabIndex={tab === 'diagnostics' ? 0 : -1}
           className={tab === 'diagnostics' ? 'active' : ''}
           onClick={() => onTabChange('diagnostics')}
         >
@@ -531,7 +684,12 @@ export default function Inspector({
         </button>
       </div>
 
-      <div className="inspector-body">
+      <div
+        className="inspector-body"
+        role="tabpanel"
+        id={`inspector-panel-${tab}`}
+        aria-labelledby={`inspector-tab-${tab}`}
+      >
         {tab === 'properties' && (
           <PropertiesPanel
             program={program}

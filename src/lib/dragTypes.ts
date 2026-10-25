@@ -10,6 +10,7 @@ export type DragPayload =
 /** 画布上的投放点。chain 与 Selection.path 的节点段编码一致，长度恒为偶数。 */
 export type DropTarget =
   | { type: 'slot'; rungId: string; chain: number[]; index: number }
+  | { type: 'node'; rungId: string; path: number[] }
   | { type: 'output'; rungId: string }
   | { type: 'rung'; index: number }
 
@@ -27,6 +28,13 @@ export function parseDropTarget(value: string | null): DropTarget | null {
       && parsed.index >= 0
     ) return parsed
     if (parsed.type === 'output' && typeof parsed.rungId === 'string') return parsed
+    if (
+      parsed.type === 'node'
+      && typeof parsed.rungId === 'string'
+      && Array.isArray(parsed.path)
+      && parsed.path.length > 0
+      && parsed.path.every((part) => Number.isInteger(part) && part >= 0)
+    ) return parsed
     if (parsed.type === 'rung' && Number.isInteger(parsed.index) && parsed.index >= 0) return parsed
   } catch {
     return null

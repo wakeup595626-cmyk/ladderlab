@@ -1,14 +1,20 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
+import './Shell.css'
+import AboutDialog from './components/AboutDialog'
+import CoachStrip from './components/CoachStrip'
 import Guide from './components/Guide'
-import { BoltIcon, GripIcon, LadderIcon, SlidersIcon } from './components/Icons'
+import { GripIcon, LadderIcon, TagIcon } from './components/Icons'
 import Inspector, { type InspectorTab } from './components/Inspector'
+import InstructionBar from './components/InstructionBar'
+import InstructionDrawer from './components/InstructionDrawer'
 import LadderCanvas from './components/LadderCanvas'
 import LibraryDialog from './components/LibraryDialog'
-import ProjectSidebar from './components/ProjectSidebar'
+import { useMediaQuery } from './lib/useMediaQuery'
+import ProjectDrawer from './components/ProjectDrawer'
 import QuickEditor from './components/QuickEditor'
 import StatusBar from './components/StatusBar'
-import TopBar from './components/TopBar'
+import WorkspaceTopBar from './components/WorkspaceTopBar'
 import { instructionLabel } from './components/instructionCatalog'
 import { compile } from './engine/compile'
 import { blankProgram, buildSample } from './engine/samples'
@@ -39,7 +45,6 @@ import {
 import {
   addRung,
   changeOutputKind,
-  collapseParallel,
   deleteNode,
   deleteRung,
   duplicateRung,
@@ -48,12 +53,12 @@ import {
   insertNodeAt,
   makeContactNode,
   moveNode,
+  moveNodeBy,
   moveRung,
   moveRungTo,
   setProfile as setProgramProfile,
   setProjectName,
   updateRungLabel,
-  wrapInParallel,
 } from './state/programOps'
 
 interface HistoryState {
@@ -70,7 +75,7 @@ interface ToastState {
 type CorruptSavedProgram = Extract<LoadSavedProgramResult, { status: 'corrupt' }>
 
 const HISTORY_LIMIT = 60
-const GUIDE_KEY = 'ladderlab.guide.v1'
+const COACH_KEY = 'ladderlab.coach.v1'
 const SAVE_DEBOUNCE_MS = 400
 const SAVE_RETRY_DELAYS_MS = [1500, 5000, 15000]
 const MAX_SIMULATION_CATCH_UP_STEPS = 5
@@ -108,7 +113,7 @@ function archiveProgramVersion(program: Program): boolean {
   }
 }
 
-type MobilePanel = 'none' | 'instructions' | 'properties'
+type MobilePanel = 'none' | 'instructions' | 'properties' | 'project'
 
 interface QuickEditState {
   selection: Selection
@@ -169,17 +174,20 @@ export default function App() {
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>('properties')
   const [quickEdit, setQuickEdit] = useState<QuickEditState | null>(null)
   const [mobilePanel, setMobilePanel] = useState<MobilePanel>('none')
-  const [inspectorOpen, setInspectorOpen] = useState(true)
+  const [inspectorOpen, setInspectorOpen] = useState(false)
   const [libraryOpen, setLibraryOpen] = useState(false)
-  const [guideOpen, setGuideOpen] = useState(() => {
+  const [guideOpen, setGuideOpen] = useState(false)
+  const [aboutOpen, setAboutOpen] = useState(false)
+  const [coachDismissed, setCoachDismissed] = useState(() => {
     try {
-      return !window.localStorage.getItem(GUIDE_KEY)
+      return Boolean(window.localStorage.getItem(COACH_KEY))
     } catch {
-      return true
+      return false
     }
   })
   const fileInputRef = useRef<HTMLInputElement>(null)
   const editorRef = useRef<HTMLElement>(null)
+  const tagsButtonRef = useRef<HTMLButtonElement>(null)
   const pendingAutoRunRef = useRef(false)
   const saveTimerRef = useRef<number | null>(null)
   const saveRetryTimerRef = useRef<number | null>(null)
@@ -265,10 +273,14 @@ export default function App() {
 
   const closeGuide = useCallback(() => {
     setGuideOpen(false)
+  }, [])
+
+  const dismissCoach = useCallback(() => {
+    setCoachDismissed(true)
     try {
-      window.localStorage.setItem(GUIDE_KEY, 'seen')
+      window.localStorage.setItem(COACH_KEY, 'seen')
     } catch {
-      // 隐私模式下不能写入也没关系，关闭动作本身已经生效。
+      // 隐私模式下只关闭本次提示。
     }
   }, [])
 
@@ -490,9 +502,6 @@ export default function App() {
     ? program.rungs.find((rung) => rung.id === selection.rungId)
     : program.rungs[0]
   const activeRungId = activeRung?.id ?? null
-  const firstInput = program.tags.find(
-    (tag) => tag.kind === 'BOOL' && tag.address.toUpperCase().startsWith('%I'),
-  )
 
   const runToggle = () => {
     if (compileResult.errors.length > 0) {
@@ -518,7 +527,7 @@ export default function App() {
 
   const openInspector = (tab: InspectorTab) => {
     setInspectorTab(tab)
-    if (window.matchMedia('(max-width: 1180px)').matches) {
+    if (window.matchMedia('(max-width: 1024px)').matches) {
       setMobilePanel('properties')
     } else {
       setInspectorOpen(true)
@@ -566,6 +575,7 @@ export default function App() {
   }
 
   const handleDrop = useCallback((payload: DragPayload, target: DropTarget) => {
+    if (mobilePanel === 'instructions') setMobilePanel('none')
     if (target.type === 'rung') {
       if (payload.type !== 'rung') {
         notify('网络号位置只接受整条梯级')
@@ -580,6 +590,16 @@ export default function App() {
     if (payload.type === 'rung') {
       notify('请把梯级拖到左侧网络号的位置')
       return
+    }
+
+    // 直接落到某个元件上，等价于插到它前面；槽位仍然负责精确位置。
+    if (target.type === 'node') {
+      target = {
+        type: 'slot',
+        rungId: target.rungId,
+        chain: target.path.slice(0, -1),
+        index: target.path[target.path.length - 1],
+      }
     }
 
     const targetRung = program.rungs.find((rung) => rung.id === target.rungId)
@@ -669,9 +689,16 @@ export default function App() {
     const path = findNodePath(next, target.rungId, sourceNode.id)
     setSelection({ rungId: target.rungId, path })
     notify('元件已移到另一条梯级')
-  }, [commit, insert, notify, program])
+  }, [commit, insert, mobilePanel, notify, program])
 
-  const drag = useDragController(handleDrop)
+  // 触摸从指令栏或指令抽屉起拖时先收起面板，画布才会露出来接住投放。
+  const drag = useDragController(handleDrop, {
+    onDragStart: () => {
+      // The instruction drawer stays mounted while the finger is down: touch
+      // delivery stops if its origin element is removed mid-gesture.
+      if (mobilePanel !== 'instructions') setMobilePanel('none')
+    },
+  })
 
   const insertRung = () => {
     const next = addRung(program)
@@ -714,9 +741,10 @@ export default function App() {
     pendingAutoRunRef.current = true
     commit(sample)
     setSelection(sample.rungs[0] ? { rungId: sample.rungs[0].id, path: null } : null)
+    setMobilePanel('none')
     openInspector('tags')
-    setMobilePanel('properties')
     closeGuide()
+    dismissCoach()
     notify('示例已开始运行：切到「变量表」，把 StartBtn 切成 TRUE')
   }
 
@@ -930,14 +958,31 @@ export default function App() {
           && (quickSelection.path === null || getNodeAtPath(program, rung.id, quickSelection.path) !== null),
       ),
   )
+  const inspectorVisible = inspectorOpen || mobilePanel === 'properties'
+  const inspectorDocked = useMediaQuery('(min-width: 1025px)')
+
+  // 停靠的变量表是页面的一部分，不抢焦点；但按 Esc 也应该能收起，
+  // 并把焦点交还给打开它的按钮。手机端的变量面板是对话框，由它自己处理 Esc。
+  useEffect(() => {
+    if (!inspectorDocked || !inspectorOpen) return
+    if (quickEdit || libraryOpen || guideOpen || aboutOpen) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented) return
+      event.preventDefault()
+      setInspectorOpen(false)
+      tagsButtonRef.current?.focus()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [inspectorDocked, inspectorOpen, quickEdit, libraryOpen, guideOpen, aboutOpen])
 
   return (
     <div
-      className="app-shell"
+      className="app-shell wb-shell"
       data-mobile-panel={mobilePanel}
-      data-inspector={inspectorOpen ? 'open' : 'closed'}
+      data-inspector={inspectorVisible ? 'open' : 'closed'}
     >
-      <TopBar
+      <WorkspaceTopBar
         projectName={program.name}
         profile={program.profile}
         running={running}
@@ -953,57 +998,61 @@ export default function App() {
         onSpeed={setSpeed}
         onUndo={undo}
         onRedo={redo}
-        onNew={newProject}
-        onImport={() => fileInputRef.current?.click()}
-        onExport={exportProject}
+        onOpenProject={() => setMobilePanel('project')}
         onGuide={() => setGuideOpen(true)}
-        onOpenLibrary={() => setLibraryOpen(true)}
-        onToggleSidebar={() => setMobilePanel((panel) => (panel === 'instructions' ? 'none' : 'instructions'))}
-        onToggleInspector={() => {
-          if (window.matchMedia('(max-width: 1180px)').matches) {
-            setMobilePanel((panel) => (panel === 'properties' ? 'none' : 'properties'))
-          } else {
-            setInspectorOpen((open) => !open)
-          }
-        }}
-        inspectorOpen={inspectorOpen}
+        onAbout={() => setAboutOpen(true)}
       />
 
-      <div className="app-body">
-        <ProjectSidebar
-          program={program}
-          profile={program.profile}
-          activeRungId={activeRungId}
-          onInsertContact={insert}
-          onChangeOutput={changeOutput}
-          onStartDrag={drag.start}
-          onAddRung={insertRung}
-          onOpenLibrary={() => setLibraryOpen(true)}
-          onOpenTags={() => openInspector('tags')}
-          onOpenGuide={() => setGuideOpen(true)}
-          onClose={() => setMobilePanel('none')}
-        />
+      <header className="wb-documentbar">
+        <div className="wb-doc-tab">
+          <LadderIcon size={15} />
+          <h1>Main [OB1]</h1>
+        </div>
+        <div className="wb-doc-actions">
+          {compileResult.errors.length > 0 && (
+            <button
+              type="button"
+              className="wb-doc-errors"
+              onClick={() => openInspector('diagnostics')}
+            >
+              {compileResult.errors.length} 个错误
+            </button>
+          )}
+          <button
+            type="button"
+            ref={tagsButtonRef}
+            className={
+              inspectorVisible && inspectorTab === 'tags' ? 'wb-doc-action is-active' : 'wb-doc-action'
+            }
+            aria-pressed={inspectorVisible && inspectorTab === 'tags'}
+            onClick={() => {
+              if (inspectorVisible && inspectorTab === 'tags') {
+                setInspectorOpen(false)
+                setMobilePanel('none')
+                return
+              }
+              openInspector('tags')
+            }}
+          >
+            <TagIcon size={16} />
+            <span>变量表</span>
+          </button>
+        </div>
+      </header>
 
-        <section className="sheet" aria-label="程序块 Main [OB1]">
-          <div className="sheet-tabbar">
-            <div className="sheet-tabgroup">
-              <span className="sheet-tab">PLC_1</span>
-              <span className="sheet-tab-sep" aria-hidden="true">/</span>
-              <span className="sheet-tab">程序块</span>
-              <span className="sheet-tab-sep" aria-hidden="true">/</span>
-              <span className="sheet-tab is-active">Main [OB1]</span>
-            </div>
-            <div className="sheet-meta">
-              <span className={running ? 'sheet-state is-live' : 'sheet-state'}>
-                <i aria-hidden="true" />
-                {running ? '运行中' : '离线'}
-              </span>
-              <span className="sheet-language">梯形图 LAD</span>
-            </div>
-          </div>
+      <InstructionBar
+        profile={program.profile}
+        onInsertContact={insert}
+        onChangeOutput={changeOutput}
+        onStartDrag={drag.start}
+        onOpenAll={() => setMobilePanel('instructions')}
+      />
 
-          <div className="sheet-body">
-            <main className="program-pane" ref={editorRef}>
+      {!coachDismissed && <CoachStrip onDismiss={dismissCoach} onStartDemo={startDemo} />}
+
+      <div className="wb-workbench">
+        <main className="wb-program-pane" ref={editorRef}>
+          <div className="wb-program-inner">
               {remoteConflict && (
                 <section
                   className="recovery-banner conflict-banner"
@@ -1129,54 +1178,10 @@ export default function App() {
                 </section>
               )}
 
-              <div className="program-heading">
-                <div className="program-heading-copy">
-                  <h1>{program.name || '未命名项目'}</h1>
-                  <p>单击元件修改参数，从左侧拖入指令，或拖动已有元件调整位置。</p>
-                </div>
-                <div className="program-facts" aria-label="程序概况">
-                  <span><b>{program.rungs.length}</b> 梯级</span>
-                  <span><b>{program.tags.length}</b> 变量</span>
-                  <span className={running ? 'fact-live' : ''}>
-                    <i aria-hidden="true" />{running ? '扫描中' : '已停止'}
-                  </span>
-                </div>
-              </div>
-
               {compileResult.errors.length > 0 && (
-                <div className="compile-banner" role="alert">
-                  <strong>工程有 {compileResult.errors.length} 个错误，仿真已阻止。</strong>
-                  <span>打开右侧「诊断」面板逐项定位。</span>
-                </div>
-              )}
-
-              {compileResult.errors.length === 0 && !running && (
-                <div className="run-hint">
-                  <BoltIcon size={18} className="run-hint-mark" aria-hidden="true" />
-                  <div className="run-hint-copy">
-                    <strong>第一次用？从这里开始</strong>
-                    <span>点「运行」，再到「变量表」把输入位切成 TRUE，就能看到绿色能流。</span>
-                  </div>
-                  <div className="run-hint-actions">
-                    <button type="button" className="hint-primary" onClick={runToggle}>
-                      运行仿真
-                    </button>
-                    {firstInput && (
-                      <button type="button" className="hint-link" onClick={() => toggleBool(firstInput.name)}>
-                        切换 {firstInput.name}
-                      </button>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {compileResult.errors.length === 0 && running && (
-                <div className="run-hint is-live">
-                  <BoltIcon size={18} className="run-hint-mark" aria-hidden="true" />
-                  <div className="run-hint-copy">
-                    <strong>正在扫描</strong>
-                    <span>到右侧「变量表」点击输入位的 TRUE / FALSE，绿色导线就是当前通电的路径。</span>
-                  </div>
+                <div className="wb-compile-banner" role="alert">
+                  <strong>有 {compileResult.errors.length} 个错误，仿真已暂停</strong>
+                  <button type="button" onClick={() => openInspector('diagnostics')}>查看诊断</button>
                 </div>
               )}
 
@@ -1196,40 +1201,153 @@ export default function App() {
                 }}
                 onStartDrag={drag.start}
                 onRenameRung={(rungId, label) => commit(updateRungLabel(program, rungId, label))}
-                onDeleteNode={(rungId, path) => {
-                  commit(deleteNode(program, rungId, path))
-                  setSelection({ rungId, path: null })
-                  setQuickEdit(null)
-                }}
-                onWrapParallel={(rungId, path) => {
-                  commit(wrapInParallel(program, rungId, path))
-                  setQuickEdit(null)
-                  notify('已创建并联分支，可把另一条触点拖进新支路')
-                }}
-                onCollapseParallel={(rungId, path) => {
-                  commit(collapseParallel(program, rungId, path))
-                  setQuickEdit(null)
-                  notify('并联已收起为第一条支路')
-                }}
                 onDuplicateRung={copyRung}
                 onDeleteRung={removeRung}
                 onMoveRung={(rungId, delta) => commit(moveRung(program, rungId, delta))}
+                onMoveNode={(rungId, path, delta) => commit(moveNodeBy(program, rungId, path, delta))}
                 onAddRung={insertRung}
               />
 
-              <footer className="editor-footer">
-                <p className="footer-hint">点击梯级标题即可改名；拖动左侧手柄可调整梯级顺序。</p>
-                <p className="save-note">
-                  {corruptProject
-                    ? '自动保存已暂停：请先处理上方恢复提示；导出 JSON 可长期归档。'
-                    : remoteConflict
-                      ? '自动保存已暂停：请先选择要保留的多标签页版本。'
-                      : '编辑后会自动保存到本机浏览器；导出 JSON 可长期归档。'}
-                </p>
-              </footer>
-            </main>
+          </div>
+        </main>
+      </div>
 
+      <StatusBar
+        running={running}
+        compileResult={compileResult}
+        lastSavedAt={lastSavedAt}
+        savePending={savePending}
+        saveError={saveError}
+        saveBlocked={Boolean(corruptProject) || Boolean(remoteConflict)}
+      />
+
+      <nav className="mobile-tabbar wb-tabbar" aria-label="工作区面板">
+        <button
+          type="button"
+          className={mobilePanel === 'none' ? 'mobile-tab-action is-active' : 'mobile-tab-action'}
+          onClick={() => {
+            setInspectorOpen(false)
+            setMobilePanel('none')
+          }}
+          aria-pressed={mobilePanel === 'none'}
+        >
+          <LadderIcon size={18} />
+          <span>程序</span>
+        </button>
+        <button
+          type="button"
+          className={mobilePanel === 'instructions' ? 'mobile-tab-action is-active' : 'mobile-tab-action'}
+          onClick={() => {
+            setInspectorOpen(false)
+            setMobilePanel((panel) => (panel === 'instructions' ? 'none' : 'instructions'))
+          }}
+          aria-pressed={mobilePanel === 'instructions'}
+        >
+          <GripIcon size={18} />
+          <span>指令</span>
+        </button>
+        <button
+          type="button"
+          className={
+            mobilePanel === 'properties' && inspectorTab === 'tags'
+              ? 'mobile-tab-action is-active'
+              : 'mobile-tab-action'
+          }
+          onClick={() => {
+            if (mobilePanel === 'properties' && inspectorTab === 'tags') {
+              setInspectorOpen(false)
+              setMobilePanel('none')
+              return
+            }
+            setInspectorTab('tags')
+            setMobilePanel('properties')
+          }}
+          aria-pressed={mobilePanel === 'properties' && inspectorTab === 'tags'}
+        >
+          <TagIcon size={18} />
+          <span>变量</span>
+        </button>
+      </nav>
+
+      <ProjectDrawer
+        open={mobilePanel === 'project'}
+        program={program}
+        activeRungId={activeRungId}
+        onClose={() => setMobilePanel('none')}
+        onOpenTags={() => {
+          setMobilePanel('none')
+          openInspector('tags')
+        }}
+        onOpenLibrary={() => {
+          setMobilePanel('none')
+          setLibraryOpen(true)
+        }}
+        onNew={() => {
+          setMobilePanel('none')
+          newProject()
+        }}
+        onImport={() => {
+          setMobilePanel('none')
+          fileInputRef.current?.click()
+        }}
+        onExport={() => {
+          setMobilePanel('none')
+          exportProject()
+        }}
+        onGuide={() => {
+          setMobilePanel('none')
+          setGuideOpen(true)
+        }}
+        onAbout={() => {
+          setMobilePanel('none')
+          setAboutOpen(true)
+        }}
+      />
+
+      {mobilePanel === 'instructions' && (
+        <InstructionDrawer
+          program={program}
+          activeRungId={activeRungId}
+          onInsertContact={insert}
+          onChangeOutput={changeOutput}
+          onStartDrag={drag.start}
+          onAddRung={insertRung}
+          onOpenLibrary={() => {
+            setMobilePanel('none')
+            setLibraryOpen(true)
+          }}
+          onOpenTags={() => {
+            setMobilePanel('none')
+            openInspector('tags')
+          }}
+          onOpenGuide={() => {
+            setMobilePanel('none')
+            setGuideOpen(true)
+          }}
+          onClose={() => setMobilePanel('none')}
+          dragging={Boolean(drag.drag)}
+        />
+      )}
+
+      {(inspectorOpen || mobilePanel === 'properties') && (
+        <div className="wb-context-layer" role="presentation">
+          <button
+            type="button"
+            className="wb-context-scrim"
+            onClick={() => {
+              setInspectorOpen(false)
+              setMobilePanel('none')
+            }}
+            aria-label="关闭属性面板"
+          />
+          <aside
+            className="wb-context-panel"
+            role={inspectorDocked ? 'complementary' : 'dialog'}
+            aria-modal={inspectorDocked ? undefined : true}
+            aria-label="属性与变量"
+          >
             <Inspector
+              docked={inspectorDocked}
               program={program}
               runtime={runtime}
               selection={selection}
@@ -1245,62 +1363,12 @@ export default function App() {
               tab={inspectorTab}
               onTabChange={setInspectorTab}
               onClose={() => {
-                setMobilePanel('none')
                 setInspectorOpen(false)
+                setMobilePanel('none')
               }}
             />
-          </div>
-        </section>
-      </div>
-
-      <StatusBar
-        profile={program.profile}
-        running={running}
-        runtime={runtime}
-        compileResult={compileResult}
-        lastSavedAt={lastSavedAt}
-        savePending={savePending}
-        saveError={saveError}
-        saveBlocked={Boolean(corruptProject) || Boolean(remoteConflict)}
-      />
-
-      <nav className="mobile-tabbar" aria-label="工作区面板">
-        <button
-          type="button"
-          className={mobilePanel === 'none' ? 'mobile-tab-action is-active' : 'mobile-tab-action'}
-          onClick={() => setMobilePanel('none')}
-          aria-pressed={mobilePanel === 'none'}
-        >
-          <LadderIcon size={18} />
-          <span>程序</span>
-        </button>
-        <button
-          type="button"
-          className={mobilePanel === 'instructions' ? 'mobile-tab-action is-active' : 'mobile-tab-action'}
-          onClick={() => setMobilePanel((panel) => (panel === 'instructions' ? 'none' : 'instructions'))}
-          aria-pressed={mobilePanel === 'instructions'}
-        >
-          <GripIcon size={18} />
-          <span>指令</span>
-        </button>
-        <button
-          type="button"
-          className={mobilePanel === 'properties' ? 'mobile-tab-action is-active' : 'mobile-tab-action'}
-          onClick={() => setMobilePanel((panel) => (panel === 'properties' ? 'none' : 'properties'))}
-          aria-pressed={mobilePanel === 'properties'}
-        >
-          <SlidersIcon size={18} />
-          <span>属性</span>
-        </button>
-      </nav>
-
-      {mobilePanel !== 'none' && (
-        <button
-          type="button"
-          className="mobile-scrim"
-          onClick={() => setMobilePanel('none')}
-          aria-label="关闭面板"
-        />
+          </aside>
+        </div>
       )}
 
       <input
@@ -1322,6 +1390,8 @@ export default function App() {
 
       <Guide open={guideOpen} onClose={closeGuide} onStartDemo={startDemo} />
 
+      <AboutDialog open={aboutOpen} onClose={() => setAboutOpen(false)} />
+
       {quickEdit && quickEditValid && (
         <QuickEditor
           program={program}
@@ -1331,10 +1401,6 @@ export default function App() {
           onProgram={commit}
           onClose={() => setQuickEdit(null)}
           onNotify={notify}
-          onOpenInspector={() => {
-            openInspector('properties')
-            setQuickEdit(null)
-          }}
           onDeleteOutput={() => {
             removeRung(quickEdit.selection.rungId)
             setQuickEdit(null)

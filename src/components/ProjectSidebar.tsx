@@ -21,6 +21,7 @@ export interface ProjectSidebarProps {
   program: Program
   profile: ProfileId
   activeRungId: string | null
+  variant?: 'full' | 'instructions'
   onInsertContact: (kind: ContactKind) => void
   onChangeOutput: (kind: OutputKind) => void
   onStartDrag: (event: React.PointerEvent<HTMLElement>, payload: DragPayload, label: string) => void
@@ -37,6 +38,7 @@ export default function ProjectSidebar({
   program,
   profile,
   activeRungId,
+  variant = 'full',
   onInsertContact,
   onChangeOutput,
   onStartDrag,
@@ -62,10 +64,16 @@ export default function ProjectSidebar({
   })).filter((item) => item.entries.length > 0)
 
   return (
-    <aside className="project-sidebar" aria-label="项目与指令">
+    <aside
+      className={`project-sidebar${variant === 'instructions' ? ' is-instructions' : ''}`}
+      aria-label={variant === 'instructions' ? '全部指令' : '项目与指令'}
+    >
       {onClose && (
         <div className="sidebar-mobile-head">
-          <h2>项目与指令</h2>
+          <div>
+            <h2>{variant === 'instructions' ? '全部指令' : '项目与指令'}</h2>
+            {variant === 'instructions' && <p className="sidebar-drawer-note">点击插入，或拖到梯形图位置。</p>}
+          </div>
           <button
             type="button"
             className="icon-button sidebar-close"
@@ -78,7 +86,7 @@ export default function ProjectSidebar({
         </div>
       )}
 
-      <nav className="project-tree" aria-label="项目树">
+      {variant === 'full' && <nav className="project-tree" aria-label="项目树">
         <div className="tree-row tree-device">
           <CpuIcon size={16} />
           <span>PLC_1</span>
@@ -119,11 +127,11 @@ export default function ProjectSidebar({
           <span>实验库</span>
           <span className="tree-count" aria-hidden="true">{COURSE_LABS.length}</span>
         </button>
-      </nav>
+      </nav>}
 
       <section className="sidebar-instructions" aria-labelledby="instruction-heading">
         <div className="instruction-head">
-          <h2 id="instruction-heading">指令</h2>
+          <h2 id="instruction-heading">{variant === 'instructions' ? '按分类查找' : '指令'}</h2>
           <button
             type="button"
             className="icon-button sidebar-add-rung"
@@ -159,6 +167,7 @@ export default function ProjectSidebar({
                 <button
                   type="button"
                   className="instruction-row"
+                  data-drag-handle
                   key={`${entry.family}-${entry.kind}`}
                   disabled={!allowed}
                   aria-label={`${entry.label}：${entry.detail}`}
@@ -195,14 +204,14 @@ export default function ProjectSidebar({
         )}
       </section>
 
-      <footer className="sidebar-foot">
+      {variant === 'full' && <footer className="sidebar-foot">
         <p>教学仿真器 · 非西门子官方产品</p>
         <small>不兼容 S7 工程文件</small>
         <button type="button" className="sidebar-guide" onClick={onOpenGuide} aria-label="使用指南" title="使用指南">
           <HelpIcon size={15} />
           <span>使用指南</span>
         </button>
-      </footer>
+      </footer>}
     </aside>
   )
 }

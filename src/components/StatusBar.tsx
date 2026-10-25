@@ -1,10 +1,7 @@
-import { getProfile } from '../engine/profiles'
-import type { CompileResult, ProfileId, Runtime } from '../engine/types'
+import type { CompileResult } from '../engine/types'
 
 interface StatusBarProps {
-  profile: ProfileId
   running: boolean
-  runtime: Runtime
   compileResult: CompileResult
   lastSavedAt: number | null
   savePending: boolean
@@ -19,24 +16,14 @@ const savedTimeFormatter = new Intl.DateTimeFormat('zh-CN', {
   hour12: false,
 })
 
-function formatTime(ms: number): string {
-  const seconds = ms / 1000
-  if (seconds < 60) return `${seconds.toFixed(1)} s`
-  const minutes = Math.floor(seconds / 60)
-  return `${minutes}m ${(seconds % 60).toFixed(0)}s`
-}
-
 export default function StatusBar({
-  profile,
   running,
-  runtime,
   compileResult,
   lastSavedAt,
   savePending,
   saveError,
   saveBlocked,
 }: StatusBarProps) {
-  const activeProfile = getProfile(profile)
   const savedTime = lastSavedAt ? savedTimeFormatter.format(lastSavedAt) : null
   const saveState = saveBlocked
     ? {
@@ -57,22 +44,18 @@ export default function StatusBar({
         : { className: 'save-state', text: '等待自动保存', title: '编辑后会短暂延迟再写入本机浏览器' }
 
   return (
-    <footer className="status-bar">
+    <footer className="status-bar wb-statusbar">
       <span className={running ? 'run-state online' : 'run-state'}>
         <i />
         {running ? '正在扫描' : '仿真暂停'}
       </span>
-      <span className="status-scan">扫描 #{runtime.scanCount}</span>
-      <span>模拟时间 {formatTime(runtime.simTime)}</span>
-      <span>档案 {activeProfile.name}</span>
-      <span className={compileResult.errors.length ? 'status-error' : ''}>
-        {compileResult.errors.length} 错误 · {compileResult.warnings.length} 警告
-      </span>
+      {compileResult.errors.length > 0 && (
+        <span className="status-error">{compileResult.errors.length} 个错误</span>
+      )}
+      <span className="status-spacer" />
       <span className={saveState.className} title={saveState.title}>
         {saveState.text}
       </span>
-      <span className="status-spacer" />
-      <span className="status-disclaimer">教学仿真器 · 非西门子官方产品 · 不兼容 S7 工程文件</span>
     </footer>
   )
 }

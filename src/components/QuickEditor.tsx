@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useLayoutEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { supportsContact, supportsOutput } from '../engine/profiles'
 import type {
@@ -16,12 +16,14 @@ import {
   collapseParallel,
   deleteNode,
   getNodeAtPath,
+  moveNodeBy,
   updateContact,
   updateOutput,
   updateTag,
   wrapInParallel,
 } from '../state/programOps'
-import { ArrowRightIcon, CloseIcon, SlidersIcon } from './Icons'
+import { CloseIcon } from './Icons'
+import { useModalFocus } from '../lib/useModalFocus'
 
 interface QuickEditorProps {
   program: Program
@@ -31,7 +33,6 @@ interface QuickEditorProps {
   onProgram: (program: Program) => void
   onClose: () => void
   onNotify: (message: string) => void
-  onOpenInspector: () => void
   onDeleteOutput?: () => void
 }
 
@@ -179,10 +180,9 @@ export default function QuickEditor({
   onProgram,
   onClose,
   onNotify,
-  onOpenInspector,
   onDeleteOutput,
 }: QuickEditorProps) {
-  const panelRef = useRef<HTMLDivElement>(null)
+  const panelRef = useModalFocus<HTMLDivElement>(true, onClose)
   const [position, setPosition] = useState({ left: 16, top: 16 })
   const rung = program.rungs.find((item) => item.id === selection.rungId)
   const node: LadderNode | null = selection.path ? getNodeAtPath(program, selection.rungId, selection.path) : null
@@ -220,29 +220,7 @@ export default function QuickEditor({
       ? Math.max(margin, Math.min(anchor.top - 22, window.innerHeight - rect.height - margin))
       : margin
     setPosition({ left, top })
-  }, [anchor, mobile])
-
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose()
-    }
-    const onPointerDown = (event: PointerEvent) => {
-      if (event.target instanceof Node && panelRef.current?.contains(event.target)) return
-      if (event.target instanceof Element && event.target.closest('.qe-scrim')) return
-      onClose()
-    }
-    window.addEventListener('keydown', onKeyDown)
-    const timer = window.setTimeout(() => window.addEventListener('pointerdown', onPointerDown), 0)
-    return () => {
-      window.removeEventListener('keydown', onKeyDown)
-      window.removeEventListener('pointerdown', onPointerDown)
-      window.clearTimeout(timer)
-    }
-  }, [onClose])
-
-  useEffect(() => {
-    panelRef.current?.focus()
-  }, [])
+  }, [anchor, mobile, panelRef])
 
   if (!rung) return null
 
@@ -291,14 +269,33 @@ export default function QuickEditor({
   const output = rung.output
   const outputOptions = hasInstance(output.kind) ? refs.boolRefs : isInteger(output.kind) ? refs.intRefs : refs.boolRefs
 
+  // 拖拽换位之外再给一条键盘/点击路径：QuickEditor 里的两个按钮，
+  // 和画布上聚焦触点后按左右方向键是同一个操作。
+  const contactPath = node?.type === 'contact' ? selection.path : null
+  const canMove = (delta: -1 | 1) =>
+    contactPath !== null && moveNodeBy(program, rung.id, contactPath, delta) !== program
+  const moveContact = (delta: -1 | 1) => {
+    if (!contactPath) return
+    onProgram(moveNodeBy(program, rung.id, contactPath, delta))
+    onNotify(delta === -1 ? '元件已向左移动一位' : '元件已向右移动一位')
+  }
+
   return createPortal(
     <>
-      <div className="qe-scrim" aria-hidden="true" />
+      <div
+        className="qe-scrim"
+        aria-hidden="true"
+        onPointerDown={(event) => {
+          event.preventDefault()
+          onClose()
+        }}
+      />
       <div
         className="qe-panel"
         ref={panelRef}
         style={mobile ? undefined : position}
         role="dialog"
+        aria-modal="true"
         aria-label={`编辑${title}`}
         tabIndex={-1}
       >
@@ -364,6 +361,24 @@ export default function QuickEditor({
             )}
 
             <div className="qe-actions">
+              <button
+                type="button"
+                className="qe-quiet"
+                disabled={!canMove(-1)}
+                aria-label="向前移动一位"
+                onClick={() => moveContact(-1)}
+              >
+                ← 左移
+              </button>
+              <button
+                type="button"
+                className="qe-quiet"
+                disabled={!canMove(1)}
+                aria-label="向后移动一位"
+                onClick={() => moveContact(1)}
+              >
+                右移 →
+              </button>
               <button
                 type="button"
                 className="qe-quiet"
@@ -534,9 +549,6 @@ export default function QuickEditor({
             )}
 
             <div className="qe-actions">
-              <button type="button" className="qe-quiet" onClick={onOpenInspector}>
-                <SlidersIcon size={15} /> 更多参数
-              </button>
               {onDeleteOutput && (
                 <button type="button" className="qe-danger" onClick={onDeleteOutput}>
                   删除梯级
@@ -548,9 +560,6 @@ export default function QuickEditor({
 
         <footer className="qe-foot">
           <span>{mobile ? '点空白处关闭 · 修改即时生效' : '回车确认 · Esc 关闭'}</span>
-          <button type="button" className="qe-more" onClick={onOpenInspector}>
-            属性面板 <ArrowRightIcon size={14} />
-          </button>
         </footer>
       </div>
     </>,
