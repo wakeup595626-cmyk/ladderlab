@@ -30,7 +30,7 @@ jobs:
       stale: ${{ steps.freshness.outputs.stale }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           # deployment 必须对应 CI 真正验证过的提交，而不是“此刻的 main”。
           ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
