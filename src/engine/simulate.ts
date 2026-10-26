@@ -123,7 +123,9 @@ function evalChain(chain: LadderNode[], incoming: boolean, runtime: Runtime): bo
       power = power && closed
       runtime.nodePower[node.id] = power
     } else {
-      const branches = node.branches.map((branch) => evalChain(branch, power, runtime))
+      // 还没闭合的草稿支路不参与能流，仿真按主线（第一条支路）计算。
+      const active = node.open === true ? node.branches.slice(0, 1) : node.branches
+      const branches = active.map((branch) => evalChain(branch, power, runtime))
       power = power && branches.some(Boolean)
       runtime.nodePower[node.id] = power
     }

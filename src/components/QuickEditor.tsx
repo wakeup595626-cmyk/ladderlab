@@ -12,6 +12,7 @@ import type {
 } from '../engine/types'
 import {
   addTag,
+  cancelOpenBranchAt,
   changeContactKind,
   changeOutputKind,
   deleteBranch,
@@ -274,7 +275,9 @@ export default function QuickEditor({
   const title = node
     ? node.type === 'contact'
       ? `${CONTACT_NAMES[node.kind]}触点`
-      : '并联分支'
+      : node.open === true
+        ? '并联分支（未闭合）'
+        : '并联分支'
     : OUTPUT_NAMES[rung.output.kind]
 
   const commitContact = (patch: Parameters<typeof updateContact>[3]) => {
@@ -441,45 +444,86 @@ export default function QuickEditor({
                 删除
               </button>
             </div>
-            <p className="qe-note">并联：点选图纸上的线路，再点段头的「打开分支」。</p>
+            <p className="qe-note">
+              并联：点两个元件之间的 +，选「加入并联分支」；
+              选中元件后 Ctrl+C / Ctrl+V 可按顺序复制。
+            </p>
           </div>
         )}
 
         {node?.type === 'parallel' && (
           <div className="qe-body">
             <div className="qe-branches">
-              {node.branches.map((branch, index) => (
-                <div className="qe-branch-row" key={`${node.id}-${index}`}>
-                  <span>支路 {index + 1}</span>
-                  <small>{branch.length} 个元件</small>
+              {node.branches.map((branch, index) => {
+                const isMain = index === 0
+                const label = node.open === true
+                  ? (isMain ? '主线（未闭合）' : `草稿支路 ${index}`)
+                  : `支路 ${index + 1}`
+                // 未闭合时 branch 0 是整条主线，误删会把已画好的元件一起带走。
+                const cannotDelete = node.open === true && isMain
+                return (
+                  <div className="qe-branch-row" key={`${node.id}-${index}`}>
+                    <span>{label}</span>
+                    <small>{branch.length} 个元件</small>
+                    <button
+                      type="button"
+                      className="qe-quiet"
+                      disabled={cannotDelete || node.branches.length < 2}
+                      title={cannotDelete
+                        ? '主线不能单独删除；请点「取消未闭合分支」'
+                        : undefined}
+                      aria-label={`删除${label}`}
+                      onClick={() => {
+                        const next = deleteBranch(program, rung.id, selection.path!, index)
+                        if (next === program) return
+                        onProgram(next)
+                        onNotify(`${label}已删除`)
+                        onClose()
+                      }}
+                    >
+                      删除
+                    </button>
+                  </div>
+                )
+              })}
+            </div>
+            {node.open === true ? (
+              <>
+                <p className="qe-note">
+                  点分支右侧「合并分支」，再点主线上的 + 完成闭合；
+                  仿真只按主线计算。
+                </p>
+                <div className="qe-actions">
                   <button
                     type="button"
-                    className="qe-quiet"
-                    disabled={node.branches.length < 2}
-                    aria-label={`删除支路 ${index + 1}`}
+                    className="qe-danger"
                     onClick={() => {
-                      const next = deleteBranch(program, rung.id, selection.path!, index)
-                      if (next === program) return
-                      onProgram(next)
-                      onNotify(`支路 ${index + 1} 已删除`)
+                      onProgram(cancelOpenBranchAt(program, rung.id, selection.path!))
+                      onNotify('已取消未闭合分支（Ctrl+Z 可撤销）')
                       onClose()
                     }}
                   >
-                    删除
+                    取消未闭合分支
                   </button>
                 </div>
-              ))}
-            </div>
-            <p className="qe-note">任一并联支路接通时，能流继续向右传递。增加分支请点选线路后使用段头「打开分支」。</p>
-            <div className="qe-actions">
-              <button
-                type="button"
-                className="qe-danger"
-                onClick={() => onDeleteNode?.()}
-              >
-                删除整个并联
-              </button>
-            </div>
+              </>
+            ) : (
+              <>
+                <p className="qe-note">
+                  任一并联支路接通时，能流继续向右传递。
+                  再并联一条：点线路之间的 +，选「加入并联分支」。
+                </p>
+                <div className="qe-actions">
+                  <button
+                    type="button"
+                    className="qe-danger"
+                    onClick={() => onDeleteNode?.()}
+                  >
+                    删除整个并联
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         )}
 

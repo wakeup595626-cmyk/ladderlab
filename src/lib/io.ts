@@ -65,11 +65,20 @@ function parseNode(value: unknown, where: string, depth = 0): LadderNode {
   }
   if (type === 'parallel') {
     if (!Array.isArray(node.branches) || node.branches.length === 0) fail(`${where}.branches 必须是非空数组。`)
+    const autoTagId = typeof node.autoTagId === 'string' && node.autoTagId.trim()
+      ? node.autoTagId
+      : undefined
     const branches = node.branches.map((branch, index) => {
       if (!Array.isArray(branch)) fail(`${where}.branches[${index}] 必须是数组。`)
       return branch.map((item, itemIndex) => parseNode(item, `${where}.branches[${index}][${itemIndex}]`, depth + 1))
     })
-    return { type: 'parallel', id: text(node.id, `${where}.id`).trim(), branches }
+    return {
+      type: 'parallel',
+      id: text(node.id, `${where}.id`).trim(),
+      branches,
+      ...(node.open === true ? { open: true } : {}),
+      ...(autoTagId ? { autoTagId } : {}),
+    }
   }
   return fail(`${where}.type 只能是 contact 或 parallel。`)
 }

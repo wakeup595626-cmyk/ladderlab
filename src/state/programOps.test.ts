@@ -1,14 +1,22 @@
 import { describe, expect, it } from 'vitest'
 import {
+  cancelOpenBranchAt,
   canDeleteTag,
+  cloneNodesForPaste,
+  closeOpenBranchAt,
+  collectNodesAtPaths,
   deleteTag,
+  deleteNodesByIds,
   duplicateRung,
+  hasOpenBranch,
   insertContactAt,
   insertNodeAt,
+  insertNodesAt,
   makeContactNode,
   moveNode,
   moveNodeBy,
   moveRungTo,
+  openBranchAtSlot,
   pickDefaultTag,
   tagsDependingOn,
   tagUsage,
@@ -351,5 +359,274 @@ describe('programOps 变量依赖与程序段复制', () => {
     const coilCopy = duplicateRung(coilSource, 'coil').rungs[1]
     expect(coilCopy.output.tag).toBe('Coil')
     expect(coilCopy.output.id).not.toBe(coilSource.rungs[0].output.id)
+  })
+})
+
+describe('programOps 分支编排与批量编辑', () => {
+  it('hasOpenBranch 能递归识别未闭合支路，闭合结构返回 false', () => {
+    const closed = parallel('closed', [contact('a', 'A')], [contact('b', 'B')])
+    const nestedDraft: ParallelNode = {
+      type: 'parallel',
+      id: 'nested-draft',
+      open: true,
+      branches: [[contact('c', 'C')], []],
+    }
+
+    expect(hasOpenBranch([closed])).toBe(false)
+    expect(hasOpenBranch([closed, nestedDraft])).toBe(true)
+  })
+
+  it('openBranchAtSlot 在主线指定插入点打开并联草稿，并拒绝 index 0 与末尾', () => {
+    const a = contact('a', 'A')
+    const b = contact('b', 'B')
+    const c = contact('c', 'C')
+    const source = program([rung('r1', [a, b, c])])
+
+    const opened = openBranchAtSlot(source, 'r1', { chain: [], index: 1 })
+    if (!opened) throw new Error('有效主线插入点应能打开分支')
+
+    const nodes = rungOf(opened.program, 'r1').nodes
+    expect(nodes).toHaveLength(2)
+    expect(nodes[0]).toEqual(a)
+    const split = nodes[1]
+    if (split.type !== 'parallel') throw new Error('打开分支应生成并联节点')
+    expect(split).toMatchObject({ id: opened.parallelId, open: true })
+    expect(split.branches[0]).toEqual([b, c])
+    expect(split.branches[1]).toHaveLength(1)
+    const draft = split.branches[1][0]
+    if (draft.type !== 'contact') throw new Error('草稿支路应包含起始触点')
+    expect(draft).toMatchObject({ id: opened.nodeId, kind: 'NO' })
+    expect(hasOpenBranch(nodes)).toBe(true)
+
+    expect(rungOf(source, 'r1').nodes).toEqual([a, b, c])
+    expect(openBranchAtSlot(source, 'r1', { chain: [], index: 0 })).toBeNull()
+    expect(openBranchAtSlot(source, 'r1', { chain: [], index: 3 })).toBeNull()
+  })
+
+  it('草稿支路可以连续插入多个节点并保留 open 状态', () => {
+    const a = contact('a', 'A')
+    const b = contact('b', 'B')
+    const extra1 = contact('extra1', 'Extra1')
+    const extra2 = contact('extra2', 'Extra2')
+    const source = program([rung('r1', [a, b])])
+    const opened = openBranchAtSlot(source, 'r1', { chain: [], index: 1 })
+    if (!opened) throw new Error('有效主线插入点应能打开分支')
+
+    const split = rungOf(opened.program, 'r1').nodes[1]
+    if (split.type !== 'parallel') throw new Error('打开分支应生成并联节点')
+    const draft = split.branches[1][0]
+
+    const withFirst = insertNodeAt(
+      opened.program,
+      'r1',
+      { chain: [1, 1], index: 1 },
+      extra1,
+    )
+    const withSecond = insertNodeAt(withFirst, 'r1', { chain: [1, 1], index: 2 }, extra2)
+    const updated = rungOf(withSecond, 'r1').nodes[1]
+    if (updated.type !== 'parallel') throw new Error('连续插入后并联节点应保留')
+
+    expect(updated.open).toBe(true)
+    expect(updated.branches[0]).toEqual([b])
+    expect(updated.branches[1]).toEqual([draft, extra1, extra2])
+    expect(hasOpenBranch(rungOf(withSecond, 'r1').nodes)).toBe(true)
+    expect(rungOf(source, 'r1').nodes).toEqual([a, b])
+  })
+
+  it('选择主线最后一个 slot 闭合后保留完整结构并清除 open', () => {
+    const a = contact('a', 'A')
+    const b = contact('b', 'B')
+    const c = contact('c', 'C')
+    const draftX = contact('draft-x', 'DraftX')
+    const draftY = contact('draft-y', 'DraftY')
+    const source = program([rung('r1', [a, b, c])])
+    const opened = openBranchAtSlot(source, 'r1', { chain: [], index: 1 })
+    if (!opened) throw new Error('有效主线插入点应能打开分支')
+
+    const split = rungOf(opened.program, 'r1').nodes[1]
+    if (split.type !== 'parallel') throw new Error('打开分支应生成并联节点')
+    const draft = split.branches[1][0]
+    const inserted = insertNodesAt(
+      opened.program,
+      'r1',
+      { chain: [1, 1], index: 1 },
+      [draftX, draftY],
+    )
+    if (!inserted) throw new Error('草稿支路应能批量插入')
+
+    const closed = closeOpenBranchAt(
+      inserted.program,
+      'r1',
+      [1],
+      split.branches[0].length,
+    )
+    if (!closed) throw new Error('选择主线末尾 slot 应能闭合分支')
+
+    const nodes = rungOf(closed, 'r1').nodes
+    expect(nodes).toHaveLength(2)
+    expect(nodes[0]).toEqual(a)
+    const merged = nodes[1]
+    if (merged.type !== 'parallel') throw new Error('闭合后应保留并联节点')
+    expect(merged.id).toBe(opened.parallelId)
+    expect(merged.open).toBe(false)
+    expect(merged.branches).toEqual([[b, c], [draft, draftX, draftY]])
+    expect(hasOpenBranch(nodes)).toBe(false)
+    expect(closeOpenBranchAt(inserted.program, 'r1', [1], split.branches[0].length + 1))
+      .toBeNull()
+  })
+
+  it('取消草稿支路后恢复原程序并丢弃草稿节点', () => {
+    const a = contact('a', 'A')
+    const b = contact('b', 'B')
+    const extra = contact('extra', 'Extra')
+    const source = program([rung('r1', [a, b])])
+    const opened = openBranchAtSlot(source, 'r1', { chain: [], index: 1 })
+    if (!opened) throw new Error('有效主线插入点应能打开分支')
+
+    const withDraft = insertNodeAt(opened.program, 'r1', { chain: [1, 1], index: 1 }, extra)
+    const cancelled = cancelOpenBranchAt(withDraft, 'r1', [1])
+
+    expect(cancelled).toEqual(source)
+    expect(rungOf(cancelled, 'r1').nodes).toEqual([a, b])
+    expect(hasOpenBranch(rungOf(cancelled, 'r1').nodes)).toBe(false)
+    expect(hasOpenBranch(rungOf(withDraft, 'r1').nodes)).toBe(true)
+  })
+
+  it('取消分支时回收自动新建的变量，闭合分支时保留该变量', () => {
+    const a = contact('a', 'A')
+    const b = contact('b', 'B')
+    const source = program([rung('r1', [a, b])], [tag('A'), tag('B'), tag('Coil')])
+    const opened = openBranchAtSlot(source, 'r1', { chain: [], index: 1 })
+    if (!opened) throw new Error('有效主线插入点应能打开分支')
+
+    expect(opened.program.tags).toHaveLength(4)
+    expect(cancelOpenBranchAt(opened.program, 'r1', [1]).tags).toEqual(source.tags)
+
+    const main = rungOf(opened.program, 'r1').nodes[1]
+    if (main.type !== 'parallel') throw new Error('打开分支应生成并联节点')
+    const closed = closeOpenBranchAt(opened.program, 'r1', [1], main.branches[0].length)
+    if (!closed) throw new Error('应能在主线末尾闭合分支')
+    expect(closed.tags).toHaveLength(4)
+  })
+
+  it('insertNodesAt 按批次顺序插入且不修改原程序或原节点数组', () => {
+    const a = contact('a', 'A')
+    const b = contact('b', 'B')
+    const x = contact('x', 'X')
+    const y = contact('y', 'Y')
+    const z = contact('z', 'Z')
+    const source = program([rung('r1', [a, b])])
+    const originalRung = source.rungs[0]
+    const originalNodes = source.rungs[0].nodes
+
+    const inserted = insertNodesAt(
+      source,
+      'r1',
+      { chain: [], index: 1 },
+      [x, y, z],
+    )
+    if (!inserted) throw new Error('有效插入点应能批量插入')
+
+    expect(rungOf(inserted.program, 'r1').nodes).toEqual([a, x, y, z, b])
+    expect(inserted.ids).toEqual(['x', 'y', 'z'])
+    expect(source.rungs[0]).toBe(originalRung)
+    expect(source.rungs[0].nodes).toBe(originalNodes)
+    expect(originalNodes).toEqual([a, b])
+    expect(insertNodesAt(source, 'r1', { chain: [], index: 1 }, [])).toBeNull()
+  })
+
+  it('cloneNodesForPaste 深拷贝并联子树、重建全部 id 并保持节点顺序', () => {
+    const compared: ContactNode = {
+      ...contact('cmp', 'Count', 'CMP'),
+      compare: { op: '>=', value: 3 },
+    }
+    const branch = parallel(
+      'p',
+      [contact('b', 'B')],
+      [contact('c', 'C'), contact('d', 'D')],
+    )
+    const tail = contact('e', 'E')
+    const source: LadderNode[] = [compared, branch, tail]
+    const originalIds = collectIds(source)
+
+    const cloned = cloneNodesForPaste(source)
+    expect(cloned.map((node) => node.type)).toEqual(['contact', 'parallel', 'contact'])
+
+    const clonedCompared = cloned[0]
+    if (clonedCompared.type !== 'contact') throw new Error('首节点应为比较触点')
+    expect(clonedCompared).toMatchObject({ kind: 'CMP', tag: 'Count' })
+    expect(clonedCompared.compare).toEqual({ op: '>=', value: 3 })
+    expect(clonedCompared.compare).not.toBe(compared.compare)
+
+    const clonedBranch = cloned[1]
+    if (clonedBranch.type !== 'parallel') throw new Error('第二节点应为并联结构')
+    expect(clonedBranch.id).not.toBe(branch.id)
+    expect(clonedBranch.branches).not.toBe(branch.branches)
+    expect(clonedBranch.branches[0]).not.toBe(branch.branches[0])
+    expect(clonedBranch.branches[0][0]).not.toBe(branch.branches[0][0])
+    expect(clonedBranch.branches.map((nodes) => (
+      nodes.map((node) => node.type === 'contact' ? node.tag : null)
+    ))).toEqual([['B'], ['C', 'D']])
+
+    const clonedTail = cloned[2]
+    if (clonedTail.type !== 'contact') throw new Error('末节点应为触点')
+    expect(clonedTail.tag).toBe('E')
+
+    const cloneIds = collectIds(cloned)
+    expect(cloneIds).toHaveLength(originalIds.length)
+    expect(new Set(cloneIds).size).toBe(cloneIds.length)
+    expect(cloneIds.some((id) => originalIds.includes(id))).toBe(false)
+    const secondCloneIds = collectIds(cloneNodesForPaste(source))
+    expect(new Set([...cloneIds, ...secondCloneIds]).size).toBe(cloneIds.length + secondCloneIds.length)
+
+    if (!clonedCompared.compare) throw new Error('比较触点应保留比较参数')
+    clonedCompared.compare.value = 9
+    expect(compared.compare?.value).toBe(3)
+  })
+
+  it('collectNodesAtPaths 提取多个嵌套路径并按图纸顺序返回', () => {
+    const a = contact('a', 'A')
+    const b = contact('b', 'B')
+    const c = contact('c', 'C')
+    const d = contact('d', 'D')
+    const e = contact('e', 'E')
+    const tail = contact('tail', 'Tail')
+    const firstParallel = parallel('p', [a, b], [c])
+    const secondParallel = parallel('q', [d], [e])
+    const source = program([rung('r1', [firstParallel, tail, secondParallel])])
+
+    expect(collectNodesAtPaths(
+      source,
+      'r1',
+      [[2, 1, 0], [1], [0, 1, 0], [0, 0, 0]],
+    )).toEqual([a, c, tail, e])
+
+    // 祖先已选中时只返回整棵子树；重复路径和偶数长度的链路径不会重复产出。
+    expect(collectNodesAtPaths(
+      source,
+      'r1',
+      [[0], [0, 0, 0], [1], [1], [], [0, 1]],
+    )).toEqual([firstParallel, tail])
+  })
+
+  it('deleteNodesByIds 批量删除跨层节点并清理空并联', () => {
+    const a = contact('a', 'A')
+    const b = contact('b', 'B')
+    const c = contact('c', 'C')
+    const d = contact('d', 'D')
+    const branch = parallel('p', [b], [c])
+    const source = program([rung('r1', [a, branch, d])])
+
+    const cleared = deleteNodesByIds(source, 'r1', new Set(['b', 'c']))
+    expect(rungOf(cleared, 'r1').nodes).toEqual([a, d])
+    expect(rungOf(cleared, 'r1').nodes.some((node) => node.type === 'parallel')).toBe(false)
+
+    // 只删一条支路时，另一条支路应替换并联节点而不是留下空壳。
+    const collapsed = deleteNodesByIds(source, 'r1', new Set(['a', 'b']))
+    expect(rungOf(collapsed, 'r1').nodes).toEqual([c, d])
+    expect(rungOf(collapsed, 'r1').nodes.some((node) => node.type === 'parallel')).toBe(false)
+
+    expect(deleteNodesByIds(source, 'r1', new Set())).toBe(source)
+    expect(rungOf(source, 'r1').nodes).toEqual([a, branch, d])
   })
 })

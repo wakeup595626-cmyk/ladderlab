@@ -110,8 +110,10 @@ function expandGuardTerms(chain: LadderNode[], terms: GuardTerm[], depth: number
     }
     if (depth >= 3) continue
     const next: GuardTerm[] = []
+    // 未闭合分支的草稿还没接进电路，判断互锁时只看主线。
+    const activeBranches = node.open === true ? node.branches.slice(0, 1) : node.branches
     for (const term of current) {
-      for (const branch of node.branches) {
+      for (const branch of activeBranches) {
         const copy = cloneGuardTerm(term)
         expandGuardTerms(branch, [copy], depth + 1)
         next.push(copy)

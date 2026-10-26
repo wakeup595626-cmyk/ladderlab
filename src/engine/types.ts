@@ -36,6 +36,13 @@ export interface ParallelNode {
   type: 'parallel'
   id: string
   branches: LadderNode[][]
+  /**
+   * 博途式「打开分支」还没闭合时的状态：第一条支路是主线，
+   * 其余支路是草稿。此时不合并不折叠，仿真只走主线。
+   */
+  open?: boolean
+  /** 打开草稿时自动新建的变量；取消这条分支且没人再引用时一并回收。 */
+  autoTagId?: string
 }
 
 export type LadderNode = ContactNode | ParallelNode
@@ -119,4 +126,6 @@ export interface Selection {
   path: number[] | null
   /** 选中线路时记录所属链路径与插入位；此时 path 仍为 null，表示没有选中元件。 */
   wire?: { chain: number[]; index: number } | null
+  /** Ctrl/Shift 多选的全部元件路径；path 仍指向主选中对象。 */
+  paths?: number[][] | null
 }

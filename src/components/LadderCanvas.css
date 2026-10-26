@@ -468,19 +468,21 @@
   fill: transparent;
 }
 
-.ll-node:hover .ll-node-hit {
+/* 一律用子选择器：并联节点里面还套着别的 .ll-node，
+   写成后代选择器会让整棵子树一起被描边、一起变蓝。 */
+.ll-node:hover > .ll-node-hit {
   fill: transparent;
   stroke: var(--accent);
   stroke-width: 1;
 }
 
-.ll-node:focus-visible .ll-node-hit {
+.ll-node:focus-visible > .ll-node-hit {
   fill: var(--accent-wash);
   stroke: var(--accent);
   stroke-width: 1;
 }
 
-.ll-node.is-selected .ll-node-hit {
+.ll-node.is-selected > .ll-node-hit {
   fill: var(--accent-wash);
 }
 
@@ -488,7 +490,7 @@
   opacity: 0.45;
 }
 
-.ll-node.is-drop-target .ll-node-hit {
+.ll-node.is-drop-target > .ll-node-hit {
   fill: var(--accent-wash);
   stroke: var(--accent);
   stroke-width: 2;
@@ -588,8 +590,8 @@
   pointer-events: none;
 }
 
-.ll-node.is-selected .ll-selection-box,
-.ll-node:focus-visible .ll-selection-box {
+.ll-node.is-selected > .ll-selection-box,
+.ll-node:focus-visible > .ll-selection-box {
   opacity: 1;
 }
 
@@ -668,7 +670,7 @@
   pointer-events: all;
 }
 
-.ll-slot:focus-visible .ll-slot-plus rect {
+.ll-slot:focus-visible .ll-slot-plus rect:not(.ll-slot-plus-hit) {
   fill: var(--accent);
   stroke: var(--accent);
   stroke-width: 2;
@@ -683,7 +685,7 @@
   fill: var(--accent-wash);
 }
 
-.ll-slot.is-drop-target .ll-slot-plus rect {
+.ll-slot.is-drop-target .ll-slot-plus rect:not(.ll-slot-plus-hit) {
   fill: var(--accent);
   stroke: var(--accent);
 }
@@ -999,5 +1001,256 @@
 
   .ll-node-grip {
     opacity: 0.55;
+  }
+}
+
+/* ── 插入点菜单 ───────────────────────────────────────────────
+   菜单通过 portal 挂到 body 上，所以这里必须是 fixed 定位；
+   它不能继承 SVG 的坐标系，也不会被程序段卡片的 overflow 裁掉。 */
+.ll-slot-menu {
+  position: fixed;
+  z-index: 90;
+  width: 232px;
+  max-height: min(420px, calc(100vh - 16px));
+  overflow-y: auto;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  box-shadow: var(--shadow-overlay);
+  color: var(--text);
+  font-family: var(--sans);
+}
+
+.ll-slot-menu-title {
+  padding: 6px 8px 8px;
+  color: var(--muted);
+  font: 600 10px/1.4 var(--mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.ll-slot-menu-item {
+  display: flex;
+  width: 100%;
+  min-height: 40px;
+  align-items: center;
+  gap: 10px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ll-slot-menu-item:hover,
+.ll-slot-menu-item:focus-visible {
+  background: var(--accent-wash);
+  outline: none;
+}
+
+.ll-slot-menu-item:focus-visible {
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.ll-slot-menu-item:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+}
+
+.ll-slot-menu-symbol {
+  width: 46px;
+  flex: 0 0 auto;
+  color: var(--faint);
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: -0.04em;
+}
+
+.ll-slot-menu-sep {
+  height: 1px;
+  margin: 6px 4px;
+  background: var(--border);
+}
+
+.ll-slot-menu-hint {
+  padding: 4px 8px 6px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+/* ── 未闭合分支：右侧合并入口 ─────────────────────────────── */
+.ll-merge-chip {
+  cursor: pointer;
+}
+
+.ll-merge-chip-hit {
+  fill: var(--surface);
+  stroke: var(--accent);
+  stroke-width: 1;
+  transition: fill var(--dur-press) var(--ease-out);
+}
+
+.ll-merge-chip:hover .ll-merge-chip-hit,
+.ll-merge-chip:focus-visible .ll-merge-chip-hit {
+  fill: var(--accent-wash);
+}
+
+.ll-merge-chip:focus-visible {
+  outline: none;
+}
+
+.ll-merge-chip-text {
+  fill: var(--accent);
+  font-family: var(--sans);
+  font-size: 11px;
+  font-weight: 600;
+  text-anchor: middle;
+  pointer-events: none;
+}
+
+/* 合并取点阶段：只有主线上的合法插入位亮蓝，点击即闭合。 */
+.ll-slot.is-merge-candidate .ll-wire {
+  stroke: var(--accent);
+  stroke-width: 2.5;
+}
+
+.ll-slot.is-merge-candidate .ll-slot-wide-hit {
+  fill: var(--accent-wash);
+}
+
+.ll-slot.is-merge-candidate .ll-slot-plus {
+  opacity: 1;
+  pointer-events: all;
+}
+
+.ll-slot.is-merge-candidate .ll-slot-plus rect:not(.ll-slot-plus-hit) {
+  fill: var(--accent);
+  stroke: var(--accent);
+}
+
+.ll-slot.is-merge-candidate .ll-slot-plus path {
+  stroke: var(--accent-ink);
+}
+
+.ll-merge-slot-mark {
+  fill: var(--accent-ink);
+  font-family: var(--sans);
+  font-size: 10.5px;
+  font-weight: 700;
+  text-anchor: middle;
+  pointer-events: none;
+}
+
+/* Ctrl / Shift 多选：虚线框标出整组，主选中仍用实心淡蓝。 */
+.ll-node.is-group-selected > .ll-selection-box {
+  opacity: 1;
+}
+
+.ll-node.is-group-selected > .ll-node-hit {
+  stroke: var(--accent);
+  stroke-dasharray: 3 3;
+}
+
+.ll-node.is-primary-selected > .ll-node-hit {
+  fill: var(--accent-wash);
+}
+
+/* 插入点 + 的真实点击区：视觉上仍是 16px 的小圆点，命中层由 JSX 给出 44×44。
+   这里绝不能改写 x / y / width / height —— 一改就把触控热区压回 28×44。
+   命中层必须透明，否则会画出一个多余的白框。 */
+.ll-slot-plus {
+  cursor: pointer;
+}
+
+.ll-slot-plus rect.ll-slot-plus-hit {
+  fill: transparent;
+  stroke: none;
+}
+
+/* 选线层与 + 各自可获得键盘焦点，视觉上都应回馈为“这一位可以插入”。 */
+.ll-slot-wire {
+  cursor: pointer;
+  outline: none;
+}
+
+.ll-slot-wire:focus-visible .ll-slot-wide-hit {
+  fill: var(--accent-wash);
+}
+
+.ll-slot-wire:focus-visible .ll-wire {
+  stroke: var(--accent);
+  stroke-width: 3;
+}
+
+.ll-slot-plus:focus-visible {
+  outline: none;
+}
+
+.ll-slot-plus:focus-visible rect:not(.ll-slot-plus-hit) {
+  fill: var(--accent);
+  stroke: var(--accent);
+}
+
+.ll-slot-plus:focus-visible path {
+  stroke: var(--accent-ink);
+}
+
+/* 尚未闭合的并联草稿支路：虚线表示“没接进电路”，合并后自动恢复实线。 */
+.ll-wire.is-draft {
+  stroke: var(--accent);
+  stroke-width: 1.5;
+  stroke-dasharray: 4 3;
+  opacity: 0.75;
+}
+
+/* 键盘焦点落在“选线”或“+”任一层时，都把 + 显影出来。 */
+.ll-slot:focus-within .ll-slot-plus {
+  opacity: 1;
+  pointer-events: all;
+}
+
+.ll-slot.is-wire-selected .ll-slot-plus {
+  opacity: 1;
+  pointer-events: all;
+}
+
+@media (pointer: coarse) {
+  .ll-slot-menu-item {
+    min-height: 44px;
+  }
+
+  /* 触屏没有 hover，插入点必须自己露出来，否则用户根本不知道 + 在哪。
+     视觉上保持 16px 的小圆点，命中区仍是 44×44；相邻点只在视觉空隙里
+     轻微重叠，点圆点本身不会误触到隔壁。 */
+  .ll-slot-plus {
+    opacity: 0.5 !important;
+    pointer-events: all !important;
+  }
+
+  /* 选线找分支点、已打开的分支头上不显示 +，避免把分叉点又插满圆点。 */
+  .ll-slot.is-branch-candidate .ll-slot-plus,
+  .ll-slot.is-branch-open .ll-slot-plus {
+    opacity: 0 !important;
+    pointer-events: none !important;
+  }
+
+  .ll-slot:hover .ll-slot-plus,
+  .ll-slot.is-wire-selected .ll-slot-plus,
+  .ll-slot.is-drop-target .ll-slot-plus,
+  .ll-slot.is-merge-candidate .ll-slot-plus,
+  .ll-slot:focus-within .ll-slot-plus {
+    opacity: 1 !important;
+    pointer-events: all !important;
+  }
+}
+
+@media (max-width: 420px) {
+  .ll-slot-menu {
+    width: min(232px, calc(100vw - 16px));
   }
 }

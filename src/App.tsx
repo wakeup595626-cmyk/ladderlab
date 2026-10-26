@@ -9,7 +9,7 @@ import { GripIcon, LadderIcon, TagIcon } from './components/Icons'
 import Inspector, { type InspectorTab } from './components/Inspector'
 import InstructionBar from './components/InstructionBar'
 import InstructionDrawer from './components/InstructionDrawer'
-import LadderCanvas from './components/LadderCanvas'
+import LadderCanvas, { type SlotRef } from './components/LadderCanvas'
 import LibraryDialog from './components/LibraryDialog'
 import { useMediaQuery } from './lib/useMediaQuery'
 import ProjectDrawer from './components/ProjectDrawer'
@@ -49,18 +49,23 @@ import {
 import {
   addRung,
   changeOutputKind,
+  cloneNodesForPaste,
+  closeOpenBranchAt,
+  collectNodesAtPaths,
   deleteNode,
+  deleteNodesByIds,
   deleteRung,
   duplicateRung,
   getNodeAtPath,
   insertContact,
   insertNodeAt,
+  insertNodesAt,
   makeContactNode,
   moveNode,
   moveNodeBy,
   moveRung,
   moveRungTo,
-  openBranchAt,
+  openBranchAtSlot,
   setProfile as setProgramProfile,
   setProjectName,
   updateRungLabel,
@@ -132,7 +137,8 @@ function runtimeSignature(program: Program): string {
   const encodeNode = (node: Program['rungs'][number]['nodes'][number]): unknown => (
     node.type === 'contact'
       ? ['c', node.id, node.kind, node.tag, node.compare?.op ?? null, node.compare?.value ?? null]
-      : ['p', node.id, node.branches.map((branch) => branch.map(encodeNode))]
+      : ['p', node.id, node.open === true ? 1 : 0,
+        node.branches.map((branch) => branch.map(encodeNode))]
   )
   return JSON.stringify({
     profile: program.profile,
@@ -175,6 +181,42 @@ function findNodePath(program: Program, rungId: string, nodeId: string): number[
   return walk(rung.nodes, [])
 }
 
+function samePath(left: number[] | null | undefined, right: number[] | null | undefined): boolean {
+  if (!left || !right) return left === right
+  return left.length === right.length && left.every((value, index) => value === right[index])
+}
+
+/** 按图纸顺序列出程序段里的所有元件路径，供 Shift 连选同一条线路使用。 */
+function listNodePaths(program: Program, rungId: string): number[][] {
+  const rung = program.rungs.find((item) => item.id === rungId)
+  if (!rung) return []
+  const out: number[][] = []
+  const walk = (chain: LadderNode[], prefix: number[]) => {
+    chain.forEach((node, index) => {
+      const path = [...prefix, index]
+      out.push(path)
+      if (node.type !== 'parallel') return
+      node.branches.forEach((branch, branchIndex) => {
+        walk(branch, [...path, branchIndex])
+      })
+    })
+  }
+  walk(rung.nodes, [])
+  return out
+}
+
+function chainLengthAtPath(nodes: LadderNode[], chain: number[]): number | null {
+  let scope = nodes
+  for (let offset = 0; offset < chain.length; offset += 2) {
+    const node = scope[chain[offset]]
+    if (!node || node.type !== 'parallel') return null
+    const branch = node.branches[chain[offset + 1]]
+    if (!branch) return null
+    scope = branch
+  }
+  return scope.length
+}
+
 export default function App() {
   const { confirm, dialog: confirmDialog } = useConfirmDialog()
   const [startup] = useState<LoadSavedProgramResult>(() => loadSavedProgram())
@@ -210,6 +252,8 @@ export default function App() {
   )
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>('properties')
   const [quickEdit, setQuickEdit] = useState<QuickEditState | null>(null)
+  // 复制的是“快照”而不是选区引用：复制后再改原元件，粘贴出来的仍是复制时的样子。
+  const [clipboard, setClipboard] = useState<LadderNode[]>([])
   const [mobilePanel, setMobilePanel] = useState<MobilePanel>('none')
   const [inspectorOpen, setInspectorOpen] = useState(false)
   const [libraryOpen, setLibraryOpen] = useState(false)
@@ -250,9 +294,19 @@ export default function App() {
   // 不回写 state，省掉一轮额外渲染。
   const selection = useMemo<Selection | null>(() => {
     if (!selectionState) return null
-    if (selectionState.wire || !selectionState.path) return selectionState
-    if (getNodeAtPath(program, selectionState.rungId, selectionState.path)) return selectionState
-    return { rungId: selectionState.rungId, path: null }
+    const validPaths = (selectionState.paths ?? []).filter((path) => (
+      path.length > 0 && getNodeAtPath(program, selectionState.rungId, path)
+    ))
+    const withPaths: Selection = validPaths.length > 1
+      ? { ...selectionState, paths: validPaths }
+      : { ...selectionState, paths: undefined }
+    if (selectionState.wire || !selectionState.path) return withPaths
+    if (getNodeAtPath(program, selectionState.rungId, selectionState.path)) return withPaths
+    return {
+      rungId: selectionState.rungId,
+      path: null,
+      paths: validPaths.length > 1 ? validPaths : undefined,
+    }
   }, [program, selectionState])
 
   // 布局 effect 在提交后同步执行、早于任何后续任务：编辑后立刻刷新或切后台时，
@@ -429,6 +483,119 @@ export default function App() {
       }
     })
   }, [])
+
+  const copySelection = useCallback(() => {
+    if (!selection) {
+      notify('先选中要复制的元件')
+      return
+    }
+    const paths = selection.paths?.length
+      ? selection.paths
+      : selection.path
+        ? [selection.path]
+        : []
+    if (paths.length === 0) {
+      notify('先选中要复制的元件')
+      return
+    }
+    const nodes = collectNodesAtPaths(program, selection.rungId, paths)
+    if (nodes.length === 0) {
+      notify('选中的元件已经不存在')
+      return
+    }
+    setClipboard(cloneNodesForPaste(nodes))
+    notify('已复制 ' + nodes.length + ' 个元件，选中插入点后 Ctrl+V')
+  }, [notify, program, selection])
+
+  /** slot 优先；没有指定时按博途习惯接在当前选中元件之后。 */
+  const pasteAt = useCallback((slot?: SlotRef) => {
+    if (clipboard.length === 0) {
+      notify('剪贴板还是空的，先选中元件按 Ctrl+C')
+      return
+    }
+    let target = slot ?? null
+    if (!target) {
+      const rungId = selection?.rungId ?? program.rungs[0]?.id
+      const rung = program.rungs.find((item) => item.id === rungId)
+      if (!rung || !rungId) {
+        notify('先选一个程序段')
+        return
+      }
+      if (selection?.wire) {
+        const length = chainLengthAtPath(rung.nodes, selection.wire.chain)
+        if (length === null) {
+          notify('这条线路已经不存在，请重新点选插入点')
+          return
+        }
+        target = {
+          rungId,
+          chain: selection.wire.chain,
+          index: Math.min(selection.wire.index, length),
+        }
+      } else if (selection?.path) {
+        target = {
+          rungId,
+          chain: selection.path.slice(0, -1),
+          index: (selection.path.at(-1) ?? 0) + 1,
+        }
+      } else {
+        target = { rungId, chain: [], index: rung.nodes.length }
+      }
+    }
+
+    // 每次粘贴都重新生成 ID，连续按 Ctrl+V 不会出现两份同 ID 的元件。
+    const result = insertNodesAt(program, target.rungId, target, cloneNodesForPaste(clipboard))
+    if (!result) {
+      notify('这个位置不能粘贴')
+      return
+    }
+    commit(result.program)
+    const lastId = result.ids.at(-1)
+    setSelection({
+      rungId: target.rungId,
+      path: lastId ? findNodePath(result.program, target.rungId, lastId) : null,
+    })
+    setQuickEdit(null)
+    setMobilePanel('none')
+    notify('已粘贴 ' + result.ids.length + ' 个元件（Ctrl+Z 撤销）')
+  }, [clipboard, commit, notify, program, selection])
+
+  /** Ctrl 点选逐个加选，Shift 点选同一条线路上连续的一段。 */
+  const extendSelection = useCallback((
+    rungId: string,
+    path: number[],
+    mode: 'toggle' | 'range',
+  ) => {
+    setSelection((current) => {
+      const base = current?.rungId === rungId
+        ? (current.paths?.length ? current.paths : current.path ? [current.path] : [])
+        : []
+      if (mode === 'toggle') {
+        const exists = base.some((item) => samePath(item, path))
+        const paths = exists
+          ? base.filter((item) => !samePath(item, path))
+          : [...base, path]
+        const primary = exists
+          ? (current?.path && samePath(current.path, path) ? paths[0] ?? null : current?.path ?? null)
+          : path
+        return { rungId, path: primary, paths: paths.length > 1 ? paths : undefined }
+      }
+
+      const anchor = current?.rungId === rungId && current.path ? current.path : path
+      const prefix = path.slice(0, -1)
+      if (!samePath(anchor.slice(0, -1), prefix)) {
+        return { rungId, path, paths: undefined }
+      }
+      const from = Math.min(anchor.at(-1) ?? 0, path.at(-1) ?? 0)
+      const to = Math.max(anchor.at(-1) ?? 0, path.at(-1) ?? 0)
+      const paths = listNodePaths(program, rungId).filter((item) => {
+        if (!samePath(item.slice(0, -1), prefix)) return false
+        const index = item.at(-1) ?? 0
+        return index >= from && index <= to
+      })
+      return { rungId, path, paths: paths.length > 1 ? paths : undefined }
+    })
+  }, [program])
 
   useEffect(() => {
     if (saveTimerRef.current !== null) {
@@ -613,7 +780,11 @@ export default function App() {
       const target = event.target as HTMLElement | null
       const typing = target instanceof Element && target.matches('input, textarea, select, [contenteditable="true"]')
       const modalOpen = Boolean(document.querySelector('[role="dialog"][aria-modal="true"]'))
-      if (typing || modalOpen || (!event.ctrlKey && !event.metaKey) || event.altKey) return
+      // 插入点菜单里 Ctrl+C / Ctrl+V 交给浏览器与菜单自己的按钮处理，
+      // 避免用户在菜单上按快捷键时突然往图纸里粘贴。
+      const inMenu = target instanceof Element
+        && Boolean(target.closest('[role="menu"], .ll-slot-menu'))
+      if (typing || modalOpen || inMenu || (!event.ctrlKey && !event.metaKey) || event.altKey) return
       // 博途用 Ctrl+Z / Ctrl+Y；macOS 用户习惯 Cmd+Shift+Z，这里三者都认。
       const key = event.key.toLowerCase()
       if (key === 'z') {
@@ -623,11 +794,19 @@ export default function App() {
       } else if (key === 'y' && event.ctrlKey && !event.shiftKey) {
         event.preventDefault()
         redo()
+      } else if (key === 'c' && !event.shiftKey) {
+        if (!selection?.path && !selection?.paths?.length) return
+        event.preventDefault()
+        copySelection()
+      } else if (key === 'v' && !event.shiftKey) {
+        if (clipboard.length === 0) return
+        event.preventDefault()
+        pasteAt()
       }
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [undo, redo])
+  }, [clipboard.length, copySelection, pasteAt, redo, selection, undo])
 
   const activeRung = selection
     ? program.rungs.find((rung) => rung.id === selection.rungId)
@@ -695,6 +874,21 @@ export default function App() {
     notify('触点已插入')
   }, [activeRungId, commit, notify, program, selection])
 
+  // 插入点菜单选中的触点：精确落在刚点的那个“+”，不做二次猜测。
+  const insertAt = useCallback((slot: SlotRef, kind: ContactKind) => {
+    const made = makeContactNode(program, kind)
+    const next = insertNodeAt(made.program, slot.rungId, slot, made.node)
+    if (next === made.program) {
+      notify('这个位置不能放置触点')
+      return
+    }
+    commit(next)
+    setSelection({ rungId: slot.rungId, path: findNodePath(next, slot.rungId, made.node.id) })
+    setQuickEdit(null)
+    setMobilePanel('none')
+    notify(instructionLabel('contact', kind) + '已插入，点名称即可改变量')
+  }, [commit, notify, program])
+
   // 段头工具栏没有拖放落点时，按博途的习惯接到已选元件后面；
   // 没有选中元件就接到这一段的末尾，始终留在用户当前正在编辑的程序段里。
   const insertContactInRung = useCallback((rungId: string, kind: ContactKind) => {
@@ -719,25 +913,34 @@ export default function App() {
     notify(`${instructionLabel('contact', kind)}已插入`)
   }, [commit, notify, program, selection])
 
-  // 和博途一致：先在图纸上选起点线路，再选闭合线路。新支路自带一个常开触点，
-  // 打开后立刻可以点它改名，不会留下无法编译的空支路。
-  const openBranch = useCallback((
-    rungId: string,
-    chain: number[],
-    openIndex: number,
-    closeIndex: number,
-  ): boolean => {
-    const opened = openBranchAt(program, rungId, chain, openIndex, closeIndex)
+  // 博途式「打开分支」：在元件之后的插入点向下分叉，后续元件留在主线，
+  // 新支路先作为草稿存在；画完后点支路右侧「合并分支」，再点主线的 + 闭合。
+  const openBranchAt = useCallback((slot: SlotRef) => {
+    const opened = openBranchAtSlot(program, slot.rungId, slot)
     if (!opened) {
-      notify('这个位置不能打开分支，请在元件之后选择起止线路')
-      return false
+      notify('请在元件之后的插入点打开分支')
+      return
     }
     commit(opened.program)
-    setSelection({ rungId, path: findNodePath(opened.program, rungId, opened.nodeId) })
+    setSelection({
+      rungId: slot.rungId,
+      path: findNodePath(opened.program, slot.rungId, opened.nodeId),
+    })
     setQuickEdit(null)
     setMobilePanel('none')
-    notify('并联支路已打开，点支路里的触点可改名')
-    return true
+    notify('并联分支已打开：点 + 继续加元件，画完点右侧「合并分支」')
+  }, [commit, notify, program])
+
+  const mergeBranch = useCallback((rungId: string, parallelPath: number[], closeIndex: number) => {
+    const next = closeOpenBranchAt(program, rungId, parallelPath, closeIndex)
+    if (!next) {
+      notify('这条分支已经闭合，或闭合位置不在主线上', { tone: 'error' })
+      return
+    }
+    commit(next)
+    setSelection({ rungId, path: parallelPath })
+    setQuickEdit(null)
+    notify('并联分支已闭合')
   }, [commit, notify, program])
 
   const removeNode = useCallback((rungId: string, path: number[]) => {
@@ -777,13 +980,31 @@ export default function App() {
         'input, textarea, select, [contenteditable="true"], .ll-insert-panel, .ll-rung-menu-panel',
       )) return
       if (document.querySelector('[role="dialog"][aria-modal="true"]')) return
+      if (!selection) return
+      const multiPaths = selection.paths?.length ?? 0
+      if (multiPaths > 1) {
+        const ids = new Set<string>()
+        for (const path of selection.paths ?? []) {
+          const node = getNodeAtPath(program, selection.rungId, path)
+          if (node) ids.add(node.id)
+        }
+        if (ids.size === 0) return
+        const next = deleteNodesByIds(program, selection.rungId, ids)
+        if (next === program) return
+        event.preventDefault()
+        commit(next)
+        setSelection({ rungId: selection.rungId, path: null })
+        setQuickEdit(null)
+        notify('已删除 ' + ids.size + ' 个元件（Ctrl+Z 撤销）')
+        return
+      }
       if (!selection?.path) return
       event.preventDefault()
       removeNode(selection.rungId, selection.path)
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [removeNode, selection])
+  }, [commit, notify, program, removeNode, selection])
 
   const changeOutput = (kind: OutputKind, targetRungId = activeRungId) => {
     if (!targetRungId) {
@@ -1517,7 +1738,9 @@ export default function App() {
                   setInspectorTab('properties')
                   // 参数框打开时点选另一个元件，直接切换编辑对象，不必先关掉面板。
                   setQuickEdit((current) => (
-                    current && next.path ? { ...current, selection: next } : null
+                    current && next.path && !(next.paths && next.paths.length > 1)
+                      ? { ...current, selection: next }
+                      : null
                   ))
                 }}
                 onEdit={(next, anchor) => {
@@ -1537,10 +1760,14 @@ export default function App() {
                 onMoveRung={(rungId, delta) => commit(moveRung(program, rungId, delta))}
                 onMoveNode={(rungId, path, delta) => commit(moveNodeBy(program, rungId, path, delta))}
                 onAddRung={insertRung}
-                onInsertSlot={(slot) => insert('NO', slot)}
+                onInsertAt={insertAt}
                 onInsertContact={insertContactInRung}
                 onDeleteNode={removeNode}
-                onOpenBranch={openBranch}
+                onOpenBranchAt={openBranchAt}
+                onMergeBranchAt={mergeBranch}
+                onPasteAt={(slot) => pasteAt(slot)}
+                clipboardCount={clipboard.length}
+                onExtendSelect={extendSelection}
               />
 
           </div>

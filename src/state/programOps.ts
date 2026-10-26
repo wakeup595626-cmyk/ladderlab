@@ -202,13 +202,20 @@ function sanitizeChain(chain: LadderNode[]): LadderNode[] {
   const next: LadderNode[] = []
   for (const node of chain) {
     if (node.type === 'parallel') {
-      const branches = node.branches.map(sanitizeChain).filter((branch) => branch.length > 0)
-      if (branches.length === 0) continue
-      if (branches.length === 1) {
-        next.push(...branches[0])
+      const branches = node.branches.map(sanitizeChain)
+      if (node.open === true) {
+        // 未闭合分支是「还在画」的状态：空支路必须保留，否则草稿支路会
+        // 在每次插入后被清掉，右侧的「合并分支」也就没有落点了。
+        next.push({ ...node, branches: branches.length >= 2 ? branches : [...branches, []] })
         continue
       }
-      next.push({ ...node, branches })
+      const kept = branches.filter((branch) => branch.length > 0)
+      if (kept.length === 0) continue
+      if (kept.length === 1) {
+        next.push(...kept[0])
+        continue
+      }
+      next.push({ ...node, branches: kept })
     } else {
       next.push(node)
     }
@@ -316,6 +323,7 @@ function sameNode(left: LadderNode, right: LadderNode): boolean {
       && sameCompare(left.compare, right.compare)
   }
   return right.type === 'parallel'
+    && Boolean(left.open) === Boolean(right.open)
     && left.branches.length === right.branches.length
     && left.branches.every((branch, index) => sameNodes(branch, right.branches[index]))
 }
@@ -567,20 +575,21 @@ export function pickDefaultTag(program: Program, kind: TagKind): TagDef | undefi
 function tagForNewContact(
   program: Program,
   kind: TagKind,
-): { program: Program; tag: TagDef | undefined } {
+): { program: Program; tag: TagDef | undefined; created: boolean } {
+  const before = new Set(program.tags.map((tag) => tag.id))
   let next = ensureTag(program, kind)
   let tag = pickDefaultTag(next, kind)
-  if (tag) return { program: next, tag }
-  const existing = new Set(next.tags.map((item) => item.id))
-  next = addTag(next, kind)
-  tag = next.tags.find((item) => !existing.has(item.id))
-  return { program: next, tag }
+  if (!tag) {
+    next = addTag(next, kind)
+    tag = next.tags.find((item) => !before.has(item.id))
+  }
+  return { program: next, tag, created: Boolean(tag && !before.has(tag.id)) }
 }
 
 export function makeContactNode(
   program: Program,
   kind: ContactKind,
-): { program: Program; node: ContactNode } {
+): { program: Program; node: ContactNode; createdTag?: TagDef } {
   const tagKind: TagKind = kind === 'CMP' ? 'INT' : 'BOOL'
   const made = tagForNewContact(program, tagKind)
   const next = made.program
@@ -592,7 +601,7 @@ export function makeContactNode(
     tag: tag?.name ?? '',
     ...(kind === 'CMP' ? { compare: { op: '>=', value: 1 } } : {}),
   }
-  return { program: next, node }
+  return { program: next, node, createdTag: made.created ? tag : undefined }
 }
 
 export function insertContactAt(
@@ -697,36 +706,42 @@ function updateChainAtPath(
 export interface OpenedBranch {
   program: Program
   nodeId: string
+  parallelId: string
+}
+
+/** 递归判断一段链里是否还有没闭合的并联分支。 */
+export function hasOpenBranch(nodes: LadderNode[]): boolean {
+  return nodes.some((node) => node.type === 'parallel'
+    && (node.open === true || node.branches.some((branch) => hasOpenBranch(branch))))
 }
 
 /**
- * 按博途的「打开分支」→「关闭分支」两步生成并联结构：
- * 从 openIndex 处的线路向下打开，在 closeIndex 处闭合，两点之间的元件留在主支路，
- * 新支路放入一个常开触点，保证程序始终可编译、可仿真。
+ * 博途式「打开分支」：在插入点把当前线路向下分叉。
+ * 原有的后续元件留在主线（branch 0），下方新增一条带常开触点的草稿支路；
+ * 草稿画完后点「合并分支」，再在主线上选一个插入点闭合。
  */
-export function openBranchAt(
+export function openBranchAtSlot(
   program: Program,
   rungId: string,
-  chainPath: number[],
-  openIndex: number,
-  closeIndex: number,
+  slot: InsertSlot,
 ): OpenedBranch | null {
   const rung = program.rungs.find((item) => item.id === rungId)
   if (!rung) return null
-  const chain = chainAtPath(rung.nodes, chainPath)
+  const chain = chainAtPath(rung.nodes, slot.chain)
   if (!chain) return null
-  // 主分支必须先有元件；分支内也至少要有一个元件，否则会生成悬空网络。
-  if (openIndex < 1 || closeIndex <= openIndex || closeIndex > chain.length) return null
+  // 分叉点之前至少要有一个元件，否则会生成悬空的双线。
+  if (!Number.isInteger(slot.index) || slot.index < 1 || slot.index >= chain.length) return null
   const made = makeContactNode(program, 'NO')
   const parallel: LadderNode = {
     type: 'parallel',
     id: uid('par'),
-    branches: [chain.slice(openIndex, closeIndex), [made.node]],
+    open: true,
+    ...(made.createdTag ? { autoTagId: made.createdTag.id } : {}),
+    branches: [chain.slice(slot.index), [made.node]],
   }
-  const replaced = updateChainAtPath(rung.nodes, chainPath, (targetChain) => [
-    ...targetChain.slice(0, openIndex),
+  const replaced = updateChainAtPath(rung.nodes, slot.chain, (targetChain) => [
+    ...targetChain.slice(0, slot.index),
     parallel,
-    ...targetChain.slice(closeIndex),
   ])
   if (!replaced) return null
   return {
@@ -735,6 +750,77 @@ export function openBranchAt(
       nodes: sanitizeChain(replaced),
     })),
     nodeId: made.node.id,
+    parallelId: parallel.id,
+  }
+}
+
+/**
+ * 「合并分支」：closeIndex 是主线（branch 0）上的插入位。
+ * 该位置之后的元件回到父链，主线剩下的部分成为并联的上支路。
+ */
+export function closeOpenBranchAt(
+  program: Program,
+  rungId: string,
+  parallelPath: number[],
+  closeIndex: number,
+): Program | null {
+  const rung = program.rungs.find((item) => item.id === rungId)
+  if (!rung) return null
+  const node = getNodeAtPath(program, rungId, parallelPath)
+  if (!node || node.type !== 'parallel' || node.open !== true) return null
+  const main = node.branches[0] ?? []
+  if (!Number.isInteger(closeIndex) || closeIndex < 1 || closeIndex > main.length) return null
+  const parentChain = parallelPath.slice(0, -1)
+  const nodeIndex = parallelPath[parallelPath.length - 1]
+  const closed: LadderNode = {
+    ...node,
+    open: false,
+    autoTagId: undefined,
+    branches: [main.slice(0, closeIndex), ...node.branches.slice(1)],
+  }
+  const replaced = updateChainAtPath(rung.nodes, parentChain, (chain) => [
+    ...chain.slice(0, nodeIndex),
+    closed,
+    ...main.slice(closeIndex),
+    ...chain.slice(nodeIndex + 1),
+  ])
+  if (!replaced) return null
+  return withRung(program, rungId, (item) => ({ ...item, nodes: sanitizeChain(replaced) }))
+}
+
+/** 取消未闭合分支：丢掉草稿，把主线原样放回父链。 */
+export function cancelOpenBranchAt(
+  program: Program,
+  rungId: string,
+  parallelPath: number[],
+): Program {
+  const rung = program.rungs.find((item) => item.id === rungId)
+  if (!rung) return program
+  const node = getNodeAtPath(program, rungId, parallelPath)
+  if (!node || node.type !== 'parallel' || node.open !== true) return program
+  const parentChain = parallelPath.slice(0, -1)
+  const nodeIndex = parallelPath[parallelPath.length - 1]
+  const replaced = updateChainAtPath(rung.nodes, parentChain, (chain) => [
+    ...chain.slice(0, nodeIndex),
+    ...(node.branches[0] ?? []),
+    ...chain.slice(nodeIndex + 1),
+  ])
+  if (!replaced) return program
+  const restored = withRung(program, rungId, (item) => ({
+    ...item,
+    nodes: sanitizeChain(replaced),
+  }))
+  // 打开草稿时若自动新建过变量，取消后没人引用就把这个变量一起收掉。
+  const created = node.autoTagId
+    ? restored.tags.find((tag) => tag.id === node.autoTagId)
+    : undefined
+  if (!created) return restored
+  if (tagUsage(restored, created.name) > 0 || bitAliasesOf(restored, created.name).length > 0) {
+    return restored
+  }
+  return {
+    ...restored,
+    tags: restored.tags.filter((tag) => tag.id !== created.id),
   }
 }
 
@@ -748,7 +834,15 @@ export function deleteBranch(
   const rung = program.rungs.find((item) => item.id === rungId)
   if (!rung || parallelPath.length === 0 || parallelPath.length % 2 === 0) return program
   const node = getNodeAtPath(program, rungId, parallelPath)
-  if (!node || node.type !== 'parallel' || node.branches.length < 2) return program
+  if (!node || node.type !== 'parallel') return program
+  if (node.open === true) {
+    // 未闭合时 branch 0 是主线，不能删；删掉最后一条草稿支路等于取消整条分支。
+    if (!Number.isInteger(branchIndex) || branchIndex < 1 || branchIndex >= node.branches.length) {
+      return program
+    }
+    if (node.branches.length <= 2) return cancelOpenBranchAt(program, rungId, parallelPath)
+  }
+  if (node.branches.length < 2) return program
   if (!Number.isInteger(branchIndex) || branchIndex < 0 || branchIndex >= node.branches.length) return program
   const parentChain = parallelPath.slice(0, -1)
   const nodeIndex = parallelPath[parallelPath.length - 1]
@@ -765,6 +859,112 @@ export function deleteBranch(
   })
   if (!replaced) return program
   return withRung(program, rungId, (item) => ({ ...item, nodes: sanitizeChain(replaced) }))
+}
+
+/**
+ * 复制用：整棵子树重建 ID，连续粘贴不会和原元件共用运行时状态。
+ * 未闭合分支只带走主线内容——草稿还没有真正接进电路。
+ */
+function cloneChainForPaste(chain: LadderNode[]): LadderNode[] {
+  const next: LadderNode[] = []
+  for (const node of chain) {
+    if (node.type === 'parallel' && node.open === true) {
+      next.push(...cloneChainForPaste(node.branches[0] ?? []))
+      continue
+    }
+    if (node.type === 'contact') {
+      next.push({
+        ...node,
+        id: uid('c'),
+        ...(node.compare ? { compare: { ...node.compare } } : {}),
+      })
+      continue
+    }
+    next.push({
+      ...node,
+      id: uid('par'),
+      branches: node.branches.map(cloneChainForPaste),
+    })
+  }
+  return next
+}
+
+export function cloneNodesForPaste(nodes: LadderNode[]): LadderNode[] {
+  return cloneChainForPaste(nodes)
+}
+
+/** 按顺序把一段元件插进同一个插入点之后，形成连续串联。 */
+export function insertNodesAt(
+  program: Program,
+  rungId: string,
+  slot: InsertSlot,
+  nodes: LadderNode[],
+): { program: Program; ids: string[] } | null {
+  if (nodes.length === 0) return null
+  const rung = program.rungs.find((item) => item.id === rungId)
+  if (!rung) return null
+  const chain = chainAtPath(rung.nodes, slot.chain)
+  if (!chain) return null
+  if (!Number.isInteger(slot.index) || slot.index < 0 || slot.index > chain.length) return null
+
+  let nextNodes = rung.nodes
+  for (let offset = 0; offset < nodes.length; offset += 1) {
+    const inserted = insertAtPath(nextNodes, slot.chain, slot.index + offset, nodes[offset])
+    if (!inserted) return null
+    nextNodes = inserted
+  }
+  return {
+    program: withRung(program, rungId, (item) => ({ ...item, nodes: sanitizeChain(nextNodes) })),
+    ids: nodes.map((node) => node.id),
+  }
+}
+
+function stripNodeIds(chain: LadderNode[], ids: Set<string>): LadderNode[] {
+  return chain
+    .filter((node) => !ids.has(node.id))
+    .map((node) => (node.type === 'parallel'
+      ? { ...node, branches: node.branches.map((branch) => stripNodeIds(branch, ids)) }
+      : node))
+}
+
+export function deleteNodesByIds(program: Program, rungId: string, ids: Set<string>): Program {
+  if (ids.size === 0) return program
+  return withRung(program, rungId, (rung) => ({
+    ...rung,
+    nodes: sanitizeChain(stripNodeIds(rung.nodes, ids)),
+  }))
+}
+
+/**
+ * 按图纸顺序收集多选元件；祖先已经选中时跳过它的后代，
+ * 这样 Ctrl+C 得到的是一棵完整的子树，而不是拆散的零件。
+ */
+export function collectNodesAtPaths(
+  program: Program,
+  rungId: string,
+  paths: number[][],
+): LadderNode[] {
+  const rung = program.rungs.find((item) => item.id === rungId)
+  if (!rung) return []
+  const wanted = new Set(paths.filter((path) => path.length > 0).map((path) => path.join('.')))
+  if (wanted.size === 0) return []
+  const out: LadderNode[] = []
+  const walk = (chain: LadderNode[], prefix: number[]) => {
+    for (let index = 0; index < chain.length; index += 1) {
+      const node = chain[index]
+      const path = [...prefix, index]
+      if (wanted.has(path.join('.'))) {
+        out.push(node)
+        continue
+      }
+      if (node.type !== 'parallel') continue
+      for (let branch = 0; branch < node.branches.length; branch += 1) {
+        walk(node.branches[branch], [...path, branch])
+      }
+    }
+  }
+  walk(rung.nodes, [])
+  return out
 }
 
 export function updateContact(

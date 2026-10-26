@@ -158,6 +158,51 @@ async function loadDemoFromAnywhere() {
   return 'guide'
 }
 
+/** 回到干净的启保停示例，后面的检查互不继承上一步留下的落点。 */
+async function reloadDemo() {
+  await reload(true)
+  await loadDemoFromAnywhere()
+  await sleep(700)
+}
+
+/** 在主线第 2 个插入位的 + 菜单里选「加入并联分支」，返回是否真的开出来。 */
+async function openDraftBranch() {
+  const opened = await evaluate(`(() => {
+    const slot = document.querySelector('.ll-slot[data-chain=""][data-index="1"]')
+    const plus = slot?.querySelector('.ll-slot-plus')
+    if (!plus) return false
+    plus.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    return true
+  })()`)
+  await sleep(320)
+  const picked = await evaluate(`(() => {
+    const item = [...document.querySelectorAll('.ll-slot-menu-item[role="menuitem"]')]
+      .find((button) => button.textContent?.includes('加入并联分支'))
+    if (!item || item.disabled) return false
+    item.click()
+    return true
+  })()`)
+  await sleep(520)
+  return opened && picked
+}
+
+/**
+ * 点支路右侧「合并分支」，等主线上的合法插入位亮起，再点第一个位置收拢。
+ * 返回亮起的位置数，方便调用方判断“合并”和“取消合并”两条路都走到了。
+ */
+async function closeDraftBranch() {
+  await evaluate(`document.querySelector('.ll-merge-chip')
+    ?.dispatchEvent(new MouseEvent('click', { bubbles: true }))`)
+  await sleep(320)
+  const candidates = await evaluate(
+    `document.querySelectorAll('.ll-slot.is-merge-candidate').length`,
+  )
+  await evaluate(`document.querySelector('.ll-slot.is-merge-candidate .ll-slot-plus')
+    ?.dispatchEvent(new MouseEvent('click', { bubbles: true }))`)
+  await sleep(520)
+  return candidates
+}
+
 await send('Page.enable')
 await send('Runtime.enable')
 
@@ -315,9 +360,15 @@ check(
 await evaluate(`document.querySelector('.wb-context-panel button[aria-label="关闭属性面板"]')?.click()`)
 await sleep(280)
 
-// 点线路只选线、不改程序；点悬浮加号才插入触点（博途式分工）。
+// 点线路只选线、不改程序；点同一个插入位的 + 才打开元件菜单。
 const beforeInsert = await evaluate(`document.querySelectorAll('.ll-node[data-node-id]').length`)
-await evaluate(`document.querySelector('.ll-rung.is-selected .ll-slot')?.dispatchEvent(new MouseEvent('click', { bubbles: true }))`)
+const wireSelected = await evaluate(`(() => {
+  const slot = document.querySelector('.ll-rung .ll-slot[data-chain=""][data-index="1"]')
+  const wire = slot?.querySelector('.ll-slot-wire')
+  if (!wire) return false
+  wire.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+  return true
+})()`)
 await sleep(250)
 const wireSelection = await evaluate(`({
   nodes: document.querySelectorAll('.ll-node[data-node-id]').length,
@@ -325,15 +376,60 @@ const wireSelection = await evaluate(`({
   chip: document.querySelector('.ll-selected-chip')?.textContent?.trim() ?? null,
 })`)
 check(
-  'desktop/wire-selects-without-insert',
-  wireSelection.nodes === beforeInsert && wireSelection.wires === 1 && String(wireSelection.chip ?? '').includes('已选线路'),
+  'desktop/slot-wire-selects-without-insert',
+  wireSelected
+    && wireSelection.nodes === beforeInsert
+    && wireSelection.wires === 1
+    && String(wireSelection.chip ?? '').includes('已选线路'),
   wireSelection,
 )
-await evaluate(`document.querySelector('.ll-rung.is-selected .ll-slot-plus')?.dispatchEvent(new MouseEvent('click', { bubbles: true }))`)
-await sleep(400)
+
+const slotMenuTriggered = await evaluate(`(() => {
+  const slot = document.querySelector('.ll-rung .ll-slot[data-chain=""][data-index="1"]')
+  const plus = slot?.querySelector('.ll-slot-plus')
+  if (!plus) return false
+  plus.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+  return true
+})()`)
+await sleep(350)
+const slotMenu = await evaluate(`(() => {
+  const menu = document.querySelector('.ll-slot-menu[role="menu"]')
+  if (!menu) return { open: false }
+  const items = [...menu.querySelectorAll('.ll-slot-menu-item[role="menuitem"]')]
+  const branch = items.find((item) => item.textContent?.includes('加入并联分支'))
+  const rect = menu.getBoundingClientRect()
+  return {
+    open: true,
+    items: items.length,
+    labels: items.map((item) => item.textContent?.trim() ?? ''),
+    branchEnabled: branch?.disabled === false,
+    fits: rect.left >= 0 && rect.right <= innerWidth + 1
+      && rect.top >= 0 && rect.bottom <= innerHeight + 1,
+  }
+})()`)
+check(
+  'desktop/slot-plus-opens-menu',
+  slotMenuTriggered && slotMenu.open && slotMenu.items >= 6 && slotMenu.branchEnabled && slotMenu.fits,
+  slotMenu,
+)
+
+await evaluate(`[...document.querySelectorAll('.ll-slot-menu-item[role="menuitem"]')]
+  .find((item) => item.textContent?.includes('常闭触点'))?.click()`)
+await sleep(420)
 const afterInsert = await evaluate(`document.querySelectorAll('.ll-node[data-node-id]').length`)
-const insertToast = await evaluate(`document.querySelector('.toast-message')?.textContent?.trim() ?? null`)
-check('desktop/slot-inserts-contact', afterInsert > beforeInsert, { beforeInsert, afterInsert, insertToast })
+const slotInsert = await evaluate(`({
+  selected: document.querySelectorAll('.ll-node.is-selected').length,
+  menuOpen: !!document.querySelector('.ll-slot-menu'),
+  toast: document.querySelector('.toast-message')?.textContent?.trim() ?? null,
+})`)
+check(
+  'desktop/slot-menu-inserts-contact',
+  afterInsert === beforeInsert + 1
+    && slotInsert.selected === 1
+    && !slotInsert.menuOpen
+    && String(slotInsert.toast ?? '').includes('常闭触点已插入'),
+  { beforeInsert, afterInsert, ...slotInsert },
+)
 
 // 顶栏撤销/重做必须常显，并且真的能回退刚才的插入。
 const historyUi = await evaluate(`({
@@ -352,12 +448,34 @@ await sleep(450)
 const afterRedo = await evaluate(`document.querySelectorAll('.ll-node[data-node-id]').length`)
 check('desktop/history-works', afterUndo === beforeInsert && afterRedo === afterInsert, { afterUndo, afterRedo })
 
+// 插入位菜单要能被 Esc 收起：触屏上误点开菜单后，不能只靠再点一次 + 才关得掉。
+await reload(true)
+await loadDemoFromAnywhere()
+await sleep(700)
+await evaluate(`(() => {
+  const slot = document.querySelector('.ll-slot[data-chain=""][data-index="1"]')
+  const plus = slot?.querySelector('.ll-slot-plus')
+  if (!plus) return false
+  plus.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+  return true
+})()`)
+await sleep(320)
+const menuBeforeEscape = await evaluate(`!!document.querySelector('.ll-slot-menu[role="menu"]')`)
+await pressEscape()
+const menuAfterEscape = await evaluate(`!!document.querySelector('.ll-slot-menu')`)
+check(
+  'desktop/slot-menu-escape-closes',
+  menuBeforeEscape && !menuAfterEscape,
+  { menuBeforeEscape, menuAfterEscape },
+)
+
 // 选线路后再用段头「插入触点」，触点必须落在这条线上，而不是跑到段尾。
 await evaluate(`(() => {
   const rung = document.querySelectorAll('.ll-rung')[0]
-  const slot = rung?.querySelectorAll('.ll-slot')[1]
-  if (!slot) return false
-  slot.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+  const slot = rung?.querySelector('.ll-slot[data-chain=""][data-index="1"]')
+  const wire = slot?.querySelector('.ll-slot-wire')
+  if (!wire) return false
+  wire.dispatchEvent(new MouseEvent('click', { bubbles: true }))
   return true
 })()`)
 await sleep(280)
@@ -494,61 +612,169 @@ await pressKey('Backspace', 'Backspace', 8)
 const backspaceCount = await evaluate(`document.querySelectorAll('.ll-node[data-node-id]').length`)
 check('desktop/backspace-removes-contact', backspaceCount === beforeBarInsert - 1, backspaceCount)
 
-// 删除并联支路最后一个触点会折叠整条并联结构；Toast 撤销必须恢复完整快照，
-// 不能只给出“已恢复”的假确认。
-await evaluate(`document.querySelector('.ll-output')?.dispatchEvent(
-  new MouseEvent('click', { bubbles: true }),
-)`)
-await sleep(360)
+// Ctrl+C / Ctrl+V：复制选中触点后连续粘贴两次，第二次必须接在第一次的后面，
+// 而且每次粘贴后选中的都是刚贴出来的那一个。
+await reloadDemo()
+await evaluate(`document.querySelector('.ll-node.ll-contact[data-node-id]')
+  ?.dispatchEvent(new MouseEvent('click', { bubbles: true }))`)
+await sleep(320)
 await pressEscape()
-await evaluate(`document.querySelector('.ll-tool-branch')?.click()`)
-await sleep(280)
-const branchOpenStage = await evaluate(`({
-  candidates: document.querySelectorAll('.ll-slot.is-branch-candidate').length,
-  plusInCandidates: document.querySelectorAll('.ll-slot.is-branch-candidate .ll-slot-plus').length,
-  nodes: document.querySelectorAll('.ll-node[data-node-id]').length,
-  chip: document.querySelector('.ll-selected-chip')?.textContent?.trim() ?? null,
+await evaluate(`document.activeElement instanceof HTMLElement && document.activeElement.blur()`)
+const clipboardBefore = await evaluate(`({
+  ids: [...document.querySelectorAll('.ll-node[data-node-id]')]
+    .map((node) => node.getAttribute('data-node-id')),
+  selected: [...document.querySelectorAll('.ll-node.is-selected[data-node-id]')]
+    .map((node) => node.getAttribute('data-node-id')),
+})`)
+await pressKey('c', 'KeyC', 67, 2)
+const clipboardCopied = await evaluate(`({
+  ids: [...document.querySelectorAll('.ll-node[data-node-id]')]
+    .map((node) => node.getAttribute('data-node-id')),
+  toast: document.querySelector('.toast-message')?.textContent?.trim() ?? null,
+})`)
+await pressKey('v', 'KeyV', 86, 2)
+const firstPaste = await evaluate(`({
+  ids: [...document.querySelectorAll('.ll-node[data-node-id]')]
+    .map((node) => node.getAttribute('data-node-id')),
+  selected: [...document.querySelectorAll('.ll-node.is-selected[data-node-id]')]
+    .map((node) => node.getAttribute('data-node-id')),
+})`)
+await pressKey('v', 'KeyV', 86, 2)
+const secondPaste = await evaluate(`({
+  ids: [...document.querySelectorAll('.ll-node[data-node-id]')]
+    .map((node) => node.getAttribute('data-node-id')),
+  selected: [...document.querySelectorAll('.ll-node.is-selected[data-node-id]')]
+    .map((node) => node.getAttribute('data-node-id')),
+})`)
+const pastedFirst = firstPaste.ids.filter((id) => !clipboardBefore.ids.includes(id))
+const pastedAll = secondPaste.ids.filter((id) => !clipboardBefore.ids.includes(id))
+const pastedSecondIndex = pastedAll.length === 2 ? secondPaste.ids.indexOf(pastedAll[0]) : -1
+check(
+  'desktop/ctrl-c-ctrl-v-appends-in-order',
+  clipboardBefore.selected.length === 1
+    && String(clipboardCopied.toast ?? '').includes('已复制')
+    && clipboardCopied.ids.length === clipboardBefore.ids.length
+    && pastedFirst.length === 1
+    && firstPaste.selected.length === 1
+    && firstPaste.selected[0] === pastedFirst[0]
+    && pastedAll.length === 2
+    && pastedSecondIndex >= 0
+    && secondPaste.ids[pastedSecondIndex + 1] === pastedAll[1]
+    && secondPaste.selected.length === 1
+    && secondPaste.selected[0] === pastedAll[1],
+  { clipboardBefore, clipboardCopied, firstPaste, secondPaste, pastedFirst, pastedAll },
+)
+
+// 删除并联支路里的第一个触点会折叠只剩单路的并联层级；Toast 撤销必须恢复完整快照，
+// 不能只给出“已恢复”的假确认。
+// 并联分支从插入点菜单打开：草稿自带一个常开触点，右侧出现「合并分支」；
+// 草稿还能继续加触点，取闭合点可按 Esc 取消，再点合并才真正收拢。
+await reloadDemo()
+const branchOpenedFromMenu = await openDraftBranch()
+const draftChain = await evaluate(`(() => {
+  const node = document.querySelector('.ll-node.is-selected[data-node-id]')
+  if (!node) return null
+  for (let element = node.parentElement; element; element = element.parentElement) {
+    const slots = [...element.querySelectorAll('.ll-slot[data-chain]')]
+    if (slots.length === 0) continue
+    const chains = new Set(slots.map((slot) => slot.getAttribute('data-chain')))
+    if (chains.size === 1) return slots[0].getAttribute('data-chain')
+  }
+  return null
+})()`)
+const branchDraft = await evaluate(`({
+  open: document.querySelectorAll('.ll-parallel.is-branch-open').length,
+  chip: document.querySelectorAll('.ll-merge-chip').length,
+  draftWires: document.querySelectorAll('.ll-wire.is-draft').length,
+  slots: document.querySelectorAll('.ll-slot[data-chain="${draftChain}"]').length,
+  label: document.querySelector('.ll-node.is-selected')?.getAttribute('aria-label') ?? null,
 })`)
 check(
-  'desktop/branch-open-stage',
-  branchOpenStage.candidates >= 1 && String(branchOpenStage.chip ?? '').includes('起点'),
-  branchOpenStage,
+  'desktop/branch-opens-draft',
+  branchOpenedFromMenu
+    && branchDraft.open === 1
+    && branchDraft.chip === 1
+    && branchDraft.draftWires >= 1
+    && branchDraft.slots === 2
+    && String(branchDraft.label ?? '').includes('常开'),
+  { branchOpenedFromMenu, draftChain, ...branchDraft },
 )
-check(
-  'desktop/branch-open-stage-no-misinsert-controls',
-  branchOpenStage.plusInCandidates === 0,
-  branchOpenStage.plusInCandidates,
-)
-await screenshot('docs/qa/branch-open-stage.png')
-await evaluate(`document.querySelectorAll('.ll-slot.is-branch-candidate')[0]
-  ?.dispatchEvent(new MouseEvent('click', { bubbles: true }))`)
-await sleep(260)
-const branchCloseStage = await evaluate(`({
-  candidates: document.querySelectorAll('.ll-slot.is-branch-candidate').length,
-  nodes: document.querySelectorAll('.ll-node[data-node-id]').length,
-  chip: document.querySelector('.ll-selected-chip')?.textContent?.trim() ?? null,
+
+for (let round = 0; round < 2; round += 1) {
+  await evaluate(`(() => {
+    const slots = [...document.querySelectorAll('.ll-slot[data-chain="${draftChain}"]')]
+    const plus = slots.at(-1)?.querySelector('.ll-slot-plus')
+    if (!plus) return false
+    plus.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    return true
+  })()`)
+  await sleep(320)
+  await evaluate(`[...document.querySelectorAll('.ll-slot-menu-item[role="menuitem"]')]
+    .find((item) => item.textContent?.includes('常开触点'))?.click()`)
+  await sleep(420)
+}
+const draftAfterInserts = await evaluate(`({
+  slots: document.querySelectorAll('.ll-slot[data-chain="${draftChain}"]').length,
+  open: document.querySelectorAll('.ll-parallel.is-branch-open').length,
+  menu: document.querySelectorAll('.ll-slot-menu').length,
 })`)
 check(
-  'desktop/branch-close-stage',
-  branchCloseStage.candidates >= 1 &&
-    branchCloseStage.nodes === branchOpenStage.nodes &&
-    String(branchCloseStage.chip ?? '').includes('闭合'),
-  branchCloseStage,
+  'desktop/branch-draft-accepts-more-contacts',
+  draftAfterInserts.slots === branchDraft.slots + 2
+    && draftAfterInserts.open === 1
+    && draftAfterInserts.menu === 0,
+  { before: branchDraft.slots, ...draftAfterInserts },
 )
-await screenshot('docs/qa/branch-close-stage.png')
-await evaluate(`[...document.querySelectorAll('.ll-slot.is-branch-candidate')].at(-1)
+
+await evaluate(`document.querySelector('.ll-merge-chip')
   ?.dispatchEvent(new MouseEvent('click', { bubbles: true }))`)
-await sleep(460)
-const branchOpened = await evaluate(`({
+await sleep(320)
+const mergeArmed = await evaluate(`({
+  candidates: document.querySelectorAll('.ll-slot.is-merge-candidate').length,
+  open: document.querySelectorAll('.ll-parallel.is-branch-open').length,
+})`)
+check(
+  'desktop/branch-merge-arms-candidates',
+  mergeArmed.candidates >= 1 && mergeArmed.open === 1,
+  mergeArmed,
+)
+
+// Esc 只退出“选闭合点”，草稿支路和已加好的触点必须原样保留。
+await pressEscape()
+const mergeEscaped = await evaluate(`({
+  candidates: document.querySelectorAll('.ll-slot.is-merge-candidate').length,
+  open: document.querySelectorAll('.ll-parallel.is-branch-open').length,
+  slots: document.querySelectorAll('.ll-slot[data-chain="${draftChain}"]').length,
+})`)
+check(
+  'desktop/branch-merge-escape-cancels',
+  mergeArmed.candidates >= 1
+    && mergeEscaped.candidates === 0
+    && mergeEscaped.open === 1
+    && mergeEscaped.slots === draftAfterInserts.slots,
+  mergeEscaped,
+)
+
+const candidatesClosed = await closeDraftBranch()
+const mergedBranch = await evaluate(`({
+  open: document.querySelectorAll('.ll-parallel.is-branch-open').length,
+  chip: document.querySelectorAll('.ll-merge-chip').length,
+  candidates: document.querySelectorAll('.ll-slot.is-merge-candidate').length,
   parallels: document.querySelectorAll('.ll-parallel').length,
-  selected: document.querySelectorAll('.ll-parallel .ll-contact.is-selected').length,
   toast: document.querySelector('.toast-message')?.textContent?.trim() ?? null,
 })`)
 check(
-  'desktop/branch-opened',
-  branchOpened.parallels >= 1 && branchOpened.selected === 1,
-  branchOpened,
+  'desktop/branch-merge-closes',
+  candidatesClosed >= 1
+    && mergedBranch.open === 0
+    && mergedBranch.chip === 0
+    && mergedBranch.candidates === 0
+    && mergedBranch.parallels >= 1
+    && String(mergedBranch.toast ?? '').includes('并联分支已闭合'),
+  { candidatesClosed, ...mergedBranch },
 )
+
+// 合并后并联节点仍保持选中，点开分支面板供截图，也留给下面的折叠测试。
 await evaluate(`document.querySelector('.ll-parallel.is-selected')
   ?.dispatchEvent(new MouseEvent('click', { bubbles: true }))`)
 await sleep(420)
@@ -558,11 +784,8 @@ const parallelBeforeDelete = await evaluate(`({
   nodes: document.querySelectorAll('.ll-node[data-node-id]').length,
   parallels: document.querySelectorAll('.ll-parallel').length,
 })`)
-await evaluate(`(() => {
-  const contacts = document.querySelectorAll('.ll-parallel .ll-contact')
-  contacts[contacts.length - 1]?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-  return contacts.length
-})()`)
+await evaluate(`document.querySelector('.ll-parallel .ll-contact')
+  ?.dispatchEvent(new MouseEvent('click', { bubbles: true }))`)
 await sleep(360)
 await pressEscape()
 await evaluate(`document.querySelector('.ll-rung-tools .ll-tool-remove')?.click()`)
@@ -776,24 +999,48 @@ await screenshot('docs/qa/mobile-segment-menu.png')
 await pressEscape()
 await sleep(200)
 
-await evaluate(`document.querySelector('.ll-insert-trigger')?.click()`)
-await sleep(340)
+// 手机上没有悬浮插入面板了：先点导线激活插入位，再点该位的 +，走同一个落点菜单。
+await evaluate(`document.querySelector('.ll-slot[data-chain=""][data-index="1"] .ll-slot-wire')
+  ?.dispatchEvent(new MouseEvent('click', { bubbles: true }))`)
+await sleep(300)
+const slotPlusOpened = await evaluate(`(() => {
+  const plus = document.querySelector('.ll-slot[data-chain=""][data-index="1"] .ll-slot-plus')
+  if (!plus) return false
+  plus.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+  return true
+})()`)
+await sleep(360)
 const mobileMenu = await evaluate(`(() => {
-  const panel = document.querySelector('.ll-insert-panel')
-  if (!panel) return { open: false }
-  if (document.querySelector('details.ll-insert')?.open !== true) return { open: false }
-  const rect = panel.getBoundingClientRect()
+  const menu = document.querySelector('.ll-slot-menu[role="menu"]')
+  if (!menu) return { open: false, items: 0 }
+  const rect = menu.getBoundingClientRect()
   return {
-    open: true,
-    fits: rect.left >= 0 && rect.right <= innerWidth + 1 && rect.top >= 0 && rect.bottom <= innerHeight + 1,
-    itemHeight: Math.round(panel.querySelector('button')?.getBoundingClientRect().height ?? 0),
+    open: rect.width > 0,
+    items: menu.querySelectorAll('[role="menuitem"]').length,
+    left: Math.round(rect.left),
+    right: Math.round(rect.right),
+    top: Math.round(rect.top),
+    bottom: Math.round(rect.bottom),
+    fits: rect.left >= 8
+      && rect.right <= innerWidth - 8 + 1
+      && rect.top >= 0
+      && rect.bottom <= innerHeight + 1,
   }
 })()`)
-check('mobile/insert-menu-fits', mobileMenu.open && mobileMenu.fits, mobileMenu)
-check('mobile/insert-menu-touch-target', mobileMenu.itemHeight >= 40, mobileMenu.itemHeight)
+check(
+  'mobile/slot-menu-fits',
+  slotPlusOpened && mobileMenu.open && mobileMenu.items >= 6 && mobileMenu.fits,
+  mobileMenu,
+)
+const mobileMenuItemHeight = await evaluate(`(() => {
+  const items = [...document.querySelectorAll('.ll-slot-menu[role="menu"] [role="menuitem"]')]
+  if (items.length === 0) return 0
+  return Math.round(Math.min(...items.map((item) => item.getBoundingClientRect().height)))
+})()`)
+check('mobile/slot-menu-touch-target', mobileMenuItemHeight >= 44, mobileMenuItemHeight)
 await screenshot('docs/qa/mobile-rung-menu.png')
-await evaluate(`document.querySelector('.ll-insert-trigger')?.click()`)
-await sleep(240)
+await pressEscape()
+await sleep(160)
 
 // 手机端点元件应打开底部参数面板，并有遮罩。
 await evaluate(`document.querySelector('.ll-node[data-node-id]')

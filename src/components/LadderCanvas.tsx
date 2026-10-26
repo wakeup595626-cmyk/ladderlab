@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import type {
   KeyboardEvent as ReactKeyboardEvent,
   PointerEvent as ReactPointerEvent,
@@ -16,8 +17,8 @@ import type {
 } from '../engine/types'
 import type { DragPayload, DropTarget } from '../lib/dragTypes'
 import { FIELD_LIMITS } from '../lib/limits'
+import { hasOpenBranch } from '../state/programOps'
 import {
-  BranchIcon,
   ChevronDownIcon,
   GripIcon,
   MoreIcon,
@@ -45,19 +46,29 @@ export interface LadderCanvasProps {
     label: string,
   ) => void
   onRenameRung?: (rungId: string, label: string) => void
-  /** 点击或键盘激活画布上的插入位时调用；不传则插入位只作为拖放落点。 */
-  onInsertSlot?: (slot: { rungId: string; chain: number[]; index: number }) => void
+  /** 插入点菜单：选中触点种类后插到这个位置。 */
+  onInsertAt?: (slot: SlotRef, kind: ContactKind) => void
+  /** 插入点菜单：在这个位置向下打开一条并联分支。 */
+  onOpenBranchAt?: (slot: SlotRef) => void
+  /** 已打开的并联分支，在主线插入位处闭合。 */
+  onMergeBranchAt?: (rungId: string, parallelPath: number[], closeIndex: number) => void
+  /** 插入点菜单：把剪贴板里的元件按顺序粘到这里。 */
+  onPasteAt?: (slot: SlotRef) => void
+  clipboardCount?: number
+  /** Ctrl/Shift 点击元件时扩展选择。 */
+  onExtendSelect?: (rungId: string, path: number[], mode: 'toggle' | 'range') => void
   /** 程序段工具栏的“插入触点”：插在已选元件之后，没有选中就接到段尾。 */
   onInsertContact?: (rungId: string, kind: ContactKind) => void
   /** 删除当前选中的元件；删除整个程序段仍走 onDeleteRung。 */
   onDeleteNode?: (rungId: string, path: number[]) => void
-  /** 按博途的「打开分支 → 闭合分支」生成并联支路；返回 false 表示该位置不可用。 */
-  onOpenBranch?: (
-    rungId: string,
-    chain: number[],
-    openIndex: number,
-    closeIndex: number,
-  ) => boolean
+  /** 只读提示：菜单项不可用、快捷键缺少选中项时告诉用户下一步。 */
+  onNotice?: (message: string) => void
+}
+
+export interface SlotRef {
+  rungId: string
+  chain: number[]
+  index: number
 }
 
 interface Size {
@@ -73,12 +84,16 @@ interface DrawContext {
   dragTarget: DropTarget | null
   dragSource: string | null
   rungId: string
+  segment: string
   metrics: LadderMetrics
   onSelect: (selection: Selection) => void
   onEdit?: (selection: Selection, anchor: DOMRect) => void
   onMoveNode: (rungId: string, path: number[], delta: -1 | 1) => void
-  onInsertSlot?: (slot: { rungId: string; chain: number[]; index: number }) => void
-  branchDraft: BranchDraft | null
+  onOpenSlotMenu: (request: SlotMenuRequest) => void
+  onMergeSlotClick: (slot: SlotRef, closeIndex: number) => void
+  onMergeChipClick: (rungId: string, parallelPath: number[]) => void
+  mergeTarget: { rungId: string; chain: number[] } | null
+  onExtendSelect?: (rungId: string, path: number[], mode: 'toggle' | 'range') => void
   onSlotClick: (rungId: string, chain: number[], index: number, chainLength: number) => void
   beginDrag: (
     event: ReactPointerEvent<SVGGElement>,
@@ -88,10 +103,14 @@ interface DrawContext {
   ) => void
 }
 
-/** 「打开分支」是两步操作：先选分支起点，再选闭合位置，和博途一致。 */
-type BranchDraft =
-  | { stage: 'open'; rungId: string }
-  | { stage: 'close'; rungId: string; chain: number[]; openIndex: number }
+/** 插入点菜单需要的定位与文案信息。 */
+export interface SlotMenuRequest extends SlotRef {
+  chainLength: number
+  segment: string
+  scope: string
+  anchor: DOMRect
+  trigger?: Element | null
+}
 
 interface LadderMetrics {
   slotW: number
@@ -110,6 +129,8 @@ interface LadderMetrics {
   emptyChainLineY: number
   parallelGutter: number
   parallelGap: number
+  /** 未闭合分支右侧「合并分支」按钮预留的宽度。 */
+  openMergeW: number
   minWidth: number
   railLeft: number
   railRight: number
@@ -140,6 +161,7 @@ const DEFAULT_METRICS: LadderMetrics = {
   emptyChainLineY: 50,
   parallelGutter: 10,
   parallelGap: 8,
+  openMergeW: 116,
   minWidth: 600,
   railLeft: 18,
   railRight: 18,
@@ -168,6 +190,7 @@ const COMPACT_METRICS: LadderMetrics = {
   emptyChainLineY: 50,
   parallelGutter: 6,
   parallelGap: 6,
+  openMergeW: 92,
   minWidth: 300,
   railLeft: 6,
   railRight: 6,
@@ -222,20 +245,6 @@ function nodeAtPath(chain: LadderNode[], path: number[] | null): LadderNode | nu
     }
   }
   return current
-}
-
-/** 取链（偶数长度路径）：[] 是根链，[i, b] 是第 i 个并联节点的第 b 条支路。 */
-function chainAtPath(nodes: LadderNode[], path: number[]): LadderNode[] | null {
-  if (path.length % 2 !== 0) return null
-  let chain = nodes
-  for (let offset = 0; offset < path.length; offset += 2) {
-    const node = chain[path[offset]]
-    if (!node || node.type !== 'parallel') return null
-    const branch = node.branches[path[offset + 1]]
-    if (!branch) return null
-    chain = branch
-  }
-  return chain
 }
 
 const OUTPUT_LABELS: Record<OutputElement['kind'], string> = {
@@ -305,8 +314,10 @@ function measureNode(node: LadderNode, m: LadderMetrics): Size {
   }
 
   const branches = node.branches.map((branch) => measureChain(branch, m))
+  const contentW = Math.max(...branches.map((branch) => branch.width)) + m.parallelGutter * 2
   return {
-    width: Math.max(...branches.map((branch) => branch.width)) + m.parallelGutter * 2,
+    // 未闭合时右侧要留出「合并分支」按钮，否则按钮会压到输出线上。
+    width: contentW + (node.open === true ? m.openMergeW : 0),
     height:
       branches.reduce((total, branch) => total + branch.height, 0)
       + m.parallelGap * (branches.length - 1),
@@ -322,6 +333,16 @@ function pathsEqual(left: number[] | null, right: number[] | null): boolean {
 
 function isSelected(context: DrawContext, path: number[] | null): boolean {
   // 选中线路时 path 同样是 null，不能把输出线圈一起点亮。
+  if (context.selection?.wire) return false
+  if (context.selection?.rungId !== context.rungId) return false
+  if (context.selection.paths?.length) {
+    return context.selection.paths.some((item) => pathsEqual(item, path))
+  }
+  return pathsEqual(context.selection.path, path)
+}
+
+/** 多选时主选中项用实线框，其余用虚线框，删除/编辑都以主选中为准。 */
+function isPrimarySelected(context: DrawContext, path: number[] | null): boolean {
   if (context.selection?.wire) return false
   return context.selection?.rungId === context.rungId
     && pathsEqual(context.selection.path, path)
@@ -426,30 +447,40 @@ function renderSlot(
     index,
   }
   const active = slotMatches(context.dragTarget, context.rungId, chain, index)
-
-  const insertHere = () => {
-    context.onInsertSlot?.({ rungId: context.rungId, chain, index })
-  }
   const selectWire = () => {
     context.onSlotClick(context.rungId, chain, index, chainLength)
   }
   const wireSelected = isWireSelected(context, chain, index)
-  const draft = context.branchDraft
-  const draftHere = draft?.rungId === context.rungId ? draft : null
-  const sameChain = Boolean(draftHere && draftHere.stage === 'close' && pathsEqual(draftHere.chain, chain))
-  // 分支取点阶段整条导线都必须只用于选点。若保留中央“+”，用户按提示
-  // 点线时会误插触点，也会让后续点击被当成支路闭合位置。
-  const branchMode = Boolean(draftHere)
-  const branchOpen = Boolean(draftHere && draftHere.stage === 'close' && sameChain && draftHere.openIndex === index)
-  const branchCandidate = Boolean(draftHere && (
-    draftHere.stage === 'open'
-      // 博途要求主分支先有元件，才能从这条线路向下打开分支。
-      ? index >= 1 && index < chainLength
-      : sameChain && index > draftHere.openIndex && index <= chainLength
-  ))
-  const ariaLabel = branchCandidate
-    ? (draftHere?.stage === 'open' ? '从这里打开并联分支' : '在这里闭合并联分支')
-    : '选择线路 ' + (index + 1)
+  // 和博途一致：先点 + 说明“在这一段插入什么”，触点类型和分支都在菜单里选；
+  // 点导线本身只做选线，两者不再抢同一个点击。
+  const scope = chain.length === 0 ? '主线路' : '支路 ' + (chain[chain.length - 1] + 1)
+  const slotLabel = context.segment + ' · ' + scope + ' · 第 ' + (index + 1) + ' 个插入点'
+  const mergeCandidate = Boolean(
+    context.mergeTarget
+    && context.mergeTarget.rungId === context.rungId
+    && pathsEqual(context.mergeTarget.chain, chain)
+    && index >= 1,
+  )
+  const openMenu = (element: Element) => context.onOpenSlotMenu({
+    rungId: context.rungId,
+    chain,
+    index,
+    chainLength,
+    segment: context.segment,
+    scope,
+    anchor: element.getBoundingClientRect(),
+    trigger: element,
+  })
+  const activatePlus = (element: Element) => {
+    if (mergeCandidate) {
+      context.onMergeSlotClick({ rungId: context.rungId, chain, index }, index)
+      return
+    }
+    openMenu(element)
+  }
+  const plusLabel = mergeCandidate
+    ? '在这里闭合并联分支'
+    : '在' + slotLabel + '插入元件或分支'
 
   return (
     <g
@@ -457,79 +488,98 @@ function renderSlot(
         'll-slot',
         active ? 'is-drop-target' : '',
         wireSelected ? 'is-wire-selected' : '',
-        branchCandidate ? 'is-branch-candidate' : '',
-        branchOpen ? 'is-branch-open' : '',
+        mergeCandidate ? 'is-merge-candidate' : '',
       ].filter(Boolean).join(' ')}
       data-drop={JSON.stringify(target)}
-      role="button"
-      tabIndex={0}
-      aria-label={ariaLabel}
-      aria-pressed={wireSelected}
-      onClick={(event) => {
-        event.stopPropagation()
-        selectWire()
-      }}
-      onKeyDown={(event) => {
-        if (event.key !== 'Enter' && event.key !== ' ' && event.key !== 'Spacebar') return
-        event.preventDefault()
-        event.stopPropagation()
-        selectWire()
-      }}
+      data-chain={chain.join('.')}
+      data-index={index}
       onPointerDown={(event) => event.stopPropagation()}
     >
-      <title>{ariaLabel + ' · 悬停后点 + 可直接插入常开触点'}</title>
-      <rect
-        className="ll-slot-hit"
-        x="0"
-        y={lineY - 22}
-        width={slotW}
-        height="44"
-      />
-      <rect
-        className="ll-slot-wide-hit"
-        x={slotW / -2}
-        y={lineY - 22}
-        width={slotW * 2}
-        height="44"
-      />
-      <line
-        className={'ll-wire' + (powered ? ' is-on' : '')}
-        x1="0"
-        y1={lineY}
-        x2={slotW}
-        y2={lineY}
-      />
-      {wireSelected && (
-        <g className="ll-wire-handles" aria-hidden="true">
-          <rect x="-3" y={lineY - 3} width="6" height="6" />
-          <rect x={slotW - 3} y={lineY - 3} width="6" height="6" />
-        </g>
-      )}
-      {branchCandidate && (
-        <circle className="ll-branch-point" cx={slotW / 2} cy={lineY} r="4.5" aria-hidden="true" />
-      )}
-      {branchOpen && (
-        <g className="ll-branch-stub" aria-hidden="true">
-          <path d={'M ' + slotW / 2 + ' ' + lineY + ' v 26'} />
-          <circle cx={slotW / 2} cy={lineY + 30} r="3.5" />
-        </g>
-      )}
-      {!branchMode && (
-        <g
-          className="ll-slot-plus"
-          transform={'translate(' + slotW / 2 + ' ' + lineY + ')'}
-          aria-hidden="true"
-          onClick={(event) => {
-            event.stopPropagation()
-            insertHere()
-          }}
-          onPointerDown={(event) => event.stopPropagation()}
-        >
-          <rect className="ll-slot-plus-hit" x="-12" y="-16" width="24" height="32" />
-          <rect x="-8" y="-8" width="16" height="16" rx="3" />
-          <path d="M -5 0 H 5 M 0 -5 V 5" />
-        </g>
-      )}
+      <g
+        className="ll-slot-wire"
+        role="button"
+        tabIndex={0}
+        aria-label={'选择线路 ' + (index + 1) + '（' + scope + '）'}
+        aria-pressed={wireSelected}
+        onClick={(event) => {
+          event.stopPropagation()
+          selectWire()
+        }}
+        onKeyDown={(event) => {
+          if (event.key !== 'Enter' && event.key !== ' ' && event.key !== 'Spacebar') return
+          event.preventDefault()
+          event.stopPropagation()
+          selectWire()
+        }}
+      >
+        <title>{slotLabel + ' · 点击选中这段导线'}</title>
+        <rect
+          className="ll-slot-hit"
+          x="0"
+          y={lineY - 22}
+          width={slotW}
+          height="44"
+        />
+        <rect
+          className="ll-slot-wide-hit"
+          x={slotW / -2}
+          y={lineY - 22}
+          width={slotW * 2}
+          height="44"
+        />
+        <line
+          className={'ll-wire' + (powered ? ' is-on' : '')}
+          x1="0"
+          y1={lineY}
+          x2={slotW}
+          y2={lineY}
+        />
+        {wireSelected && (
+          <g className="ll-wire-handles" aria-hidden="true">
+            <rect x="-3" y={lineY - 3} width="6" height="6" />
+            <rect x={slotW - 3} y={lineY - 3} width="6" height="6" />
+          </g>
+        )}
+      </g>
+      <g
+        className="ll-slot-plus"
+        transform={'translate(' + slotW / 2 + ' ' + lineY + ')'}
+        role="button"
+        tabIndex={0}
+        aria-label={plusLabel}
+        onClick={(event) => {
+          event.stopPropagation()
+          activatePlus(event.currentTarget)
+        }}
+        onKeyDown={(event) => {
+          if (
+            event.key !== 'Enter'
+            && event.key !== ' '
+            && event.key !== 'Spacebar'
+            && event.key !== '+'
+            && event.key !== 'Insert'
+          ) return
+          event.preventDefault()
+          event.stopPropagation()
+          activatePlus(event.currentTarget)
+        }}
+      >
+        <title>{plusLabel}</title>
+        {/* 相邻插入点（尤其是并联支路起点与主线插入点）只隔十几像素。
+            命中区必须比视觉加号略宽但不能互相盖住，否则点主线会误开支路菜单。 */}
+        <rect className="ll-slot-plus-hit" x="-12" y="-22" width="24" height="44" />
+        {mergeCandidate ? (
+          <>
+            <rect x="-10" y="-10" width="20" height="20" rx="4" />
+            <text className="ll-merge-slot-mark" textAnchor="middle" y="3.7">合</text>
+          </>
+        ) : (
+          <>
+            <rect x="-8" y="-8" width="16" height="16" rx="3" />
+            <path d="M -5 0 H 5 M 0 -5 V 5" />
+          </>
+        )}
+      </g>
     </g>
   )
 }
@@ -575,6 +625,8 @@ function renderContact(
   const m = context.metrics
   const size = contactSize(node, m)
   const selected = isSelected(context, path)
+  const primary = isPrimarySelected(context, path)
+  const grouped = selected && (context.selection?.paths?.length ?? 0) > 1
   const powered = context.runtime.nodePower[node.id] === true
   const details = tagDetails(context.tags, node.tag)
   const address = visibleAddress(details.name, details.address)
@@ -593,6 +645,8 @@ function renderContact(
         incomingPower ? 'has-input-power' : '',
         powered ? 'is-powered' : '',
         selected ? 'is-selected' : '',
+        grouped ? 'is-group-selected' : '',
+        grouped && primary ? 'is-primary-selected' : '',
         source ? 'is-drag-source' : '',
         dropActive ? 'is-drop-target' : '',
       ].filter(Boolean).join(' ')}
@@ -607,6 +661,16 @@ function renderContact(
       data-node-id={node.id}
       onClick={(event) => {
         event.stopPropagation()
+        // 和桌面软件一致：Ctrl/Cmd 逐项加选，Shift 选同一线路上的连续一段。
+        // 多选时不弹快速编辑，避免遮住接下来要按的 Ctrl+C。
+        if ((event.ctrlKey || event.metaKey) && context.onExtendSelect) {
+          context.onExtendSelect(context.rungId, path, 'toggle')
+          return
+        }
+        if (event.shiftKey && context.onExtendSelect) {
+          context.onExtendSelect(context.rungId, path, 'range')
+          return
+        }
         selectAndEdit(context, selection, event.currentTarget)
       }}
       onKeyDown={(event) => {
@@ -1147,7 +1211,6 @@ interface RungSectionProps {
   onRenameRung?: (rungId: string, label: string) => void
   onInsertContact?: (rungId: string, kind: ContactKind) => void
   onDeleteNode?: (rungId: string, path: number[]) => void
-  onStartBranch?: (rungId: string) => void
 }
 
 /** 程序段的“插入触点”下拉菜单，行为与右上角的程序段菜单保持一致。 */
@@ -1252,7 +1315,6 @@ function RungSection({
   onRenameRung,
   onInsertContact,
   onDeleteNode,
-  onStartBranch,
 }: RungSectionProps) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const cancelRenameRef = useRef(false)
@@ -1266,7 +1328,12 @@ function RungSection({
   const titleValue = titleDraft ?? rung.label
   const metrics = metricsFor(availableWidth)
   const layout = measureRung(rung, availableWidth, metrics)
-  const rungContext: DrawContext = { ...context, rungId: rung.id, metrics }
+  const rungContext: DrawContext = {
+    ...context,
+    rungId: rung.id,
+    segment: segmentLabel,
+    metrics,
+  }
   const powered = context.runtime.rungPower[rung.id] === true
   // 选中某个元件后，这一行才淡显插入位和拖拽手柄：
   // 既保留空白画面的克制，也让第一次使用的人看得见“这里能点、能拖”。
@@ -1287,12 +1354,19 @@ function RungSection({
       : '并联分支 · ' + selectedNode.branches.length + ' 路'
     : ''
   const localWire = context.selection?.rungId === rung.id ? context.selection.wire ?? null : null
-  const localDraft = context.branchDraft?.rungId === rung.id ? context.branchDraft : null
-  const statusLabel = localDraft
-    ? localDraft.stage === 'open'
-      ? '点一条线路作为分支起点'
-      : '再点一条线路闭合分支'
-    : selectedLabel || (localWire ? '已选线路 ' + (localWire.index + 1) : '')
+  const armedHere = context.mergeTarget?.rungId === rung.id
+  const multiCount = context.selection?.rungId === rung.id
+    ? context.selection.paths?.length ?? 0
+    : 0
+  // 段头只保留一条最相关的提示：正在合并 > 有未闭合分支 > 多选 > 单选。
+  const statusLabel = armedHere
+    ? '点主线上的 + 合并（Esc 取消）'
+    : hasOpenBranch(rung.nodes)
+      ? '分支未闭合 · 点右侧「合并分支」'
+      : multiCount > 1
+        ? '已选 ' + multiCount + ' 个元件 · Ctrl+C 复制'
+        : selectedLabel || (localWire ? '已选线路 ' + (localWire.index + 1) : '')
+  const statusTip = Boolean(armedHere) || hasOpenBranch(rung.nodes) || multiCount > 1
 
   useLayoutEffect(() => {
     const element = scrollRef.current
@@ -1411,22 +1485,6 @@ function RungSection({
                 onInsert={onInsertContact}
               />
             )}
-            {onStartBranch && (
-              <button
-                type="button"
-                className="ll-tool ll-tool-branch"
-                data-no-rung-drag
-                aria-pressed={Boolean(localDraft)}
-                disabled={rung.nodes.length < 2}
-                title={rung.nodes.length < 2
-                  ? '先插入至少两个元件，才能在元件之后打开并联分支'
-                  : '打开并联分支（Shift+F8）：先选起点，再选闭合位置'}
-                onClick={() => onStartBranch(rung.id)}
-              >
-                <BranchIcon size={15} />
-                <span className="ll-tool-label">打开分支</span>
-              </button>
-            )}
             <button
               type="button"
               className="ll-tool ll-tool-remove"
@@ -1445,8 +1503,8 @@ function RungSection({
           </div>
           {statusLabel && (
             <span
-              className={'ll-selected-chip' + (localDraft ? ' is-branch-tip' : '')}
-              title={statusLabel + (localDraft ? '（Esc 取消）' : '')}
+              className={'ll-selected-chip' + (statusTip ? ' is-branch-tip' : '')}
+              title={statusLabel}
               role="status"
             >
               {statusLabel}
@@ -1632,6 +1690,176 @@ function RungSection({
   )
 }
 
+interface SlotMenuProps {
+  request: SlotMenuRequest
+  clipboardCount: number
+  initialKind?: ContactKind | null
+  onClose: (restoreFocus?: boolean) => void
+  onPick: (kind: ContactKind) => void
+  onBranch: () => void
+  onPaste: () => void
+}
+
+/**
+ * 点插入位上的 + 后出现的菜单。用 portal 挂到 body，避免被 SVG 的裁切和
+ * 程序段的 overflow 截断；位置按触发点计算，空间不够时自动翻到上方。
+ */
+function SlotMenu({
+  request,
+  clipboardCount,
+  initialKind,
+  onClose,
+  onPick,
+  onBranch,
+  onPaste,
+}: SlotMenuProps) {
+  const menuRef = useRef<HTMLDivElement>(null)
+  const [placement, setPlacement] = useState<{ left: number; top: number } | null>(null)
+  const canBranch = request.index >= 1 && request.index < request.chainLength
+  const positionHint = request.index === 0
+    ? '插到线路最前面'
+    : request.index >= request.chainLength
+      ? '插到线路末尾'
+      : `插到第 ${request.index} 个元件之后`
+
+  useLayoutEffect(() => {
+    const menu = menuRef.current
+    if (!menu) return
+    const { anchor } = request
+    const width = menu.offsetWidth
+    const height = menu.offsetHeight
+    const left = Math.max(
+      8,
+      Math.min(anchor.left + anchor.width / 2 - width / 2, window.innerWidth - width - 8),
+    )
+    let top = anchor.bottom + 8
+    if (top + height > window.innerHeight - 8) top = anchor.top - height - 8
+    if (top < 8) top = Math.max(8, window.innerHeight - height - 8)
+    setPlacement({ left: Math.round(left), top: Math.round(top) })
+    const timer = window.setTimeout(() => {
+      const preferred = initialKind
+        ? menu.querySelector<HTMLButtonElement>(`[data-kind="${initialKind}"]`)
+        : null
+      const next = preferred
+        ?? menu.querySelector<HTMLButtonElement>('.ll-slot-menu-item:not(:disabled)')
+      next?.focus()
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [initialKind, request])
+
+  useEffect(() => {
+    const onPointerDown = (event: PointerEvent) => {
+      const menu = menuRef.current
+      const target = event.target as Node | null
+      if (!menu || !target) return
+      if (menu.contains(target) || request.trigger?.contains(target)) return
+      onClose()
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      const menu = menuRef.current
+      if (!menu) return
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        // 捕获阶段先吃掉 Esc：菜单是最上层浮层，按一次只关它，
+        // 不要顺带把右侧属性栏也收起，也避免被扩展的冒泡拦截。
+        event.stopImmediatePropagation()
+        onClose()
+        return
+      }
+      if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return
+      const items = Array.from(
+        menu.querySelectorAll<HTMLButtonElement>('.ll-slot-menu-item:not(:disabled)'),
+      )
+      if (items.length === 0) return
+      event.preventDefault()
+      const current = items.indexOf(document.activeElement as HTMLButtonElement)
+      let next = 0
+      if (event.key === 'ArrowDown') next = current < 0 ? 0 : (current + 1) % items.length
+      else if (event.key === 'ArrowUp') next = current < 0 ? items.length - 1 : (current - 1 + items.length) % items.length
+      else if (event.key === 'End') next = items.length - 1
+      items[next]?.focus()
+    }
+    const onDismiss = (event: Event) => {
+      const menu = menuRef.current
+      if (menu && event.target instanceof Node && menu.contains(event.target)) return
+      onClose()
+    }
+    window.addEventListener('pointerdown', onPointerDown, true)
+    window.addEventListener('keydown', onKeyDown, true)
+    window.addEventListener('resize', onDismiss)
+    window.addEventListener('scroll', onDismiss, true)
+    return () => {
+      window.removeEventListener('pointerdown', onPointerDown, true)
+      window.removeEventListener('keydown', onKeyDown, true)
+      window.removeEventListener('resize', onDismiss)
+      window.removeEventListener('scroll', onDismiss, true)
+    }
+  }, [onClose, request.trigger])
+
+  return createPortal(
+    <div
+      ref={menuRef}
+      className="ll-slot-menu"
+      // 用 menu 而不是 dialog：一来这是一组可键盘上下选择的命令，
+      // 二来 App 的全局快捷键会跳过 role=menu 内部的按键，
+      // 菜单里按 Ctrl+C / Ctrl+V 不会被当成“复制图纸上的元件”。
+      role="menu"
+      aria-label={request.segment + ' ' + request.scope + ' 插入菜单'}
+      style={{
+        left: placement?.left ?? 0,
+        top: placement?.top ?? 0,
+        visibility: placement ? 'visible' : 'hidden',
+      }}
+    >
+      <div className="ll-slot-menu-title" role="presentation">
+        {request.segment} · {request.scope}
+      </div>
+      <div className="ll-slot-menu-hint" role="presentation">
+        {positionHint}
+      </div>
+      {CONTACT_CHOICES.map((choice) => (
+        <button
+          key={choice.kind}
+          type="button"
+          role="menuitem"
+          className="ll-slot-menu-item"
+          data-kind={choice.kind}
+          onClick={() => onPick(choice.kind)}
+        >
+          <span className="ll-slot-menu-symbol" aria-hidden="true">{choice.symbol}</span>
+          <span>{choice.label}</span>
+        </button>
+      ))}
+      <div className="ll-slot-menu-sep" role="separator" />
+      <button
+        type="button"
+        role="menuitem"
+        className="ll-slot-menu-item"
+        disabled={!canBranch}
+        title={canBranch
+          ? '在这里向下打开一条并联分支，画完点右侧「合并分支」'
+          : '分支要从元件之后、且后面还有元件的位置打开'}
+        onClick={onBranch}
+      >
+        <span className="ll-slot-menu-symbol" aria-hidden="true">−┬−</span>
+        <span>加入并联分支</span>
+      </button>
+      {clipboardCount > 0 && (
+        <button type="button" role="menuitem" className="ll-slot-menu-item" onClick={onPaste}>
+          <span className="ll-slot-menu-symbol" aria-hidden="true">Ctrl+V</span>
+          <span>粘贴 {clipboardCount} 个元件</span>
+        </button>
+      )}
+      {!canBranch && (
+        <p className="ll-slot-menu-hint" role="presentation">
+          分支要从元件之后、且后面还有元件的位置打开。
+        </p>
+      )}
+    </div>,
+    document.body,
+  )
+}
+
 export default function LadderCanvas({
   program,
   runtime,
@@ -1647,13 +1875,50 @@ export default function LadderCanvas({
   onEdit,
   onStartDrag,
   onRenameRung,
-  onInsertSlot,
+  onInsertAt,
+  onOpenBranchAt,
+  onMergeBranchAt,
+  onPasteAt,
+  clipboardCount = 0,
+  onExtendSelect,
   onInsertContact,
   onDeleteNode,
-  onOpenBranch,
+  onNotice,
 }: LadderCanvasProps) {
   const [dragSource, setDragSource] = useState<string | null>(null)
-  const [branchDraft, setBranchDraft] = useState<BranchDraft | null>(null)
+  const [slotMenu, setSlotMenu] = useState<SlotMenuRequest | null>(null)
+  const [mergeArmed, setMergeArmed] = useState<{ rungId: string; parallelPath: number[] } | null>(null)
+  const [pendingFocus, setPendingFocus] = useState<SlotRef | null>(null)
+  const [focusOpenBranch, setFocusOpenBranch] = useState(false)
+  const [lastKind, setLastKind] = useState<ContactKind>('NO')
+
+  // 选完元件后把焦点交给下一个 +，键盘用户和触屏都能连续往下加。
+  // 这里按 DOM 里的 rung/chain/index 查找，避免并联嵌套时把路径拼错。
+  useEffect(() => {
+    if (!pendingFocus && !focusOpenBranch) return
+    let target: SVGGElement | null = null
+    if (pendingFocus) {
+      const rung = Array.from(document.querySelectorAll<HTMLElement>('.ll-rung'))
+        .find((element) => element.dataset.rungId === pendingFocus.rungId)
+      target = rung
+        ? Array.from(rung.querySelectorAll<SVGGElement>('.ll-slot')).find((element) => (
+            element.dataset.chain === pendingFocus.chain.join('.')
+            && Number(element.dataset.index) === pendingFocus.index
+          ))?.querySelector<SVGGElement>('.ll-slot-plus') ?? null
+        : null
+      // 放到下一帧再清状态，避免在 effect 里同步 setState 触发级联渲染。
+      window.requestAnimationFrame(() => setPendingFocus(null))
+    } else {
+      const branches = document.querySelectorAll<SVGGElement>('.ll-parallel.is-branch-open')
+      const openBranch = branches.item(branches.length - 1)
+      const pluses = openBranch?.querySelectorAll<SVGGElement>('.ll-slot-plus')
+      target = pluses?.item((pluses?.length ?? 0) - 1) ?? null
+      window.requestAnimationFrame(() => setFocusOpenBranch(false))
+    }
+    if (!target) return
+    target.focus({ preventScroll: true })
+    target.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+  }, [focusOpenBranch, pendingFocus, program])
 
   useEffect(() => {
     const clearDragSource = () => setDragSource(null)
@@ -1667,51 +1932,64 @@ export default function LadderCanvas({
     }
   }, [])
 
-  const startBranch = (rungId: string) => {
-    if (branchDraft?.rungId === rungId) {
-      setBranchDraft(null)
-      return
-    }
-    const rung = program.rungs.find((item) => item.id === rungId)
-    if (!rung) return
-    let chain: number[] = []
-    let openIndex = -1
-    if (selection?.rungId === rungId) {
-      if (selection.wire) {
-        chain = selection.wire.chain
-        openIndex = selection.wire.index
-      } else if (selection.path && selection.path.length > 0) {
-        // 选中元件时，博途在“所选元素之后”打开分支。
-        chain = selection.path.slice(0, -1)
-        openIndex = selection.path[selection.path.length - 1] + 1
-      }
-    }
-    const target = chainAtPath(rung.nodes, chain)
-    if (target && openIndex >= 1 && openIndex < target.length) {
-      setBranchDraft({ stage: 'close', rungId, chain, openIndex })
-      return
-    }
-    setBranchDraft({ stage: 'open', rungId })
+  const closeSlotMenu = (restoreFocus = true) => {
+    const trigger = slotMenu?.trigger
+    setSlotMenu(null)
+    if (!restoreFocus || !(trigger instanceof HTMLElement)) return
+    window.requestAnimationFrame(() => {
+      if (trigger.isConnected) trigger.focus()
+    })
   }
 
-  const handleSlotClick = (rungId: string, chain: number[], index: number, chainLength: number) => {
-    if (branchDraft?.rungId === rungId) {
-      if (branchDraft.stage === 'open') {
-        if (index >= 1 && index < chainLength) {
-          setBranchDraft({ stage: 'close', rungId, chain, openIndex: index })
-          return
-        }
-      } else if (pathsEqual(branchDraft.chain, chain)
-        && index > branchDraft.openIndex && index <= chainLength) {
-        if (onOpenBranch?.(rungId, chain, branchDraft.openIndex, index)) {
-          setBranchDraft(null)
-        }
-        return
-      }
-    }
-    setBranchDraft(null)
-    onSelect({ rungId, path: null, wire: { chain, index } })
+  const menuSlot = (request: SlotMenuRequest): SlotRef => ({
+    rungId: request.rungId,
+    chain: request.chain,
+    index: request.index,
+  })
+
+  const pickFromMenu = (kind: ContactKind) => {
+    if (!slotMenu) return
+    const slot = menuSlot(slotMenu)
+    setLastKind(kind)
+    closeSlotMenu(false)
+    setPendingFocus({ ...slot, chain: [...slot.chain], index: slot.index + 1 })
+    onInsertAt?.(slot, kind)
   }
+
+  const branchFromMenu = () => {
+    if (!slotMenu) return
+    const slot = menuSlot(slotMenu)
+    closeSlotMenu(false)
+    if (!onOpenBranchAt) {
+      onNotice?.('当前版本没有接入并联分支操作')
+      return
+    }
+    setFocusOpenBranch(true)
+    onOpenBranchAt(slot)
+  }
+
+  const pasteFromMenu = () => {
+    if (!slotMenu) return
+    const slot = menuSlot(slotMenu)
+    closeSlotMenu(false)
+    onPasteAt?.(slot)
+  }
+
+  // 取点合并状态独占 Esc：放在捕获阶段，先于属性栏等全局快捷键处理。
+  useEffect(() => {
+    if (!mergeArmed) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      const target = event.target
+      if (target instanceof Element && target.closest('[role="dialog"]')) return
+      event.preventDefault()
+      event.stopPropagation()
+      setMergeArmed(null)
+      onNotice?.('已取消取点，并联分支仍然打开')
+    }
+    window.addEventListener('keydown', onKeyDown, true)
+    return () => window.removeEventListener('keydown', onKeyDown, true)
+  }, [mergeArmed, onNotice])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -1721,18 +1999,26 @@ export default function LadderCanvas({
       )) return
       if (event.key === 'F8' && event.shiftKey && selection) {
         event.preventDefault()
-        startBranch(selection.rungId)
+        const rungId = selection.rungId
+        if (selection.wire) {
+          onOpenBranchAt?.({ rungId, chain: selection.wire.chain, index: selection.wire.index })
+          return
+        }
+        if (selection.path && selection.path.length > 0) {
+          onOpenBranchAt?.({
+            rungId,
+            chain: selection.path.slice(0, -1),
+            index: selection.path[selection.path.length - 1] + 1,
+          })
+          return
+        }
+        onNotice?.('先在图纸上选中一个元件或一段线路，再按 Shift+F8 打开分支')
         return
-      }
-      if (!branchDraft) return
-      if (event.key === 'Escape' || (event.key === 'F9' && event.shiftKey)) {
-        event.preventDefault()
-        setBranchDraft(null)
       }
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  })
+  }, [selection, onOpenBranchAt, onNotice])
 
   const beginDrag: DrawContext['beginDrag'] = (event, payload, label, sourceKey) => {
     setDragSource(sourceKey)
@@ -1745,55 +2031,93 @@ export default function LadderCanvas({
     dragTarget,
     dragSource,
     rungId: '',
+    segment: '',
     metrics: DEFAULT_METRICS,
     onSelect: (next) => {
-      // 点元件即结束「打开分支」的取点状态，避免下一次选线被误当成闭合位置。
-      setBranchDraft(null)
+      // 点元件或线路即结束分支合并取点状态，避免下一次点击被误当成闭合位置。
+      setMergeArmed(null)
+      setSlotMenu(null)
       onSelect(next)
     },
     onEdit,
     onMoveNode,
-    onInsertSlot,
-    branchDraft,
-    onSlotClick: handleSlotClick,
+    onOpenSlotMenu: (request) => {
+      setMergeArmed(null)
+      setSlotMenu(request)
+    },
+    onMergeSlotClick: (_slot, closeIndex) => {
+      if (!mergeArmed) return
+      const { rungId, parallelPath } = mergeArmed
+      setMergeArmed(null)
+      onMergeBranchAt?.(rungId, parallelPath, closeIndex)
+    },
+    onMergeChipClick: (rungId, parallelPath) => {
+      setSlotMenu(null)
+      setMergeArmed((current) => (
+        current && current.rungId === rungId && pathsEqual(current.parallelPath, parallelPath)
+          ? null
+          : { rungId, parallelPath }
+      ))
+    },
+    mergeTarget: mergeArmed
+      ? { rungId: mergeArmed.rungId, chain: [...mergeArmed.parallelPath, 0] }
+      : null,
+    onExtendSelect,
+    onSlotClick: (rungId, chain, index) => {
+      setSlotMenu(null)
+      setMergeArmed(null)
+      onSelect({ rungId, path: null, wire: { chain, index } })
+    },
     beginDrag,
   }
 
   return (
-    <div className={'ll-canvas' + (isDragging ? ' is-dragging' : '')}>
-      {program.rungs.length === 0 ? (
-        <div className="ll-empty-board">
-          <div className="ll-empty-symbol">—[ ]—( )</div>
-          <h3>程序里还没有程序段</h3>
-          <p>添加第一条程序段，然后从指令面板拖入触点或输出。</p>
-          <button type="button" onClick={onAddRung}>添加程序段</button>
-        </div>
-      ) : (
-        <div className="ll-program-sheet">
-          {program.rungs.map((rung, index) => (
-            <RungSection
-              key={rung.id}
-              rung={rung}
-              index={index}
-              total={program.rungs.length}
-              context={{ ...context, rungId: rung.id }}
-              onDuplicateRung={onDuplicateRung}
-              onDeleteRung={onDeleteRung}
-              onMoveRung={onMoveRung}
-              onRenameRung={onRenameRung}
-              onInsertContact={onInsertContact}
-              onDeleteNode={onDeleteNode}
-              onStartBranch={startBranch}
-            />
-          ))}
-        </div>
+    <>
+      <div className={'ll-canvas' + (isDragging ? ' is-dragging' : '')}>
+        {program.rungs.length === 0 ? (
+          <div className="ll-empty-board">
+            <div className="ll-empty-symbol">—[ ]—( )</div>
+            <h3>程序里还没有程序段</h3>
+            <p>添加第一条程序段，然后点线路上的 + 插入触点。</p>
+            <button type="button" onClick={onAddRung}>添加程序段</button>
+          </div>
+        ) : (
+          <div className="ll-program-sheet">
+            {program.rungs.map((rung, index) => (
+              <RungSection
+                key={rung.id}
+                rung={rung}
+                index={index}
+                total={program.rungs.length}
+                context={{ ...context, rungId: rung.id }}
+                onDuplicateRung={onDuplicateRung}
+                onDeleteRung={onDeleteRung}
+                onMoveRung={onMoveRung}
+                onRenameRung={onRenameRung}
+                onInsertContact={onInsertContact}
+                onDeleteNode={onDeleteNode}
+              />
+            ))}
+          </div>
+        )}
+        {program.rungs.length > 0 && (
+          <button type="button" className="ll-add-rung" onClick={onAddRung}>
+            <span aria-hidden="true">+</span> 添加程序段
+          </button>
+        )}
+      </div>
+      {slotMenu && (
+        <SlotMenu
+          request={slotMenu}
+          clipboardCount={clipboardCount}
+          initialKind={lastKind}
+          onClose={closeSlotMenu}
+          onPick={pickFromMenu}
+          onBranch={branchFromMenu}
+          onPaste={pasteFromMenu}
+        />
       )}
-      {program.rungs.length > 0 && (
-        <button type="button" className="ll-add-rung" onClick={onAddRung}>
-          <span aria-hidden="true">+</span> 添加程序段
-        </button>
-      )}
-    </div>
+    </>
   )
 }
 function renderParallel(
@@ -1806,10 +2130,14 @@ function renderParallel(
   const size = measureNode(node, m)
   const branchSizes = node.branches.map((branch) => measureChain(branch, m))
   const selected = isSelected(context, path)
+  const primary = isPrimarySelected(context, path)
+  const grouped = selected && (context.selection?.paths?.length ?? 0) > 1
   const sourceKey = 'node:' + context.rungId + ':' + path.join('.')
   const source = context.dragSource === sourceKey
   const splitX = m.parallelGutter / 2
-  const collectX = size.width - m.parallelGutter / 2
+  const isOpen = node.open === true
+  const contentW = size.width - (isOpen ? m.openMergeW : 0)
+  const collectX = contentW - m.parallelGutter / 2
   let branchY = 0
   const placements = branchSizes.map((branch) => {
     const y = branchY
@@ -1821,18 +2149,30 @@ function renderParallel(
   const lastCenter = placements[placements.length - 1]?.centerY ?? entryY
   const outputPower = context.runtime.nodePower[node.id] === true
   const selection = { rungId: context.rungId, path }
+  const draftPlacements = placements.slice(1)
+  const chipX = contentW + 8
+  const chipW = m.openMergeW - 16
+  const chipH = 28
+  const chipY = draftPlacements.length > 0
+    ? (draftPlacements[0].centerY + draftPlacements[draftPlacements.length - 1].centerY) / 2
+    : entryY
 
   return (
     <g
       className={[
         'll-node',
         'll-parallel',
+        isOpen ? 'is-branch-open' : '',
         selected ? 'is-selected' : '',
+        grouped ? 'is-group-selected' : '',
+        grouped && primary ? 'is-primary-selected' : '',
         source ? 'is-drag-source' : '',
       ].filter(Boolean).join(' ')}
       role="button"
       tabIndex={0}
-      aria-label={'并联分支，' + node.branches.length + ' 条支路，点击编辑'}
+      aria-label={isOpen
+        ? '并联分支，主线未闭合，点击编辑或点右侧合并分支'
+        : '并联分支，' + node.branches.length + ' 条支路，点击编辑'}
       aria-keyshortcuts="ArrowLeft ArrowRight"
       data-node-id={node.id}
       onClick={(event) => {
@@ -1861,8 +2201,10 @@ function renderParallel(
       }}
     >
       <title>
-        {'并联分支 · ' + node.branches.length + ' 条支路 · '
-          + (outputPower ? '能流接通' : '能流断开')}
+        {isOpen
+          ? '并联分支 · 主线 + ' + (node.branches.length - 1) + ' 条草稿支路 · 点「合并分支」后在主线上选闭合位置'
+          : '并联分支 · ' + node.branches.length + ' 条支路 · '
+            + (outputPower ? '能流接通' : '能流断开')}
       </title>
       <rect
         className="ll-node-hit"
@@ -1880,6 +2222,7 @@ function renderParallel(
       {placements.map((placement, index) => {
         const branch = node.branches[index]
         const branchPower = chainOutputPower(branch, context.runtime, incomingPower)
+        const endX = m.parallelGutter + branchSizes[index].width
         return (
           <g key={node.id + '-branch-wires-' + index}>
             <path
@@ -1887,19 +2230,77 @@ function renderParallel(
               d={'M ' + splitX + ' ' + placement.centerY
                 + ' H ' + m.parallelGutter}
             />
-            <path
-              className={'ll-wire' + (branchPower ? ' is-on' : '')}
-              d={'M ' + (m.parallelGutter + branchSizes[index].width) + ' '
-                + placement.centerY + ' H ' + collectX}
-            />
+            {isOpen && index === 0 ? (
+              // 未闭合时主线直接接到输出，草稿支路等在右侧汇合。
+              <path
+                className={'ll-wire' + (branchPower ? ' is-on' : '')}
+                d={'M ' + endX + ' ' + placement.centerY + ' H ' + size.width}
+              />
+            ) : (
+              <path
+                className={'ll-wire' + (branchPower ? ' is-on' : '') + (isOpen ? ' is-draft' : '')}
+                d={'M ' + endX + ' ' + placement.centerY + ' H '
+                  + (isOpen ? contentW + 2 : collectX)}
+              />
+            )}
           </g>
         )
       })}
-      <path
-        className={'ll-wire' + (outputPower ? ' is-on' : '')}
-        d={'M ' + collectX + ' ' + firstCenter + ' V ' + lastCenter
-          + ' M ' + collectX + ' ' + entryY + ' H ' + size.width}
-      />
+      {isOpen ? (
+        <g className="ll-open-collect">
+          {draftPlacements.length > 1 && (
+            <path
+              className="ll-wire is-draft"
+              d={'M ' + (contentW + 2) + ' ' + draftPlacements[0].centerY
+                + ' V ' + draftPlacements[draftPlacements.length - 1].centerY}
+            />
+          )}
+          {draftPlacements.length > 0 && (
+            <path
+              className="ll-wire is-draft"
+              d={'M ' + (contentW + 2) + ' ' + chipY + ' H ' + chipX}
+            />
+          )}
+          <g
+            className="ll-merge-chip"
+            role="button"
+            tabIndex={0}
+            aria-label="合并分支：点一下，再在主线插入点里选闭合位置"
+            onClick={(event) => {
+              event.stopPropagation()
+              context.onMergeChipClick(context.rungId, path)
+            }}
+            onKeyDown={(event) => {
+              activateWithKeyboard(event, () => context.onMergeChipClick(context.rungId, path))
+            }}
+            onPointerDown={(event) => event.stopPropagation()}
+          >
+            <title>合并分支：点一下，再点主线上的 + 选择闭合位置</title>
+            <rect
+              className="ll-merge-chip-hit"
+              x={chipX}
+              y={chipY - chipH / 2}
+              width={chipW}
+              height={chipH}
+              rx="3"
+            />
+            <text
+              className="ll-merge-chip-text"
+              x={chipX + chipW / 2}
+              y={chipY + 4}
+              textAnchor="middle"
+            >
+              合并分支
+            </text>
+          </g>
+        </g>
+      ) : (
+        <path
+          className={'ll-wire' + (outputPower ? ' is-on' : '')}
+          d={'M ' + collectX + ' ' + firstCenter + ' V ' + lastCenter
+            + ' M ' + collectX + ' ' + entryY + ' H ' + size.width}
+        />
+      )}
       {node.branches.map((branch, index) => {
         const placement = placements[index]
         return (
