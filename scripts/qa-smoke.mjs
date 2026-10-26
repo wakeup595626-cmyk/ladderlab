@@ -833,6 +833,47 @@ check(
   { candidatesClosed, ...mergedBranch },
 )
 
+// 博途式并联：每条支路有自己的水平线，末端进入独立的汇合竖线。
+// 父子并联的汇合竖线也必须错开，不能把两层的竖线叠成一根。
+const parallelGeometry = await evaluate(`(() => {
+  const groups = [...document.querySelectorAll('.ll-parallel')]
+  return groups.map((group) => {
+    const right = [...group.querySelectorAll('[data-parallel-branch-side="right"]')]
+      .filter((path) => path.closest('.ll-parallel') === group)
+      .map((path) => {
+        const box = path.getBBox()
+        return { x: box.x, y: box.y, end: box.x + box.width }
+      })
+    const join = [...group.querySelectorAll('[data-parallel-join]')]
+      .find((path) => path.closest('.ll-parallel') === group)?.getBBox()
+    return {
+      branches: right.length,
+      ys: right.map((item) => Math.round(item.y * 10) / 10),
+      spans: right.map((item) => Math.round((item.end - item.x) * 10) / 10),
+      joinX: join ? Math.round(join.x * 10) / 10 : null,
+      joinXGap: join && right.length
+        ? Math.max(...right.map((item) => Math.abs(join.x - item.end)))
+        : null,
+    }
+  })
+})()`)
+const parallelLayers = parallelGeometry.filter((group) => group.branches >= 2)
+const parallelJoinXs = new Set(parallelLayers.map((group) => group.joinX))
+check(
+  'desktop/parallel-has-separate-branch-lanes',
+  parallelLayers.length >= 2
+    && parallelLayers.every((group) => new Set(group.ys).size === group.branches)
+    && parallelLayers.every((group) => group.spans.every((span) => span > 4))
+    && parallelLayers.every((group) => group.joinXGap < 1),
+  parallelGeometry,
+)
+check(
+  'desktop/nested-parallel-joins-are-distinct',
+  parallelJoinXs.size >= 2,
+  { joins: [...parallelJoinXs] },
+)
+await screenshot('docs/qa/desktop-parallel-standard.png')
+
 // 合并后并联节点仍保持选中，点开分支面板供截图，也留给下面的折叠测试。
 await evaluate(`document.querySelector('.ll-parallel.is-selected')
   ?.dispatchEvent(new MouseEvent('click', { bubbles: true }))`)
@@ -927,6 +968,67 @@ await pressKey('z', 'KeyZ', 90, 2)
 await pressKey('z', 'KeyZ', 90, 2)
 const restoredRungs = await evaluate(`document.querySelectorAll('.ll-rung').length`)
 check('desktop/segments-restored', restoredRungs === 1, restoredRungs)
+
+// 定时器按博途布局：IN / Q 在主功率线上，PT / ET 的值放在框外左右两侧。
+const openedLibrary = await evaluate(`(() => {
+  const button = document.querySelector('.wb-project-button')
+  button?.click()
+  return !!button
+})()`)
+await sleep(320)
+const openedSamples = await evaluate(`(() => {
+  if (!document.querySelector('.wb-project-drawer')) return false
+  const item = [...document.querySelectorAll('.wb-tree-item')]
+    .find((node) => node.textContent?.includes('实验库'))
+  item?.click()
+  return !!item
+})()`)
+await sleep(360)
+const pickedTimerSample = await evaluate(`(() => {
+  const item = [...document.querySelectorAll('.library-item')]
+    .find((node) => node.textContent?.includes('顺序启动'))
+  item?.click()
+  return !!item
+})()`)
+await sleep(300)
+await evaluate(`document.querySelector('.confirm-ok')?.click()`)
+await sleep(700)
+const timerLayout = await evaluate(`(() => {
+  const graphic = document.querySelector('[data-instruction="TON"]')
+  if (!graphic) return { present: false }
+  const box = graphic.querySelector('.ll-instruction-box')?.getBoundingClientRect()
+  const pt = graphic.querySelector('[data-pin-value="PT"]')
+  const et = graphic.querySelector('[data-pin-value="ET"]')
+  const ptRect = pt?.getBoundingClientRect()
+  const etRect = et?.getBoundingClientRect()
+  return {
+    present: true,
+    pins: [...graphic.querySelectorAll('[data-pin]')].map((pin) => pin.getAttribute('data-pin')),
+    ptText: pt?.textContent?.trim() ?? null,
+    etText: et?.textContent?.trim() ?? null,
+    ptInside: box && ptRect ? ptRect.right <= box.left + 1 : null,
+    etInside: box && etRect ? etRect.left >= box.right - 1 : null,
+    box: box ? { left: box.left, right: box.right, top: box.top, bottom: box.bottom } : null,
+    pt: ptRect ? { left: ptRect.left, right: ptRect.right } : null,
+    et: etRect ? { left: etRect.left, right: etRect.right } : null,
+    overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth + 1,
+  }
+})()`)
+check(
+  'desktop/timer-follows-tia-pin-layout',
+  openedLibrary
+    && openedSamples
+    && pickedTimerSample
+    && timerLayout.present
+    && ['IN', 'PT', 'Q', 'ET'].every((pin) => timerLayout.pins.includes(pin))
+    && timerLayout.ptText === 'T#3s'
+    && timerLayout.etText === 'T#0ms'
+    && timerLayout.ptInside === true
+    && timerLayout.etInside === true
+    && !timerLayout.overflow,
+  timerLayout,
+)
+await screenshot('docs/qa/desktop-timer-standard.png')
 
 // 工程改名后刷新仍保留。
 const renameReady = await evaluate(`(() => {

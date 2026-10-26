@@ -784,7 +784,10 @@
 .ll-box-title,
 .ll-pin-label,
 .ll-box-data,
-.ll-box-value {
+.ll-box-value,
+.ll-box-subtitle,
+.ll-box-operand,
+.ll-box-external-value {
   font-family: var(--mono);
   pointer-events: none;
 }
@@ -809,6 +812,38 @@
   fill: var(--accent-ink);
   font-size: 11px;
   font-weight: 600;
+}
+
+.ll-box-subtitle {
+  fill: var(--muted);
+  font-size: 9.5px;
+}
+
+.ll-pin-terminal {
+  fill: none;
+  stroke: var(--muted);
+  stroke-width: 1.25;
+  stroke-linecap: square;
+}
+
+.ll-box-operand {
+  fill: var(--muted);
+  font-size: 9.5px;
+}
+
+/* 博途把 PT / ET 和 PV / CV 的当前值放在框外；底描边保证跨过导线时仍可读。 */
+.ll-box-external-value {
+  fill: var(--accent-ink);
+  font-size: 10.5px;
+  font-weight: 600;
+  paint-order: stroke fill;
+  stroke: var(--surface);
+  stroke-width: 3px;
+  stroke-linejoin: round;
+}
+
+.ll-output.is-powered .ll-pin-terminal {
+  stroke: var(--positive);
 }
 
 .ll-output.is-true .ll-box-value,
@@ -949,7 +984,10 @@
   .ll-box-title,
   .ll-pin-label,
   .ll-box-data,
-  .ll-box-value {
+  .ll-box-value,
+  .ll-box-subtitle,
+  .ll-box-operand,
+  .ll-box-external-value {
     font-size: 12px;
   }
 

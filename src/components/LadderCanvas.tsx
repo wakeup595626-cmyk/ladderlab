@@ -124,10 +124,15 @@ interface LadderMetrics {
   boxW: number
   boxH: number
   boxLineY: number
+  /** 指令框左右留给外部参数值（PT / ET、PV / CV）的车道。 */
+  boxLaneLeft: number
+  boxLaneRight: number
   emptyChainW: number
   emptyChainH: number
   emptyChainLineY: number
   parallelGutter: number
+  /** 左右分叉竖线之间留给“合流车道”的宽度，避免嵌套并联的竖线互相贴合。 */
+  parallelJoinW: number
   parallelGap: number
   /** 未闭合分支右侧「合并分支」按钮预留的宽度。 */
   openMergeW: number
@@ -153,13 +158,16 @@ const DEFAULT_METRICS: LadderMetrics = {
   coilW: 112,
   coilH: 92,
   coilLineY: 50,
-  boxW: 236,
-  boxH: 168,
+  boxW: 320,
+  boxH: 176,
   boxLineY: 80,
+  boxLaneLeft: 70,
+  boxLaneRight: 70,
   emptyChainW: 150,
   emptyChainH: 92,
   emptyChainLineY: 50,
-  parallelGutter: 10,
+  parallelGutter: 18,
+  parallelJoinW: 30,
   parallelGap: 8,
   openMergeW: 116,
   minWidth: 600,
@@ -182,13 +190,16 @@ const COMPACT_METRICS: LadderMetrics = {
   coilW: 74,
   coilH: 92,
   coilLineY: 50,
-  boxW: 168,
-  boxH: 168,
+  boxW: 244,
+  boxH: 176,
   boxLineY: 80,
+  boxLaneLeft: 54,
+  boxLaneRight: 54,
   emptyChainW: 92,
   emptyChainH: 92,
   emptyChainLineY: 50,
-  parallelGutter: 6,
+  parallelGutter: 12,
+  parallelJoinW: 22,
   parallelGap: 6,
   openMergeW: 92,
   minWidth: 300,
@@ -307,14 +318,16 @@ function measureNode(node: LadderNode, m: LadderMetrics): Size {
   if (node.type === 'contact') return contactSize(node, m)
   if (node.branches.length === 0) {
     return {
-      width: m.emptyChainW + m.parallelGutter * 2,
+      width: m.emptyChainW + m.parallelGutter * 2 + m.parallelJoinW,
       height: m.emptyChainH,
       lineY: m.emptyChainLineY,
     }
   }
 
   const branches = node.branches.map((branch) => measureChain(branch, m))
-  const contentW = Math.max(...branches.map((branch) => branch.width)) + m.parallelGutter * 2
+  const contentW = Math.max(...branches.map((branch) => branch.width))
+    + m.parallelGutter * 2
+    + m.parallelJoinW
   return {
     // 未闭合时右侧要留出「合并分支」按钮，否则按钮会压到输出线上。
     width: contentW + (node.open === true ? m.openMergeW : 0),
@@ -378,10 +391,12 @@ function tagDetails(tags: TagDef[], reference: string) {
 
 function formatTime(value: number): string {
   if (!Number.isFinite(value)) return 'T#—'
-  const seconds = value / 1000
+  const milliseconds = Math.max(0, Math.round(value))
+  if (milliseconds < 1000) return 'T#' + milliseconds + 'ms'
+  const seconds = milliseconds / 1000
   const text = Number.isInteger(seconds)
     ? String(seconds)
-    : seconds.toFixed(2).replace(/0+$/, '').replace(/\.$/, '')
+    : seconds.toFixed(3).replace(/0+$/, '').replace(/\.$/, '')
   return 'T#' + text + 's'
 }
 
@@ -870,6 +885,311 @@ function renderChain(
   return <g>{parts}</g>
 }
 
+interface InstructionPinSpec {
+  label: string
+  /** 框内显示的操作数；PT / ET / PV / CV 使用 externalValue 放到框外。 */
+  value?: string
+  externalValue?: string
+}
+
+interface InstructionRowSpec {
+  left?: InstructionPinSpec
+  right?: InstructionPinSpec
+}
+
+interface InstructionSpec {
+  title: string
+  subtitle: string
+  rows: InstructionRowSpec[]
+}
+
+/**
+ * 指令框按 IEC / 博途的习惯排引脚：能流从第一行 IN 进、Q 出，
+ * 参数在左侧，当前值在右侧；PT/ET 这类参数值放在框外，避免和引脚名挤在一起。
+ */
+function instructionSpec(output: OutputElement, runtime: Runtime): InstructionSpec {
+  const target = shorten(output.tag || '—', 14)
+  const reset = output.resetTag ? shorten(output.resetTag, 12) : undefined
+  const source = shorten(
+    output.sourceTag || (output.kind === 'MOVE' ? String(output.value ?? 0) : output.tag || '—'),
+    14,
+  )
+  const operand = shorten(output.valueTag || String(output.value ?? 1), 14)
+
+  if (output.kind === 'TON' || output.kind === 'TOF') {
+    return {
+      title: output.kind,
+      subtitle: 'Time',
+      rows: [
+        { left: { label: 'IN' }, right: { label: 'Q' } },
+        {
+          left: { label: 'PT', externalValue: formatTime(output.pt ?? 0) },
+          right: {
+            label: 'ET',
+            externalValue: formatTime(runtime.timers[output.tag]?.et ?? 0),
+          },
+        },
+      ],
+    }
+  }
+
+  if (output.kind === 'TONR') {
+    return {
+      title: 'TONR',
+      subtitle: 'Time',
+      rows: [
+        { left: { label: 'IN' }, right: { label: 'Q' } },
+        { left: { label: 'R', value: reset } },
+        {
+          left: { label: 'PT', externalValue: formatTime(output.pt ?? 0) },
+          right: {
+            label: 'ET',
+            externalValue: formatTime(runtime.timers[output.tag]?.et ?? 0),
+          },
+        },
+      ],
+    }
+  }
+
+  if (output.kind === 'CTU') {
+    return {
+      title: 'CTU',
+      subtitle: 'Int',
+      rows: [
+        { left: { label: 'CU' }, right: { label: 'Q' } },
+        { left: { label: 'R', value: reset } },
+        {
+          left: { label: 'PV', externalValue: String(output.pv ?? 1) },
+          right: {
+            label: 'CV',
+            externalValue: String(runtime.counters[output.tag]?.cv ?? 0),
+          },
+        },
+      ],
+    }
+  }
+
+  if (output.kind === 'MOVE') {
+    return {
+      title: 'MOVE',
+      subtitle: 'Int',
+      rows: [
+        { left: { label: 'EN' }, right: { label: 'ENO' } },
+        { left: { label: 'IN', value: source }, right: { label: 'OUT', value: target } },
+      ],
+    }
+  }
+
+  if (output.kind === 'ADD' || output.kind === 'SUB') {
+    return {
+      title: output.kind,
+      subtitle: 'Int',
+      rows: [
+        { left: { label: 'EN' }, right: { label: 'ENO' } },
+        { left: { label: 'IN1', value: source }, right: { label: 'OUT', value: target } },
+        { left: { label: 'IN2', value: operand } },
+      ],
+    }
+  }
+
+  if (output.kind === 'SHL' || output.kind === 'ROL') {
+    return {
+      title: output.kind,
+      subtitle: 'Int',
+      rows: [
+        { left: { label: 'EN' }, right: { label: 'ENO' } },
+        { left: { label: 'IN', value: source }, right: { label: 'OUT', value: target } },
+        { left: { label: 'N', value: operand } },
+      ],
+    }
+  }
+
+  const patternIndex = runtime.patterns[output.id]?.index ?? 0
+  const patternLength = output.pattern?.length ?? 0
+  return {
+    title: 'PATTERN',
+    subtitle: '教学扩展',
+    rows: [
+      { left: { label: 'EN' }, right: { label: 'ENO' } },
+      {
+        left: { label: 'PULSE', value: shorten(output.pulseTag || '—', 12) },
+        right: { label: 'OUT', value: target },
+      },
+      {
+        left: {
+          label: 'NEXT',
+          value: patternLength ? String(patternIndex + 1) + ' / ' + patternLength : '—',
+        },
+      },
+    ],
+  }
+}
+
+function renderInstructionGraphic(
+  output: OutputElement,
+  context: DrawContext,
+  size: Size,
+  centerY: number,
+  powered: boolean,
+  symbol: string,
+  address: string,
+): ReactNode {
+  const m = context.metrics
+  const spec = instructionSpec(output, context.runtime)
+  const boxX = m.boxLaneLeft
+  const boxRight = size.width - m.boxLaneRight
+  const boxWidth = boxRight - boxX
+  const boxTop = 34
+  const headingH = 34
+  const symbolX = size.width / 2
+  const rowYs = [centerY + 4, centerY + 30, centerY + 56]
+  const boxBottom = rowYs[spec.rows.length - 1] + 18
+  const boxHeight = boxBottom - boxTop
+  const leftValueX = boxX + 48
+  const rightValueX = boxRight - 42
+
+  return (
+    <g className="ll-instruction-graphic" data-instruction={output.kind}>
+      {address ? (
+        <>
+          <text className="ll-output-address" x={symbolX} y="14" textAnchor="middle">
+            {shorten(address, m.addressChars)}
+          </text>
+          <text className="ll-output-name" x={symbolX} y="28" textAnchor="middle">
+            {shorten(symbol, m.boxChars)}
+          </text>
+        </>
+      ) : (
+        <text className="ll-output-name" x={symbolX} y="15" textAnchor="middle">
+          {shorten(symbol, m.boxChars)}
+        </text>
+      )}
+
+      <path
+        className={'ll-wire' + (powered ? ' is-on' : '')}
+        d={'M 0 ' + centerY + ' H ' + boxX
+          + ' M ' + boxRight + ' ' + centerY + ' H ' + size.width}
+      />
+      <rect
+        className="ll-instruction-box"
+        x={boxX}
+        y={boxTop}
+        width={boxWidth}
+        height={boxHeight}
+        rx="2"
+      />
+      <rect
+        className="ll-box-heading"
+        x={boxX}
+        y={boxTop}
+        width={boxWidth}
+        height={headingH}
+        rx="2"
+      />
+      <text
+        className="ll-box-title"
+        x={symbolX}
+        y={boxTop + 14}
+        textAnchor="middle"
+      >
+        {spec.title}
+      </text>
+      <text
+        className="ll-box-subtitle"
+        x={symbolX}
+        y={boxTop + 27}
+        textAnchor="middle"
+      >
+        {spec.subtitle}
+      </text>
+
+      {spec.rows.map((row, index) => {
+        const y = rowYs[index]
+        const pinLineY = y - 4
+        return (
+          <g key={output.id + '-row-' + index}>
+            {row.left && (
+              <g
+                data-pin={row.left.label}
+                data-pin-side="left"
+                data-external={row.left.externalValue ? 'true' : undefined}
+              >
+                <text className="ll-pin-label" x={boxX + 12} y={y}>{row.left.label}</text>
+                {row.left.value && (
+                  <text className="ll-box-operand" x={leftValueX} y={y}>{row.left.value}</text>
+                )}
+                {row.left.externalValue && (
+                  <>
+                    <path
+                      className="ll-pin-terminal"
+                      d={'M ' + (boxX - 12) + ' ' + pinLineY + ' H ' + boxX}
+                    />
+                    <text
+                      className="ll-box-external-value"
+                      data-pin-value={row.left.label}
+                      x={boxX - 18}
+                      y={y}
+                      textAnchor="end"
+                    >
+                      {row.left.externalValue}
+                    </text>
+                  </>
+                )}
+              </g>
+            )}
+            {row.right && (
+              <g
+                data-pin={row.right.label}
+                data-pin-side="right"
+                data-external={row.right.externalValue ? 'true' : undefined}
+                data-pin-state={index === 0 && row.right.label === 'Q'
+                  ? (readOutputQ(output, context.runtime) ? 'true' : 'false')
+                  : undefined}
+              >
+                <text
+                  className="ll-pin-label"
+                  x={boxRight - 12}
+                  y={y}
+                  textAnchor="end"
+                >
+                  {row.right.label}
+                </text>
+                {row.right.value && (
+                  <text
+                    className="ll-box-operand"
+                    x={rightValueX}
+                    y={y}
+                    textAnchor="end"
+                  >
+                    {row.right.value}
+                  </text>
+                )}
+                {row.right.externalValue && (
+                  <>
+                    <path
+                      className="ll-pin-terminal"
+                      d={'M ' + boxRight + ' ' + pinLineY + ' H ' + (boxRight + 12)}
+                    />
+                    <text
+                      className="ll-box-external-value"
+                      data-pin-value={row.right.label}
+                      x={boxRight + 18}
+                      y={y}
+                      textAnchor="start"
+                    >
+                      {row.right.externalValue}
+                    </text>
+                  </>
+                )}
+              </g>
+            )}
+          </g>
+        )
+      })}
+    </g>
+  )
+}
+
 function renderOutput(
   output: OutputElement,
   context: DrawContext,
@@ -884,11 +1204,8 @@ function renderOutput(
   const address = details.bound ? details.address : ''
   const symbol = details.bound ? `"${details.name}"` : details.name
   const isCoil = output.kind === 'COIL' || output.kind === 'SET' || output.kind === 'RESET'
-  const isTimer = output.kind === 'TON' || output.kind === 'TOF' || output.kind === 'TONR'
   const centerY = isCoil ? m.coilLineY : m.boxLineY
   const symbolX = size.width / 2
-  const boxTop = 34
-  const boxHeight = 124
   const selection = { rungId, path: null }
   const isDropTarget = context.dragTarget?.type === 'output'
     && context.dragTarget.rungId === rungId
@@ -977,166 +1294,7 @@ function renderOutput(
           </text>
         </g>
       ) : (
-        <g>
-          {isTimer || output.kind === 'CTU' ? (
-            <text className="ll-output-name" x={symbolX} y="15" textAnchor="middle">
-              {shorten(output.tag, m.boxChars)}
-            </text>
-          ) : (
-            <>
-              {address && (
-                <text className="ll-output-address" x={symbolX} y="14" textAnchor="middle">
-                  {shorten(address, m.boxChars)}
-                </text>
-              )}
-              <text
-                className="ll-output-name"
-                x={symbolX}
-                y={address ? 28 : 15}
-                textAnchor="middle"
-              >
-                {shorten(symbol, m.boxChars)}
-              </text>
-            </>
-          )}
-          <path
-            className={'ll-wire' + (powered ? ' is-on' : '')}
-            d={'M 0 ' + centerY + ' H 16 M ' + (size.width - 16) + ' '
-              + centerY + ' H ' + size.width}
-          />
-          <rect
-            className="ll-instruction-box"
-            x="16"
-            y={boxTop}
-            width={size.width - 32}
-            height={boxHeight}
-            rx="3"
-          />
-          <rect
-            className="ll-box-heading"
-            x="16"
-            y={boxTop}
-            width={size.width - 32}
-            height="31"
-            rx="3"
-          />
-          <text
-            className="ll-box-title"
-            x={symbolX}
-            y={boxTop + 22}
-            textAnchor="middle"
-          >
-            {OUTPUT_LABELS[output.kind]}
-          </text>
-          <text className="ll-pin-label" x="25" y={centerY + 5}>IN</text>
-          <text
-            className="ll-pin-label"
-            x={size.width - 25}
-            y={centerY + 5}
-            textAnchor="end"
-          >
-            {q ? 'Q TRUE' : 'Q FALSE'}
-          </text>
-          {isTimer ? (
-            <g>
-              <text className="ll-box-data" x="25" y={centerY + 28}>PT</text>
-              <text
-                className="ll-box-value"
-                x={size.width - 25}
-                y={centerY + 28}
-                textAnchor="end"
-              >
-                {formatTime(output.pt ?? 0)}
-              </text>
-              <text className="ll-box-data" x="25" y={centerY + 49}>ET</text>
-              <text
-                className="ll-box-value"
-                x={size.width - 25}
-                y={centerY + 49}
-                textAnchor="end"
-              >
-                {formatTime(context.runtime.timers[output.tag]?.et ?? 0)}
-              </text>
-            </g>
-          ) : output.kind === 'CTU' ? (
-            <g>
-              <text className="ll-box-data" x="25" y={centerY + 28}>PV</text>
-              <text
-                className="ll-box-value"
-                x={size.width - 25}
-                y={centerY + 28}
-                textAnchor="end"
-              >
-                {output.pv ?? 1}
-              </text>
-              <text className="ll-box-data" x="25" y={centerY + 49}>CV</text>
-              <text
-                className="ll-box-value"
-                x={size.width - 25}
-                y={centerY + 49}
-                textAnchor="end"
-              >
-                {context.runtime.counters[output.tag]?.cv ?? 0}
-              </text>
-            </g>
-          ) : output.kind === 'PATTERN' ? (
-            <g>
-              <text className="ll-box-data" x="25" y={centerY + 22}>PULSE</text>
-              <text
-                className="ll-box-data"
-                x={size.width - 25}
-                y={centerY + 22}
-                textAnchor="end"
-              >
-                {shorten(output.pulseTag || '—', m.nameChars - 2)}
-              </text>
-              <text className="ll-box-data" x="25" y={centerY + 43}>NEXT</text>
-              <text
-                className="ll-box-value"
-                x={size.width - 25}
-                y={centerY + 43}
-                textAnchor="end"
-              >
-                {(context.runtime.patterns[output.id]?.index ?? 0) + 1}
-                {' / ' + (output.pattern?.length ?? 0)}
-              </text>
-            </g>
-          ) : (
-            <g>
-              <text className="ll-box-data" x="25" y={centerY + 22}>
-                {output.kind === 'MOVE' ? 'SRC' : 'ACC'}
-              </text>
-              <text
-                className="ll-box-data"
-                x={size.width - 25}
-                y={centerY + 22}
-                textAnchor="end"
-              >
-                {shorten(
-                  output.sourceTag || (output.kind === 'MOVE'
-                    ? String(output.value ?? 0)
-                    : output.tag),
-                  12,
-                )}
-              </text>
-              {output.kind !== 'MOVE' && (
-                <g>
-                  <text className="ll-box-data" x="25" y={centerY + 43}>
-                    {output.kind === 'ROL' || output.kind === 'SHL' ? 'N' : 'IN'}
-                  </text>
-                  <text
-                    className="ll-box-data"
-                    x={size.width - 25}
-                    y={centerY + 43}
-                    textAnchor="end"
-                  >
-                    {shorten(output.valueTag || String(output.value ?? 1), 12)}
-                  </text>
-                </g>
-              )}
-            </g>
-          )}
-        </g>
+        renderInstructionGraphic(output, context, size, centerY, powered, symbol, address)
       )}
 
       <rect
@@ -2239,6 +2397,7 @@ function renderParallel(
       />
       <path
         className={'ll-wire' + (incomingPower ? ' is-on' : '')}
+        data-parallel-entry
         d={'M 0 ' + entryY + ' H ' + splitX
           + ' M ' + splitX + ' ' + firstCenter + ' V ' + lastCenter}
       />
@@ -2250,6 +2409,8 @@ function renderParallel(
           <g key={node.id + '-branch-wires-' + index}>
             <path
               className={'ll-wire' + (incomingPower ? ' is-on' : '')}
+              data-parallel-branch={index}
+              data-parallel-branch-side="left"
               d={'M ' + splitX + ' ' + placement.centerY
                 + ' H ' + m.parallelGutter}
             />
@@ -2257,11 +2418,15 @@ function renderParallel(
               // 未闭合时主线直接接到输出，草稿支路等在右侧汇合。
               <path
                 className={'ll-wire' + (branchPower ? ' is-on' : '')}
+                data-parallel-branch={index}
+                data-parallel-branch-side="right"
                 d={'M ' + endX + ' ' + placement.centerY + ' H ' + size.width}
               />
             ) : (
               <path
                 className={'ll-wire' + (branchPower ? ' is-on' : '') + (isOpen ? ' is-draft' : '')}
+                data-parallel-branch={index}
+                data-parallel-branch-side="right"
                 d={'M ' + endX + ' ' + placement.centerY + ' H '
                   + (isOpen ? contentW + 2 : collectX)}
               />
@@ -2320,6 +2485,7 @@ function renderParallel(
       ) : (
         <path
           className={'ll-wire' + (outputPower ? ' is-on' : '')}
+          data-parallel-join
           d={'M ' + collectX + ' ' + firstCenter + ' V ' + lastCenter
             + ' M ' + collectX + ' ' + entryY + ' H ' + size.width}
         />
