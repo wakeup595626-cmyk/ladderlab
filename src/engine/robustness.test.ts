@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseProgramText, serializeProgram } from '../lib/io'
+import { MAX_IMPORT_BYTES, parseProgramText, serializeProgram } from '../lib/io'
 import { addTag } from '../state/programOps'
 import { compile } from './compile'
 import { parseBitAddress, parseByteAddress } from './references'
@@ -113,7 +113,7 @@ describe('状态 ID 与配置校验', () => {
       [tag('A'), tag('B')],
       [rung('same', [], output('COIL', 'A')), rung('same', [], output('COIL', 'B'))],
     )
-    expect(compile(duplicateRungs).errors.some((item) => item.message.includes('梯级 ID“same”重复'))).toBe(true)
+    expect(compile(duplicateRungs).errors.some((item) => item.message.includes('程序段 ID“same”重复'))).toBe(true)
 
     const duplicateOutputs = program(
       [tag('A'), tag('B')],
@@ -179,6 +179,160 @@ describe('状态 ID 与配置校验', () => {
     expect(errors).toContain('SHL 的移位次数必须在 0～15 之间')
     expect(errors).toContain('ROL 的移位次数必须在 0～7 之间')
     expect(result.warnings.some((item) => item.message.includes('取整'))).toBe(true)
+  })
+})
+
+describe('输出驱动与定时器边界', () => {
+  it('PT 超过 32767 报错并提示 ET 是 INT', () => {
+    const check = (pt: number) => compile(program(
+      [tag('Pulse')],
+      [rung('r1', [contact('c1', 'NO', 'Pulse')], output('TON', 'T1', { pt }))],
+    )).errors.map((item) => item.message).join('\n')
+
+    expect(check(0)).toContain('PT 必须大于 0')
+    expect(check(1.5)).toContain('1～32767 的整数')
+    expect(check(32768)).toContain('ET 按 INT 存储')
+    expect(check(32768)).toContain('级联多个定时器或改用计数器')
+  })
+
+  it('同一变量被定时器 Q 或数值输出多次写入时给出警告', () => {
+    const source = program(
+      [tag('Pulse'), tag('TimerQ'), tag('TimerET', 'INT', 0)],
+      [
+        rung('r1', [contact('c1', 'NO', 'Pulse')], output('TON', 'T1', { pt: 10, qTag: 'TimerQ', valueTag: 'TimerET' })),
+        rung('r2', [contact('c2', 'NO', 'Pulse')], output('TON', 'T2', { pt: 20, qTag: 'TimerQ', valueTag: 'TimerET' })),
+        rung('r3', [contact('c3', 'NO', 'Pulse')], output('CTU', 'C1', { pv: 1, qTag: 'TimerQ', valueTag: 'TimerET' })),
+      ],
+    )
+
+    const result = compile(source)
+    expect(result.errors).toEqual([])
+    const driveWarnings = result.warnings.filter((item) => item.message.includes('多处输出驱动'))
+    expect(driveWarnings).toHaveLength(4)
+    expect(driveWarnings.some((item) => item.message.includes('状态输出'))).toBe(true)
+    expect(driveWarnings.some((item) => item.message.includes('数值输出'))).toBe(true)
+  })
+
+  it('SET 与 COIL 驱动同一变量时给出警告，但 SET/RESET 锁存不告警', () => {
+    const tags = [tag('Pulse'), tag('Latch')]
+    const lock = program(tags, [
+      rung('set', [contact('c1', 'NO', 'Pulse')], output('SET', 'Latch', { id: 'set-out' })),
+      rung('reset', [contact('c2', 'NO', 'Pulse')], output('RESET', 'Latch', { id: 'reset-out' })),
+    ])
+    expect(compile(lock).warnings).toEqual([])
+
+    const mixed = program(tags, [
+      rung('coil', [contact('c1', 'NO', 'Pulse')], output('COIL', 'Latch', { id: 'coil-out' })),
+      rung('set', [contact('c2', 'NO', 'Pulse')], output('SET', 'Latch', { id: 'set-out' })),
+    ])
+    const messages = compile(mixed).warnings.map((item) => item.message).join('\n')
+    expect(messages).toContain('多处输出驱动')
+    expect(messages).toContain('线圈 与 SET 置位')
+  })
+
+  it('MOVE、ADD、SUB、SHL、ROL 的目标变量都参与写冲突告警', () => {
+    const kinds = ['MOVE', 'ADD', 'SUB', 'SHL', 'ROL'] as const
+    for (const kind of kinds) {
+      const source = program(
+        [tag('Pulse'), tag('Source', 'INT', 1), tag('Value', 'INT', 0)],
+        [
+          rung(
+            'move',
+            [contact('c1', 'NO', 'Pulse')],
+            output('MOVE', 'Value', { id: 'move-out', sourceTag: 'Source' }),
+          ),
+          rung(
+            'op',
+            [contact('c2', 'NO', 'Pulse')],
+            output(kind, 'Value', { id: 'op-out', sourceTag: 'Source', value: 1 }),
+          ),
+        ],
+      )
+
+      const result = compile(source)
+      expect(result.errors, kind).toEqual([])
+      const messages = result.warnings.map((item) => item.message).join('\n')
+      expect(messages, kind).toContain('多处输出驱动')
+      expect(messages, kind).toContain(`${kind} 目标变量`)
+    }
+  })
+
+  it('单个 MOVE 或算术指令写目标时不误报', () => {
+    const source = program(
+      [tag('Pulse'), tag('Source', 'INT', 1), tag('Value', 'INT', 0)],
+      [rung(
+        'only',
+        [contact('c1', 'NO', 'Pulse')],
+        output('ADD', 'Value', { sourceTag: 'Source', value: 1 }),
+      )],
+    )
+
+    expect(compile(source).warnings).toEqual([])
+  })
+
+  it('PATTERN 输出和步号变量参与写冲突告警，同一输出自写不误报', () => {
+    const tags = [
+      tag('Pulse'),
+      tag('LampByte', 'INT', 0),
+      tag('Step', 'INT', 0),
+    ]
+    const pattern = (id: string, tagName = 'LampByte', stepTag = 'Step') => output('PATTERN', tagName, {
+      id,
+      pulseTag: 'Pulse',
+      stepTag,
+      pattern: [1, 2],
+    })
+
+    const alone = program(tags, [
+      rung('pattern', [contact('c1', 'NO', 'Pulse')], pattern('pattern-out')),
+    ])
+    expect(compile(alone).errors).toEqual([])
+    expect(compile(alone).warnings).toEqual([])
+
+    const outputConflict = program(tags, [
+      rung('pattern', [contact('c1', 'NO', 'Pulse')], pattern('pattern-out')),
+      rung(
+        'move',
+        [contact('c2', 'NO', 'Pulse')],
+        output('MOVE', 'LampByte', { id: 'move-out', value: 0 }),
+      ),
+    ])
+    const outputMessages = compile(outputConflict).warnings.map((item) => item.message).join('\n')
+    expect(outputMessages).toContain('PATTERN 输出变量')
+
+    const stepConflict = program(tags, [
+      rung('pattern', [contact('c1', 'NO', 'Pulse')], pattern('pattern-out')),
+      rung(
+        'move',
+        [contact('c2', 'NO', 'Pulse')],
+        output('MOVE', 'Step', { id: 'move-out', value: 0 }),
+      ),
+    ])
+    const stepMessages = compile(stepConflict).warnings.map((item) => item.message).join('\n')
+    expect(stepMessages).toContain('PATTERN 步号变量')
+
+    const sameAddress = program(tags, [
+      rung('pattern', [contact('c1', 'NO', 'Pulse')], pattern('pattern-out', 'Step', 'Step')),
+    ])
+    expect(compile(sameAddress).warnings).toEqual([])
+  })
+
+  it('多个 PATTERN 写同一变量时按写入者各报一次', () => {
+    const source = program(
+      [tag('Pulse'), tag('LampByte', 'INT', 0)],
+      [1, 2, 3].map((index) => rung(
+        `pattern-${index}`,
+        [contact(`c${index}`, 'NO', 'Pulse')],
+        output('PATTERN', 'LampByte', {
+          id: `pattern-out-${index}`,
+          pulseTag: 'Pulse',
+          pattern: [index],
+        }),
+      )),
+    )
+
+    const driveWarnings = compile(source).warnings.filter((item) => item.message.includes('多处输出驱动'))
+    expect(driveWarnings).toHaveLength(2)
   })
 })
 
@@ -291,7 +445,7 @@ describe('工程导入边界', () => {
         first,
         { ...first, output: { ...first.output, id: 'unique-output-for-rung-check' } },
       ],
-    }, '梯级 ID')
+    }, '程序段 ID')
     expectError({
       ...source,
       rungs: [
@@ -349,6 +503,28 @@ describe('工程导入边界', () => {
         output: { id: 'long-pattern', kind: 'PATTERN', tag: 'LampByte', pulseTag: '', pattern: Array(1025).fill(0) },
       }],
     }))).toThrow('最多支持 1024')
+  })
+
+  it('拒绝超过 5 MB 的工程文本和超长工程名、变量名、注释、梯级名', () => {
+    expect(() => parseProgramText(' '.repeat(MAX_IMPORT_BYTES + 1))).toThrow('超过 5 MB')
+
+    const source = blankProgram()
+    const reject = (value: unknown, message: string) => {
+      expect(() => parseProgramText(JSON.stringify(value))).toThrow(message)
+    }
+    reject({ ...source, name: 'P'.repeat(65) }, '工程名')
+    reject({
+      ...source,
+      tags: source.tags.map((item, index) => index === 0 ? { ...item, name: 'N'.repeat(65) } : item),
+    }, '变量名')
+    reject({
+      ...source,
+      tags: source.tags.map((item, index) => index === 0 ? { ...item, comment: 'C'.repeat(501) } : item),
+    }, '变量注释')
+    reject({
+      ...source,
+      rungs: [{ ...source.rungs[0], label: 'L'.repeat(121) }],
+    }, '程序段名称')
   })
 })
 

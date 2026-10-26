@@ -94,6 +94,13 @@ function selectionPath(program: Program, nodeId: string): number[] | null {
   return null
 }
 
+/** 与画布上的编号保持一致：属性面板永远用「程序段 N」指代当前所在的段。 */
+function rungCaption(program: Program, rungId: string, label: string): string {
+  const index = program.rungs.findIndex((item) => item.id === rungId)
+  const title = label.trim()
+  return `程序段 ${index < 0 ? '?' : index + 1}${title ? ' · ' + title : ''}`
+}
+
 function ContactProperties({
   program,
   selectedRung,
@@ -138,7 +145,7 @@ function ContactProperties({
       <div className="property-heading">
         <span className="property-type">位逻辑触点</span>
         <h3>{CONTACT_NAMES[node.kind]}</h3>
-        <p>{selectedRung.label || '未命名梯级'}</p>
+        <p>{rungCaption(program, selectedRung.id, selectedRung.label)}</p>
       </div>
 
       <label className="field">
@@ -600,7 +607,7 @@ export default function Inspector({
       ? `${CONTACT_NAMES[node.kind]} · ${node.tag || '未绑定'}`
       : `并联分支 · ${node.branches.length} 条支路`
     : rung
-      ? `梯级输出 · ${OUTPUT_NAMES[rung.output.kind]} · ${rung.output.tag || '未绑定'}`
+      ? `程序段输出 · ${OUTPUT_NAMES[rung.output.kind]} · ${rung.output.tag || '未绑定'}`
       : '尚未选择元件'
 
   const context =
@@ -789,7 +796,7 @@ function PropertiesPanel({
         <div className="property-heading">
           <span className="property-type">输出 / 指令</span>
           <h3>{OUTPUT_NAMES[output.kind]}</h3>
-          <p>{selectedRung.label || '未命名梯级'}</p>
+          <p>{rungCaption(program, selectedRung.id, selectedRung.label)}</p>
         </div>
 
         <label className="field">
@@ -945,7 +952,7 @@ function PropertiesPanel({
         <div className="property-heading">
           <span className="property-type">并联分支</span>
           <h3>{selectedNode.branches.length} 条支路</h3>
-          <p>{selectedRung.label || '未命名梯级'}</p>
+          <p>{rungCaption(program, selectedRung.id, selectedRung.label)}</p>
         </div>
         <p className="form-note">任一并联支路接通，能流就会继续向右传递。</p>
         <div className="button-row">

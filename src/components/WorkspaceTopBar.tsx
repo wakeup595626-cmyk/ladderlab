@@ -60,6 +60,30 @@ export default function WorkspaceTopBar({
   const [menuOpen, setMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
   const menuButtonRef = useRef<HTMLButtonElement>(null)
+  const [nameDraft, setNameDraft] = useState(projectName)
+  const nameEditingRef = useRef(false)
+  const nameCancelRef = useRef(false)
+
+  // 工程名按“一次输入、一次提交”处理：避免每敲一个字都写一条撤销记录。
+  useEffect(() => {
+    if (!nameEditingRef.current) setNameDraft(projectName)
+  }, [projectName])
+
+  const commitName = () => {
+    nameEditingRef.current = false
+    if (nameCancelRef.current) {
+      nameCancelRef.current = false
+      setNameDraft(projectName)
+      return
+    }
+    const next = nameDraft.trim()
+    if (!next) {
+      setNameDraft(projectName)
+      return
+    }
+    if (next !== projectName) onProjectName(next)
+    else setNameDraft(next)
+  }
 
   const menuItems = () => Array.from(
     menuRef.current?.querySelectorAll<HTMLButtonElement>('[role^="menuitem"]:not([disabled])') ?? [],
@@ -76,6 +100,10 @@ export default function WorkspaceTopBar({
       setMenuOpen(false)
     }
     const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Tab') {
+        setMenuOpen(false)
+        return
+      }
       if (event.key !== 'Escape') return
       // 菜单只是页面里的一层浮层：Esc 先关它，不要连带关闭变量表。
       event.preventDefault()
@@ -124,13 +152,53 @@ export default function WorkspaceTopBar({
         </span>
       </div>
 
+      {/* 撤销/重做放在顶栏常驻，和博途的快速访问工具栏一致：
+          不用先展开「更多」才能找回上一步。 */}
+      <div className="wb-history-actions" role="group" aria-label="编辑历史">
+        <button
+          type="button"
+          className="icon-button wb-history-button"
+          onClick={onUndo}
+          disabled={!canUndo}
+          aria-label="撤销上一步"
+          aria-keyshortcuts="Control+Z"
+          title="撤销上一步 (Ctrl+Z)"
+        >
+          <UndoIcon size={17} />
+        </button>
+        <button
+          type="button"
+          className="icon-button wb-history-button"
+          onClick={onRedo}
+          disabled={!canRedo}
+          aria-label="重做下一步"
+          aria-keyshortcuts="Control+Y Control+Shift+Z"
+          title="重做下一步 (Ctrl+Y 或 Ctrl+Shift+Z)"
+        >
+          <RedoIcon size={17} />
+        </button>
+      </div>
+
       <label className="wb-project-name" htmlFor="project-name">
         <span className="visually-hidden">工程名称</span>
         <input
           id="project-name"
-          value={projectName}
-          onChange={(event) => onProjectName(event.target.value)}
+          value={nameDraft}
+          onChange={(event) => setNameDraft(event.target.value)}
+          onFocus={() => { nameEditingRef.current = true }}
+          onBlur={commitName}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') {
+              event.preventDefault()
+              event.currentTarget.blur()
+            } else if (event.key === 'Escape') {
+              event.preventDefault()
+              nameCancelRef.current = true
+              event.currentTarget.blur()
+            }
+          }}
           spellCheck={false}
+          aria-label="工程名称，输入后按回车保存"
         />
       </label>
 
@@ -209,16 +277,8 @@ export default function WorkspaceTopBar({
                 </div>
               </div>
 
-              <div className="wb-menu-group" role="group" aria-label="编辑">
-                <span className="wb-menu-label">编辑</span>
-                <button type="button" role="menuitem" onClick={() => chooseMenuAction(onUndo)} disabled={!canUndo}>
-                  <UndoIcon size={16} />
-                  <span>撤销</span>
-                </button>
-                <button type="button" role="menuitem" onClick={() => chooseMenuAction(onRedo)} disabled={!canRedo}>
-                  <RedoIcon size={16} />
-                  <span>重做</span>
-                </button>
+              <div className="wb-menu-group" role="group" aria-label="指令集">
+                <span className="wb-menu-label">指令集</span>
                 <div className="wb-speed-row" role="group" aria-label="指令集版本">
                   <span>指令集</span>
                   {PROFILES.map((item) => (

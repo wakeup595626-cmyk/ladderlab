@@ -52,7 +52,7 @@ export function blankProgram(): Program {
       tag('Motor', '%Q0.0', 'BOOL', false, '电机接触器'),
     ],
     [
-      rung('一个新的梯级', [contact('NO', 'StartBtn'), contact('NC', 'StopBtn')], output('COIL', 'Motor')),
+      rung('', [contact('NO', 'StartBtn'), contact('NC', 'StopBtn')], output('COIL', 'Motor')),
     ],
   )
 }

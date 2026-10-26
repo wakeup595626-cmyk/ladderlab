@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
+  canDeleteTag,
+  deleteTag,
+  duplicateRung,
   insertContactAt,
   insertNodeAt,
   makeContactNode,
@@ -7,6 +10,9 @@ import {
   moveNodeBy,
   moveRungTo,
   pickDefaultTag,
+  tagsDependingOn,
+  tagUsage,
+  updateTag,
 } from './programOps'
 import type {
   ContactKind,
@@ -242,5 +248,108 @@ describe('programOps 拖放操作', () => {
     }
     expect(result.tags.some((item) => item.kind === 'INT')).toBe(true)
     expect(source.tags).toEqual([])
+  })
+})
+
+describe('programOps 变量依赖与梯级复制', () => {
+  it('改名时同步重写位别名的 bitOf 并保持新名大小写', () => {
+    const byte = tag('Byte', 'INT', 0)
+    const alias = { ...tag('Bit0'), id: 'alias-bit0', address: '%M0.0', bitOf: ' Byte ' }
+    const source = program([rung('r1', [contact('c1', 'Byte')])], [byte, alias])
+
+    const renamed = updateTag(source, byte.id, { name: 'MainByte' })
+
+    expect(renamed.tags.find((item) => item.id === byte.id)?.name).toBe('MainByte')
+    expect(renamed.tags.find((item) => item.id === alias.id)?.bitOf).toBe('MainByte')
+    expect(rungOf(renamed, 'r1').nodes[0]).toEqual(contact('c1', 'MainByte'))
+    expect(source.tags.find((item) => item.id === alias.id)?.bitOf).toBe(' Byte ')
+  })
+
+  it('改名撞上已有变量名时保持原程序', () => {
+    const first = tag('Main')
+    const second = tag('Used')
+    const source = program([rung('r1', [contact('c1', 'Main')])], [first, second])
+
+    expect(updateTag(source, first.id, { name: ' Used ' })).toBe(source)
+  })
+
+  it('仍有位别名依赖时拒绝删除字节变量并可查询依赖', () => {
+    const byte = tag('Byte', 'INT', 0)
+    const alias = { ...tag('Bit0'), id: 'alias-bit0', address: '%M0.0', bitOf: 'Byte' }
+    const source = program([], [byte, alias])
+
+    expect(tagsDependingOn(source, ' Byte ')).toEqual([alias])
+    expect(canDeleteTag(source, byte.id)).toBe(false)
+    expect(deleteTag(source, byte.id)).toBe(source)
+    expect(canDeleteTag(source, alias.id)).toBe(true)
+    expect(deleteTag(source, alias.id).tags.map((item) => item.id)).toEqual([byte.id])
+  })
+
+  it('tagUsage 把位别名的 bitOf 引用计入使用次数', () => {
+    const byte = tag('Byte', 'INT', 0)
+    const alias = { ...tag('Bit0'), id: 'alias-bit0', address: '%M0.0', bitOf: ' Byte ' }
+    const source = program([], [byte, alias])
+
+    expect(tagUsage(source, ' Byte ')).toBe(1)
+    expect(tagUsage(source, 'Missing')).toBe(0)
+  })
+
+  it('复制定时器和计数器梯级清空输出绑定，复制线圈保持原输出', () => {
+    const source = program(
+      [
+        {
+          id: 'timer',
+          label: '定时',
+          nodes: [],
+          output: {
+            id: 'timer-out',
+            kind: 'TON',
+            tag: 'T1',
+            pt: 100,
+            qTag: 'TimerQ',
+            valueTag: 'TimerET',
+            resetTag: 'Reset',
+          },
+        },
+        {
+          id: 'counter',
+          label: '计数',
+          nodes: [],
+          output: {
+            id: 'counter-out',
+            kind: 'CTU',
+            tag: 'C1',
+            pv: 5,
+            qTag: 'CounterQ',
+            valueTag: 'CounterCV',
+            resetTag: 'Reset',
+          },
+        },
+      ],
+      [
+        tag('TimerQ'),
+        tag('TimerET', 'INT', 0),
+        tag('CounterQ'),
+        tag('CounterCV', 'INT', 0),
+        tag('Reset'),
+      ],
+    )
+
+    const timerCopy = duplicateRung(source, 'timer').rungs[1]
+    expect(timerCopy.output.tag).toBe('T2')
+    expect(timerCopy.output.qTag).toBeUndefined()
+    expect(timerCopy.output.valueTag).toBeUndefined()
+    expect(timerCopy.output.resetTag).toBeUndefined()
+
+    const counterCopy = duplicateRung(source, 'counter').rungs[2]
+    expect(counterCopy.output.tag).toBe('C2')
+    expect(counterCopy.output.qTag).toBeUndefined()
+    expect(counterCopy.output.valueTag).toBeUndefined()
+    expect(counterCopy.output.resetTag).toBeUndefined()
+
+    const coilSource = program([rung('coil', [contact('c1', 'Start')])], [tag('Start'), tag('Coil')])
+    const coilCopy = duplicateRung(coilSource, 'coil').rungs[1]
+    expect(coilCopy.output.tag).toBe('Coil')
+    expect(coilCopy.output.id).not.toBe(coilSource.rungs[0].output.id)
   })
 })

@@ -136,8 +136,8 @@ export default function ProjectSidebar({
             type="button"
             className="icon-button sidebar-add-rung"
             onClick={onAddRung}
-            aria-label="新增梯级"
-            title="新增梯级"
+            aria-label="新增程序段"
+            title="新增程序段"
           >
             <PlusIcon size={17} />
           </button>

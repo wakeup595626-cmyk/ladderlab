@@ -115,6 +115,10 @@ body[data-drag-kind] {
   color: var(--text);
   font-size: 13.5px;
   font-weight: 600;
+  /* 手机上工程名可能只剩几十像素，宁可用省略号，也别露出半截字。 */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .wb-project-name input:hover {
@@ -136,6 +140,20 @@ body[data-drag-kind] {
   align-items: center;
   gap: 6px;
   margin-left: auto;
+}
+
+.wb-history-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 1px;
+  padding-right: 12px;
+  border-right: 1px solid var(--border);
+}
+
+.wb-history-actions .wb-history-button {
+  width: 34px;
+  height: 34px;
 }
 
 .wb-project-button {
@@ -1287,6 +1305,16 @@ body[data-drag-kind] {
     display: none;
   }
 
+  .wb-history-actions {
+    gap: 0;
+    padding-right: 5px;
+  }
+
+  .wb-history-actions .wb-history-button {
+    width: 38px;
+    height: 40px;
+  }
+
   .wb-project-name {
     flex: 1 1 auto;
   }
@@ -1453,6 +1481,21 @@ body[data-drag-kind] {
 }
 
 @media (max-width: 480px) {
+  /* 窄屏优先保住「撤销 / 重做 / 运行」这些真正要点的控件：
+     品牌图标让位给工程名，避免工程名被挤成半截字。 */
+  .wb-shell .wb-brand {
+    display: none;
+  }
+
+  .wb-shell .wb-topbar {
+    gap: 8px;
+    padding: 0 12px;
+  }
+
+  .wb-shell .wb-topbar-actions {
+    gap: 4px;
+  }
+
   .wb-doc-meta {
     font-size: 11.5px;
   }
@@ -1823,4 +1866,156 @@ body[data-drag-kind] {
 .wb-instruction-drawer-backdrop.is-dragging {
   opacity: 0;
   pointer-events: none;
+}
+
+.wb-instruction-drawer-backdrop {
+  transition: opacity var(--dur-press) var(--ease-out);
+}
+
+/* ---------------------------------------------------------- motion layer */
+
+.wb-project-button,
+.run-toggle,
+.icon-button,
+.guide-primary,
+.guide-secondary,
+.guide-close,
+.wb-coach-demo,
+.wb-coach-dismiss {
+  transition:
+    background-color var(--dur-press) linear,
+    border-color var(--dur-press) linear,
+    color var(--dur-press) linear;
+}
+
+/* Wide rows should acknowledge the press without shrinking their text. */
+.library-item,
+.ll-add-rung {
+  transition: background-color var(--dur-press) linear;
+}
+
+.library-item:active,
+.ll-add-rung:active {
+  background-color: var(--active);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .wb-project-button,
+  .run-toggle,
+  .icon-button,
+  .guide-primary,
+  .guide-secondary,
+  .guide-close,
+  .wb-coach-demo,
+  .wb-coach-dismiss {
+    transition:
+      transform var(--dur-press) var(--ease-out),
+      background-color var(--dur-press) linear,
+      border-color var(--dur-press) linear,
+      color var(--dur-press) linear;
+  }
+
+  .wb-project-button:active:not(:disabled),
+  .run-toggle:active:not(:disabled),
+  .icon-button:active:not(:disabled),
+  .guide-primary:active,
+  .guide-secondary:active,
+  .guide-close:active,
+  .wb-coach-demo:active,
+  .wb-coach-dismiss:active {
+    transform: scale(0.97);
+  }
+
+  .library-item,
+  .ll-add-rung {
+    transition:
+      transform var(--dur-press) var(--ease-out),
+      background-color var(--dur-press) linear;
+  }
+
+  .library-item:active,
+  .ll-add-rung:active {
+    transform: translateY(1px);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  @keyframes ll-pop-in {
+    from {
+      opacity: 0;
+      transform: translateY(-4px) scale(0.97);
+    }
+
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  }
+
+  @keyframes ll-coach-step {
+    from {
+      opacity: 0;
+      transform: translateY(4px);
+    }
+
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  .wb-more-menu.topbar-menu,
+  .ll-rung-menu-panel {
+    transform-origin: top right;
+    animation: ll-pop-in var(--dur-quick) var(--ease-out);
+  }
+
+  .wb-coach-path > span,
+  .wb-coach-compact {
+    animation: ll-coach-step 200ms var(--ease-out) both;
+  }
+
+  .wb-coach-path > span:nth-child(2) {
+    animation-delay: 40ms;
+  }
+
+  .wb-coach-path > span:nth-child(3) {
+    animation-delay: 80ms;
+  }
+
+  .wb-drawer-backdrop {
+    overflow: hidden;
+    transition: opacity var(--dur-base) var(--ease-out);
+  }
+
+  .wb-project-drawer {
+    transition: transform var(--dur-sheet) var(--ease-drawer);
+  }
+
+  .wb-context-layer {
+    overflow: hidden;
+  }
+
+  .wb-context-scrim {
+    transition: opacity var(--dur-base) var(--ease-out);
+  }
+
+  .wb-context-panel[role="dialog"] {
+    transition: transform var(--dur-sheet) var(--ease-drawer);
+  }
+
+  @starting-style {
+    .wb-drawer-backdrop,
+    .wb-context-scrim {
+      opacity: 0;
+    }
+
+    .wb-project-drawer {
+      transform: translateX(-100%);
+    }
+
+    .wb-context-panel[role="dialog"] {
+      transform: translateX(100%);
+    }
+  }
 }

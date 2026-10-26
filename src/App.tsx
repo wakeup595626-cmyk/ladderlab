@@ -3,6 +3,7 @@ import './App.css'
 import './Shell.css'
 import AboutDialog from './components/AboutDialog'
 import CoachStrip from './components/CoachStrip'
+import { useConfirmDialog } from './lib/useConfirmDialog'
 import Guide from './components/Guide'
 import { GripIcon, LadderIcon, TagIcon } from './components/Icons'
 import Inspector, { type InspectorTab } from './components/Inspector'
@@ -17,6 +18,7 @@ import StatusBar from './components/StatusBar'
 import WorkspaceTopBar from './components/WorkspaceTopBar'
 import { instructionLabel } from './components/instructionCatalog'
 import { compile } from './engine/compile'
+import { normalizeReference } from './engine/references'
 import { blankProgram, buildSample } from './engine/samples'
 import { createRuntime, step, writeRuntimeValue } from './engine/simulate'
 import type {
@@ -27,7 +29,7 @@ import type {
   Selection,
 } from './engine/types'
 import type { DragPayload, DropTarget } from './lib/dragTypes'
-import { downloadText, parseProgramText, serializeProgram } from './lib/io'
+import { downloadText, MAX_IMPORT_BYTES, parseProgramText, serializeProgram } from './lib/io'
 import { useDragController } from './lib/useDragController'
 import {
   archiveRecoveryCopy,
@@ -70,6 +72,10 @@ interface HistoryState {
 interface ToastState {
   id: number
   message: string
+  tone: 'info' | 'error'
+  /** 错误类提示不自动消失，必须由用户关闭。 */
+  sticky: boolean
+  action?: { label: string; run: () => void }
 }
 
 type CorruptSavedProgram = Extract<LoadSavedProgramResult, { status: 'corrupt' }>
@@ -115,6 +121,33 @@ function archiveProgramVersion(program: Program): boolean {
 
 type MobilePanel = 'none' | 'instructions' | 'properties' | 'project'
 
+/**
+ * 只把“会改变运行时结构”的部分纳入签名。改工程名、注释或定时器 PT 时
+ * 仿真不应中断，否则用户边看变量边调参数会一直被踢回初值。
+ */
+function runtimeSignature(program: Program): string {
+  const encodeNode = (node: Program['rungs'][number]['nodes'][number]): unknown => (
+    node.type === 'contact'
+      ? ['c', node.id, node.kind, node.tag, node.compare?.op ?? null, node.compare?.value ?? null]
+      : ['p', node.id, node.branches.map((branch) => branch.map(encodeNode))]
+  )
+  return JSON.stringify({
+    profile: program.profile,
+    tags: program.tags.map((tag) => [
+      tag.id, tag.name, tag.kind, tag.address, tag.bitOf ?? null, tag.initial,
+    ]),
+    rungs: program.rungs.map((rung) => [
+      rung.id,
+      rung.nodes.map(encodeNode),
+      [
+        rung.output.id, rung.output.kind, rung.output.tag,
+        rung.output.qTag ?? null, rung.output.valueTag ?? null, rung.output.resetTag ?? null,
+        rung.output.sourceTag ?? null, rung.output.pulseTag ?? null, rung.output.stepTag ?? null,
+      ],
+    ]),
+  })
+}
+
 interface QuickEditState {
   selection: Selection
   anchor: DOMRect | null
@@ -140,6 +173,7 @@ function findNodePath(program: Program, rungId: string, nodeId: string): number[
 }
 
 export default function App() {
+  const { confirm, dialog: confirmDialog } = useConfirmDialog()
   const [startup] = useState<LoadSavedProgramResult>(() => loadSavedProgram())
   const [initialProgram] = useState<Program>(() =>
     startup.status === 'ok' ? startup.program : blankProgram(),
@@ -203,6 +237,8 @@ export default function App() {
   )
   const lastSaveFailureRef = useRef<string | null>(null)
   const remoteConflictRef = useRef(false)
+  const toastTimerRef = useRef<number | null>(null)
+  const lastRuntimeSignatureRef = useRef<string | null>(null)
   const program = history.present
   const compileResult = useMemo(() => compile(program), [program])
 
@@ -213,9 +249,33 @@ export default function App() {
     savingEnabledRef.current = savingEnabled
   }, [program, savingEnabled])
 
-  const notify = useCallback((message: string) => {
-    setToast({ id: Date.now(), message })
+  const notify = useCallback((
+    message: string,
+    options?: { tone?: 'info' | 'error'; sticky?: boolean; action?: { label: string; run: () => void } },
+  ) => {
+    setToast({
+      id: Date.now() + Math.random(),
+      message,
+      tone: options?.tone ?? 'info',
+      sticky: options?.sticky ?? options?.tone === 'error',
+      action: options?.action,
+    })
   }, [])
+
+  const stopToastTimer = useCallback(() => {
+    if (toastTimerRef.current === null) return
+    window.clearTimeout(toastTimerRef.current)
+    toastTimerRef.current = null
+  }, [])
+
+  const scheduleToastDismiss = useCallback((message: string, minDuration = 0) => {
+    stopToastTimer()
+    const duration = Math.max(minDuration, Math.min(5200, Math.max(2400, 1200 + message.length * 45)))
+    toastTimerRef.current = window.setTimeout(() => {
+      toastTimerRef.current = null
+      setToast(null)
+    }, duration)
+  }, [stopToastTimer])
 
   const clearSaveRetryTimer = useCallback(() => {
     if (saveRetryTimerRef.current !== null) {
@@ -243,7 +303,7 @@ export default function App() {
     saveDirtyRef.current = true
     setSaveError(result.error)
     if (lastSaveFailureRef.current !== result.error) {
-      notify(`自动保存失败：${result.error}。请先导出工程 JSON 备份。`)
+      notify(`自动保存失败：${result.error}。请先导出工程 JSON 备份。`, { tone: 'error' })
       lastSaveFailureRef.current = result.error
     }
 
@@ -419,7 +479,7 @@ export default function App() {
       remoteConflictRef.current = true
       setRemoteConflict({ program: incoming, savedAt: getLastSavedAt() ?? Date.now() })
       setSavePending(false)
-      notify('另一个标签页保存了不同的版本，本页自动保存已暂停')
+      notify('另一个标签页保存了不同的版本，本页自动保存已暂停', { tone: 'error' })
     }
 
     window.addEventListener('storage', onStorage)
@@ -432,16 +492,24 @@ export default function App() {
   }, [corruptProject])
 
   useEffect(() => {
-    // 工程变化后必须丢弃旧运行时，避免新变量表沿用上一个工程的计时器和边沿状态。
-    // oxlint-disable-next-line react/set-state-in-effect
-    setRunning(pendingAutoRunRef.current)
-    pendingAutoRunRef.current = false
-    setRuntime(createRuntime(program))
-    setSelection((current) => {
+    const keepSelection = () => setSelection((current) => {
       if (!current) return program.rungs[0] ? { rungId: program.rungs[0].id, path: null } : null
       if (program.rungs.some((rung) => rung.id === current.rungId)) return current
       return program.rungs[0] ? { rungId: program.rungs[0].id, path: null } : null
     })
+    const signature = runtimeSignature(program)
+    if (lastRuntimeSignatureRef.current === signature) {
+      // 只改了名称、注释、PT/PV 等参数：保留扫描状态与变量值。
+      keepSelection()
+      return
+    }
+    lastRuntimeSignatureRef.current = signature
+    // 拓扑或变量结构变化时才丢弃旧运行时，避免沿用上一个工程的计时器和边沿状态。
+    // oxlint-disable-next-line react/set-state-in-effect
+    setRunning(pendingAutoRunRef.current)
+    pendingAutoRunRef.current = false
+    setRuntime(createRuntime(program))
+    keepSelection()
   }, [program])
 
   useEffect(() => {
@@ -480,18 +548,27 @@ export default function App() {
 
   useEffect(() => {
     if (!toast) return
-    const timer = window.setTimeout(() => setToast(null), 2600)
-    return () => window.clearTimeout(timer)
-  }, [toast])
+    // 错误提示与撤销入口必须留给用户处理，不能读完就消失。
+    if (toast.sticky) return
+    scheduleToastDismiss(toast.message, toast.action ? 7000 : 0)
+    return stopToastTimer
+  }, [toast, scheduleToastDismiss, stopToastTimer])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null
       const typing = target instanceof Element && target.matches('input, textarea, select, [contenteditable="true"]')
-      if (!typing && (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') {
+      const modalOpen = Boolean(document.querySelector('[role="dialog"][aria-modal="true"]'))
+      if (typing || modalOpen || (!event.ctrlKey && !event.metaKey) || event.altKey) return
+      // 博途用 Ctrl+Z / Ctrl+Y；macOS 用户习惯 Cmd+Shift+Z，这里三者都认。
+      const key = event.key.toLowerCase()
+      if (key === 'z') {
         event.preventDefault()
         if (event.shiftKey) redo()
         else undo()
+      } else if (key === 'y' && event.ctrlKey && !event.shiftKey) {
+        event.preventDefault()
+        redo()
       }
     }
     window.addEventListener('keydown', onKeyDown)
@@ -578,17 +655,17 @@ export default function App() {
     if (mobilePanel === 'instructions') setMobilePanel('none')
     if (target.type === 'rung') {
       if (payload.type !== 'rung') {
-        notify('网络号位置只接受整条梯级')
+        notify('网络号位置只能放整个程序段')
         return
       }
       commit(moveRungTo(program, payload.rungId, target.index))
       setSelection({ rungId: payload.rungId, path: null })
-      notify('梯级顺序已调整')
+      notify('程序段顺序已调整')
       return
     }
 
     if (payload.type === 'rung') {
-      notify('请把梯级拖到左侧网络号的位置')
+      notify('请把程序段拖到左侧网络号的位置')
       return
     }
 
@@ -648,7 +725,7 @@ export default function App() {
       commit(next)
       const path = findNodePath(next, target.rungId, sourceNode.id)
       setSelection({ rungId: target.rungId, path })
-      notify('元件已移到另一条梯级')
+      notify('元件已移到另一个程序段')
       return
     }
 
@@ -688,7 +765,7 @@ export default function App() {
     commit(next)
     const path = findNodePath(next, target.rungId, sourceNode.id)
     setSelection({ rungId: target.rungId, path })
-    notify('元件已移到另一条梯级')
+    notify('元件已移到另一个程序段')
   }, [commit, insert, mobilePanel, notify, program])
 
   // 触摸从指令栏或指令抽屉起拖时先收起面板，画布才会露出来接住投放。
@@ -705,16 +782,26 @@ export default function App() {
     const rung = next.rungs.at(-1)
     commit(next)
     if (rung) setSelection({ rungId: rung.id, path: null })
-    notify('已新增梯级')
+    notify('已新增程序段')
   }
 
   const removeRung = (rungId: string) => {
     const index = program.rungs.findIndex((rung) => rung.id === rungId)
+    const removed = program.rungs[index]
     const next = deleteRung(program, rungId)
+    if (next === program) return
     commit(next)
     const fallback = next.rungs[Math.max(0, index - 1)] ?? next.rungs[0]
     setSelection(fallback ? { rungId: fallback.id, path: null } : null)
-    notify('梯级已删除')
+    notify('程序段已删除', {
+      action: {
+        label: '撤销',
+        run: () => {
+          commit(program)
+          if (removed) setSelection({ rungId: removed.id, path: null })
+        },
+      },
+    })
   }
 
   const copyRung = (rungId: string) => {
@@ -723,16 +810,22 @@ export default function App() {
     const copy = sourceIndex >= 0 ? next.rungs[sourceIndex + 1] : undefined
     commit(next)
     if (copy) setSelection({ rungId: copy.id, path: null })
-    notify('梯级已复制')
+    notify('程序段已复制')
   }
 
-  const loadSample = (id: string) => {
+  const loadSample = async (id: string) => {
     const sample = buildSample(id)
-    if (!sample) return
-    if (!window.confirm('载入课程实验 / 示例会替换当前工程，但可以撤销。继续吗？')) return
+    if (!sample) return false
+    const accepted = await confirm({
+      title: '载入这个实验？',
+      description: '当前工程会被替换，载入后可以用撤销恢复。',
+      confirmLabel: '载入',
+    })
+    if (!accepted) return false
     commit(sample)
     setSelection(sample.rungs[0] ? { rungId: sample.rungs[0].id, path: null } : null)
     notify('实验 / 示例已载入，可直接编辑和运行')
+    return true
   }
 
   const startDemo = () => {
@@ -776,7 +869,7 @@ export default function App() {
     const result = saveProgram(program)
     if (!result.ok) {
       setSaveError(result.error)
-      notify(`无法接受当前工程：${result.error}。自动保存仍保持暂停。`)
+      notify(`无法接受当前工程：${result.error}。自动保存仍保持暂停。`, { tone: 'error' })
       return
     }
 
@@ -801,7 +894,7 @@ export default function App() {
     notify('已接受当前工程，自动保存已恢复')
   }
 
-  const discardCorruptProject = () => {
+  const discardCorruptProject = async () => {
     if (!corruptProject) return
     const intact = isRecoveryBackupIntact(corruptProject.backupKey, corruptProject.raw)
     if (!intact && !rawDownloaded) {
@@ -809,7 +902,13 @@ export default function App() {
       return
     }
     const keepNote = intact ? '浏览器内恢复副本会保留，' : '原始内容已下载到本机，'
-    if (!window.confirm(`将放弃当前浏览器里的损坏工程并新建空白工程。${keepNote}继续吗？`)) return
+    const accepted = await confirm({
+      title: '放弃损坏的工程？',
+      description: `将放弃当前浏览器里的损坏工程并新建空白工程。${keepNote}此操作不可撤销。`,
+      confirmLabel: '放弃并新建',
+      danger: true,
+    })
+    if (!accepted) return
     const next = blankProgram()
     if (saveTimerRef.current !== null) {
       window.clearTimeout(saveTimerRef.current)
@@ -838,7 +937,7 @@ export default function App() {
   const keepLocalVersion = () => {
     if (!remoteConflict) return
     if (!archiveProgramVersion(remoteConflict.program)) {
-      notify('无法暂存另一标签页版本，尚未覆盖本机存储；请先从工具栏导出本页 JSON')
+      notify('无法暂存另一标签页版本，尚未覆盖本机存储；请先从工具栏导出本页 JSON', { tone: 'error' })
       return
     }
     remoteConflictRef.current = false
@@ -847,13 +946,13 @@ export default function App() {
     setBackups(listRecoveryBackups())
     setBackupsDismissed(false)
     if (saveLatestProgram()) notify('已保留本页修改；另一标签页版本已存为恢复副本')
-    else notify('已保留本页修改，但写回本机存储失败；请先导出工程 JSON，另一版本已存为恢复副本')
+    else notify('已保留本页修改，但写回本机存储失败；请先导出工程 JSON，另一版本已存为恢复副本', { tone: 'error' })
   }
 
   const adoptRemoteVersion = () => {
     if (!remoteConflict) return
     if (!archiveProgramVersion(latestProgramRef.current)) {
-      notify('无法暂存本页修改，尚未切换版本；请先从工具栏导出本页 JSON')
+      notify('无法暂存本页修改，尚未切换版本；请先从工具栏导出本页 JSON', { tone: 'error' })
       return
     }
     const incoming = remoteConflict.program
@@ -905,8 +1004,13 @@ export default function App() {
       : '已从恢复副本载入工程，会作为当前工程自动保存')
   }
 
-  const newProject = () => {
-    if (!window.confirm('新建工程会替换当前工程，但可以撤销。继续吗？')) return
+  const newProject = async () => {
+    const accepted = await confirm({
+      title: '新建空白工程？',
+      description: '当前工程会被替换，新建后可以用撤销恢复。',
+      confirmLabel: '新建',
+    })
+    if (!accepted) return
     const next = blankProgram()
     commit(next)
     setSelection(next.rungs[0] ? { rungId: next.rungs[0].id, path: null } : null)
@@ -926,6 +1030,9 @@ export default function App() {
   const importProject = async (file: File | undefined) => {
     if (!file) return
     try {
+      if (file.size > MAX_IMPORT_BYTES) {
+        throw new Error(`工程文件超过 ${MAX_IMPORT_BYTES / (1024 * 1024)} MB 上限，请精简后再导入`)
+      }
       const text = await file.text()
       const imported = parseProgramText(text)
       commit(imported)
@@ -940,14 +1047,43 @@ export default function App() {
     }
   }
 
+  // 先按变量类型判断能不能写，再看写入是否真的产生了新状态。
+  // 用户把 INT 写成和当前相同的数值时，运行时本就会返回新对象，
+  // 但旧写法在等值写入时容易给出误导性的“输入值无效”。
   const toggleBool = (name: string) => {
-    setRuntime((previous) => writeRuntimeValue(program, previous, name, !previous.bools[name]))
-    notify(`${name} 已切换为 ${runtime.bools[name] ? 'FALSE' : 'TRUE'}`)
+    const tag = program.tags.find((item) => normalizeReference(item.name) === normalizeReference(name))
+    if (!tag) {
+      notify(`${name} 不存在，请先在变量表里新建`, { tone: 'error' })
+      return
+    }
+    if (tag.kind !== 'BOOL') {
+      notify(`${name} 是 INT 变量，不能按位切换；请在变量表里直接改数值`, { tone: 'error' })
+      return
+    }
+    const nextValue = !runtime.bools[normalizeReference(name)]
+    setRuntime((previous) => writeRuntimeValue(program, previous, name, nextValue))
+    notify(`${name} 已切换为 ${nextValue ? 'TRUE' : 'FALSE'}`)
   }
 
   const setInt = (name: string, value: number) => {
+    const tag = program.tags.find((item) => normalizeReference(item.name) === normalizeReference(name))
+    if (!tag) {
+      notify(`${name} 不存在，请先在变量表里新建`, { tone: 'error' })
+      return
+    }
+    if (tag.kind !== 'INT') {
+      notify(`${name} 是 BOOL 变量，只能置位或复位`, { tone: 'error' })
+      return
+    }
+    if (!Number.isFinite(value)) {
+      notify(`${name} 需要输入一个有效数字`, { tone: 'error' })
+      return
+    }
+    if (value > 32767 || value < -32768) {
+      notify(`${name} 超出 INT 范围（-32768～32767），已按 16 位补码折算`, { tone: 'error' })
+    }
     setRuntime((previous) => writeRuntimeValue(program, previous, name, value))
-    notify(`${name} 当前值已设为 ${value}`)
+    notify(`${name} 当前值已设为 ${Math.trunc(value)}`)
   }
 
   const quickSelection = quickEdit?.selection ?? null
@@ -1193,7 +1329,13 @@ export default function App() {
                 isDragging={Boolean(drag.drag)}
                 onSelect={(next) => {
                   setSelection(next)
-                  setQuickEdit(null)
+                  // 画布上选中谁，右边面板就跟到谁：否则会出现
+                  // 画布里选了 Motor、右侧却在显示变量表的割裂感。
+                  setInspectorTab('properties')
+                  // 参数框打开时点选另一个元件，直接切换编辑对象，不必先关掉面板。
+                  setQuickEdit((current) => (
+                    current && next.path ? { ...current, selection: next } : null
+                  ))
                 }}
                 onEdit={(next, anchor) => {
                   setSelection(next)
@@ -1206,6 +1348,7 @@ export default function App() {
                 onMoveRung={(rungId, delta) => commit(moveRung(program, rungId, delta))}
                 onMoveNode={(rungId, path, delta) => commit(moveNodeBy(program, rungId, path, delta))}
                 onAddRung={insertRung}
+                onInsertSlot={(slot) => insert('NO', slot)}
               />
 
           </div>
@@ -1382,15 +1525,14 @@ export default function App() {
       <LibraryDialog
         open={libraryOpen}
         onClose={() => setLibraryOpen(false)}
-        onLoadSample={(id) => {
-          setLibraryOpen(false)
-          loadSample(id)
-        }}
+        onLoadSample={loadSample}
       />
 
       <Guide open={guideOpen} onClose={closeGuide} onStartDemo={startDemo} />
 
       <AboutDialog open={aboutOpen} onClose={() => setAboutOpen(false)} />
+
+      {confirmDialog}
 
       {quickEdit && quickEditValid && (
         <QuickEditor
@@ -1419,8 +1561,40 @@ export default function App() {
       )}
 
       {toast && (
-        <div className="toast" key={toast.id} role="status">
-          {toast.message}
+        <div
+          className={toast.tone === 'error' ? 'toast is-error' : 'toast'}
+          key={toast.id}
+          role={toast.tone === 'error' ? 'alert' : 'status'}
+          aria-live={toast.tone === 'error' ? 'assertive' : 'polite'}
+          onPointerEnter={stopToastTimer}
+          onPointerLeave={() => {
+            if (!toast.sticky) scheduleToastDismiss(toast.message, toast.action ? 7000 : 0)
+          }}
+        >
+          <span className="toast-message">{toast.message}</span>
+          {toast.action && (
+            <button
+              type="button"
+              className="toast-action"
+              onClick={() => {
+                const run = toast.action?.run
+                setToast(null)
+                run?.()
+              }}
+            >
+              {toast.action.label}
+            </button>
+          )}
+          {(toast.sticky || toast.action) && (
+            <button
+              type="button"
+              className="toast-close"
+              aria-label="关闭提示"
+              onClick={() => setToast(null)}
+            >
+              ×
+            </button>
+          )}
         </div>
       )}
     </div>

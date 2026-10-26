@@ -229,7 +229,9 @@ function applyOutput(output: OutputElement, power: boolean, runtime: Runtime, dt
       if (!power) {
         write(output.tag, 0)
       } else if (pulse && !state.prevIn && output.pattern?.length) {
-        write(output.tag, output.pattern[state.index] ?? 0)
+        // 改短节拍表时旧的 index 可能越界，取模后仍落在有效区间。
+        const index = state.index % output.pattern.length
+        write(output.tag, output.pattern[index] ?? 0)
         if (output.stepTag) write(output.stepTag, state.index + 1)
         state.index = (state.index + 1) % output.pattern.length
       }

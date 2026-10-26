@@ -11,7 +11,8 @@ import type {
   TagKind,
 } from '../engine/types'
 import { uid } from '../lib/uid'
-import { byteAddressLength, parseBitAddress, parseByteAddress } from '../engine/references'
+import { withinFieldLimit } from '../lib/limits'
+import { byteAddressLength, normalizeReference, parseBitAddress, parseByteAddress } from '../engine/references'
 
 export interface InsertSlot {
   /** 偶数长度：[] 为根链，[i, b] 为第 i 个并联节点的第 b 支路，依此类推。 */
@@ -101,6 +102,23 @@ function rewriteRefs(program: Program, oldName: string, newName: string): Progra
   }
 }
 
+/** 位别名靠 bitOf 指向 INT 字节变量；改名或删除前必须把这类依赖一起考虑。 */
+function bitAliasesOf(program: Program, name: string): TagDef[] {
+  const key = normalizeReference(name)
+  return program.tags.filter((tag) => tag.bitOf !== undefined && normalizeReference(tag.bitOf) === key)
+}
+
+/** 查询还有哪些变量的 bitOf 指向该变量，供界面在删除前提示。 */
+export function tagsDependingOn(program: Program, name: string): TagDef[] {
+  return bitAliasesOf(program, name)
+}
+
+/** 位别名仍指向该变量时不允许删除；界面可据此禁用删除按钮。 */
+export function canDeleteTag(program: Program, tagId: string): boolean {
+  const tag = program.tags.find((item) => item.id === tagId)
+  return !tag || bitAliasesOf(program, tag.name).length === 0
+}
+
 export function updateTag(
   program: Program,
   tagId: string,
@@ -109,23 +127,47 @@ export function updateTag(
   const current = program.tags.find((tag) => tag.id === tagId)
   if (!current) return program
   const nextName = patch.name === undefined ? current.name : patch.name.trim()
+  const nextComment = patch.comment === undefined ? current.comment : patch.comment
+  if (
+    (patch.name !== undefined && (!nextName || !withinFieldLimit('tagName', nextName)))
+    || (patch.comment !== undefined && !withinFieldLimit('tagComment', nextComment))
+  ) {
+    return program
+  }
+  const renaming = nextName !== current.name
   const unchanged = (Object.keys(patch) as Array<keyof typeof patch>).every((key) => (
     Object.is(current[key], key === 'name' ? nextName : patch[key])
   ))
   if (unchanged) return program
+  const duplicate = renaming && program.tags.some((tag) => (
+    tag.id !== tagId && normalizeReference(tag.name) === normalizeReference(nextName)
+  ))
+  if (duplicate) return program
   const next: Program = {
     ...program,
-    tags: program.tags.map((tag) => (tag.id === tagId ? { ...tag, ...patch, name: nextName } : tag)),
+    tags: program.tags.map((tag) => {
+      if (tag.id === tagId) return { ...tag, ...patch, name: nextName }
+      if (tag.bitOf !== undefined && normalizeReference(tag.bitOf) === normalizeReference(current.name)) {
+        return { ...tag, bitOf: nextName }
+      }
+      return tag
+    }),
   }
-  return nextName !== current.name ? rewriteRefs(next, current.name, nextName) : next
+  return renaming ? rewriteRefs(next, current.name, nextName) : next
 }
 
 export function deleteTag(program: Program, tagId: string): Program {
+  const tag = program.tags.find((item) => item.id === tagId)
+  if (!tag || bitAliasesOf(program, tag.name).length > 0) return program
   return { ...program, tags: program.tags.filter((tag) => tag.id !== tagId) }
 }
 
 export function tagUsage(program: Program, name: string): number {
-  const matches = (ref: string | undefined) => Boolean(ref) && (ref === name || Boolean(ref?.startsWith(`${name}.`)))
+  const target = normalizeReference(name)
+  const matches = (ref: string | undefined) => {
+    const value = normalizeReference(ref ?? '')
+    return Boolean(value) && (value === target || value.startsWith(`${target}.`))
+  }
   let count = 0
   const walk = (chain: LadderNode[]) => {
     for (const node of chain) {
@@ -145,6 +187,9 @@ export function tagUsage(program: Program, name: string): number {
     if (matches(rung.output.sourceTag)) count += 1
     if (matches(rung.output.pulseTag)) count += 1
     if (matches(rung.output.stepTag)) count += 1
+  }
+  for (const tag of program.tags) {
+    if (tag.bitOf !== undefined && normalizeReference(tag.bitOf) === target) count += 1
   }
   return count
 }
@@ -349,7 +394,9 @@ export function getNodeAtPath(program: Program, rungId: string, path: number[] |
 }
 
 export function setProjectName(program: Program, name: string): Program {
-  return { ...program, name }
+  const next = name.trim()
+  if (!next || !withinFieldLimit('programName', next) || next === program.name) return program
+  return { ...program, name: next }
 }
 
 export function setProfile(program: Program, profile: ProfileId): Program {
@@ -357,7 +404,10 @@ export function setProfile(program: Program, profile: ProfileId): Program {
 }
 
 export function updateRungLabel(program: Program, rungId: string, label: string): Program {
-  return withRung(program, rungId, (rung) => ({ ...rung, label }))
+  if (!withinFieldLimit('rungLabel', label)) return program
+  const rung = program.rungs.find((item) => item.id === rungId)
+  if (!rung || rung.label === label) return program
+  return withRung(program, rungId, (item) => ({ ...item, label }))
 }
 
 export function addRung(program: Program): Program {
@@ -369,7 +419,9 @@ export function addRung(program: Program): Program {
   const outputTag = boolTags.find((tag) => tag.address.toUpperCase().startsWith('%Q')) ?? boolTags[1] ?? boolTags[0]
   const node: LadderNode = { type: 'contact', id: uid('c'), kind: 'NO', tag: input.name }
   const output: OutputElement = { id: uid('o'), kind: 'COIL', tag: outputTag.name }
-  const rung: Rung = { id: uid('r'), label: '新梯级', nodes: [node], output }
+  // 新程序段默认不写标题：画布上已经有「程序段 N」编号，
+  // 再塞一句默认文字会和编号重复，也让用户以为标题是必填的。
+  const rung: Rung = { id: uid('r'), label: '', nodes: [node], output }
   return { ...next, rungs: [...next.rungs, rung] }
 }
 
@@ -381,10 +433,11 @@ export function duplicateRung(program: Program, rungId: string): Program {
       ? { ...node, id: uid('c') }
       : { ...node, id: uid('par'), branches: node.branches.map((branch) => branch.map(cloneNode)) }
   const source = program.rungs[index]
+  const clearsOutputs = ['TON', 'TOF', 'TONR', 'CTU'].includes(source.output.kind)
   const copy: Rung = {
     ...source,
     id: uid('r'),
-    label: `${source.label} 副本`,
+    label: source.label ? `${source.label} 副本` : '',
     nodes: source.nodes.map(cloneNode),
     output: {
       ...source.output,
@@ -392,6 +445,7 @@ export function duplicateRung(program: Program, rungId: string): Program {
       tag: ['TON', 'TOF', 'TONR'].includes(source.output.kind)
         ? nextInstanceName(program, 'T')
         : source.output.kind === 'CTU' ? nextInstanceName(program, 'C') : source.output.tag,
+      ...(clearsOutputs ? { qTag: undefined, valueTag: undefined, resetTag: undefined } : {}),
       ...(source.output.pattern ? { pattern: [...source.output.pattern] } : {}),
     },
   }

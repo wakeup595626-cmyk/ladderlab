@@ -6,6 +6,7 @@ import type {
   ProfileId,
   TagKind,
 } from '../engine/types'
+import { FIELD_LIMITS, programTextFieldIssues, utf8ByteLength } from './limits'
 
 const CONTACT_KINDS: ContactKind[] = ['NO', 'NC', 'P', 'N', 'CMP']
 const OUTPUT_KINDS: OutputKind[] = ['COIL', 'SET', 'RESET', 'TON', 'TOF', 'TONR', 'CTU', 'MOVE', 'ADD', 'SUB', 'SHL', 'ROL', 'PATTERN']
@@ -16,9 +17,15 @@ const MAX_TAGS = 1000
 const MAX_RUNGS = 1000
 const MAX_NODES = 5000
 const MAX_PATTERN = 1024
+export const MAX_IMPORT_BYTES = 5 * 1024 * 1024
 
 function fail(message: string): never {
   throw new Error(`工程文件格式不正确：${message}`)
+}
+
+function capped(value: string, max: number, label: string, where: string): string {
+  if (value.length > max) fail(`${label}“${value.slice(0, 16)}…”超过上限 ${max} 个字符（${where}）。`)
+  return value
 }
 
 function record(value: unknown, where: string): Record<string, unknown> {
@@ -77,7 +84,7 @@ export function parseProgram(input: unknown): Program {
   const rungs = data.rungs
   if (!Array.isArray(rungs)) fail('rungs 必须是数组。')
   if (tags.length > MAX_TAGS) fail(`变量数量超过上限 ${MAX_TAGS}。`)
-  if (rungs.length > MAX_RUNGS) fail(`梯级数量超过上限 ${MAX_RUNGS}。`)
+  if (rungs.length > MAX_RUNGS) fail(`程序段数量超过上限 ${MAX_RUNGS}。`)
   const tagIds = new Set<string>()
   const tagNames = new Set<string>()
 
@@ -95,7 +102,7 @@ export function parseProgram(input: unknown): Program {
     if (!id) fail(`${where}.id 不能为空。`)
     if (tagIds.has(id)) fail(`变量 ID“${id}”重复。`)
     tagIds.add(id)
-    const name = text(tag.name, `${where}.name`).trim()
+    const name = capped(text(tag.name, `${where}.name`).trim(), FIELD_LIMITS.tagName, '变量名', `${where}.name`)
     if (!name) fail(`${where}.name 不能为空。`)
     if (tagNames.has(name)) fail(`变量名“${name}”重复。`)
     tagNames.add(name)
@@ -105,7 +112,9 @@ export function parseProgram(input: unknown): Program {
       address: text(tag.address, `${where}.address`).trim(),
       kind,
       initial,
-      comment: typeof tag.comment === 'string' ? tag.comment : '',
+      comment: typeof tag.comment === 'string'
+        ? capped(tag.comment, FIELD_LIMITS.tagComment, '变量注释', `${where}.comment`)
+        : '',
       ...(tag.bitOf !== undefined ? { bitOf: text(tag.bitOf, `${where}.bitOf`).trim() } : {}),
     }
   })
@@ -147,11 +156,13 @@ export function parseProgram(input: unknown): Program {
     }
     const rungId = text(rung.id, `${where}.id`).trim()
     if (!rungId) fail(`${where}.id 不能为空。`)
-    if (rungIds.has(rungId)) fail(`梯级 ID“${rungId}”重复。`)
+    if (rungIds.has(rungId)) fail(`程序段 ID“${rungId}”重复。`)
     rungIds.add(rungId)
     return {
       id: rungId,
-      label: typeof rung.label === 'string' ? rung.label : '',
+      label: typeof rung.label === 'string'
+        ? capped(rung.label, FIELD_LIMITS.rungLabel, '程序段名称', `${where}.label`)
+        : '',
       nodes: rung.nodes.map((node, nodeIndex) => parseNode(node, `${where}.nodes[${nodeIndex}]`)),
       output: parsedOutput,
     }
@@ -175,7 +186,9 @@ export function parseProgram(input: unknown): Program {
 
   return {
     schema: 1,
-    name: typeof data.name === 'string' && data.name.trim() ? data.name.trim() : '未命名项目',
+    name: typeof data.name === 'string' && data.name.trim()
+      ? capped(data.name.trim(), FIELD_LIMITS.programName, '工程名', 'name')
+      : '未命名项目',
     profile,
     tags: parsedTags,
     rungs: parsedRungs,
@@ -183,6 +196,9 @@ export function parseProgram(input: unknown): Program {
 }
 
 export function parseProgramText(text: string): Program {
+  if (utf8ByteLength(text) > MAX_IMPORT_BYTES) {
+    throw new Error(`工程文件超过 ${MAX_IMPORT_BYTES / (1024 * 1024)} MB 上限，请精简变量、程序段和注释后重试。`)
+  }
   let data: unknown
   try {
     data = JSON.parse(text)
@@ -193,6 +209,10 @@ export function parseProgramText(text: string): Program {
 }
 
 export function serializeProgram(program: Program): string {
+  const issues = programTextFieldIssues(program)
+  if (issues.length > 0) {
+    throw new Error(`工程字段不合法，已阻止保存：${issues[0]}`)
+  }
   return JSON.stringify(program, null, 2)
 }
 

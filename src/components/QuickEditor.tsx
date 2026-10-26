@@ -1,4 +1,4 @@
-import { useLayoutEffect, useMemo, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { supportsContact, supportsOutput } from '../engine/profiles'
 import type {
@@ -43,6 +43,8 @@ const CONTACT_NAMES: Record<ContactKind, string> = {
   N: '下降沿',
   CMP: '比较',
 }
+
+const MOBILE_QUERY = '(max-width: 720px)'
 
 const OUTPUT_NAMES: Record<OutputKind, string> = {
   COIL: '线圈',
@@ -182,11 +184,29 @@ export default function QuickEditor({
   onNotify,
   onDeleteOutput,
 }: QuickEditorProps) {
-  const panelRef = useModalFocus<HTMLDivElement>(true, onClose)
   const [position, setPosition] = useState({ left: 16, top: 16 })
   const rung = program.rungs.find((item) => item.id === selection.rungId)
   const node: LadderNode | null = selection.path ? getNodeAtPath(program, selection.rungId, selection.path) : null
-  const mobile = typeof window !== 'undefined' && window.matchMedia('(max-width: 720px)').matches
+  const [mobile, setMobile] = useState(
+    () => typeof window !== 'undefined' && window.matchMedia(MOBILE_QUERY).matches,
+  )
+  // 桌面端是悬浮属性框：不锁焦点、不铺遮罩，点选另一个元件直接切换编辑对象。
+  const panelRef = useModalFocus<HTMLDivElement>(mobile, onClose)
+  const focusedOnceRef = useRef(false)
+
+  useEffect(() => {
+    if (mobile || focusedOnceRef.current) return
+    focusedOnceRef.current = true
+    panelRef.current?.focus({ preventScroll: true })
+  }, [mobile, panelRef])
+
+  useEffect(() => {
+    const media = window.matchMedia(MOBILE_QUERY)
+    const update = () => setMobile(media.matches)
+    update()
+    media.addEventListener('change', update)
+    return () => media.removeEventListener('change', update)
+  }, [])
 
   const refs = useMemo(() => {
     const instances = program.rungs
@@ -209,18 +229,43 @@ export default function QuickEditor({
     if (mobile) return
     const panel = panelRef.current
     if (!panel) return
-    const rect = panel.getBoundingClientRect()
-    const margin = 12
-    let left = anchor ? anchor.right + margin : margin
-    if (left + rect.width > window.innerWidth - margin) {
-      left = anchor ? anchor.left - rect.width - margin : window.innerWidth - rect.width - margin
+    // 点选别的元件时面板会切换编辑对象，这里重新量一次真实位置，
+    // 避免面板还停在上一只元件旁边。
+    const measure = (): DOMRect | null => {
+      const attribute = node ? 'data-node-id' : 'data-output-id'
+      const key = node ? 'nodeId' : 'outputId'
+      const id = node ? node.id : rung?.output.id
+      if (!id) return anchor
+      for (const element of document.querySelectorAll<HTMLElement>('[' + attribute + ']')) {
+        if (element.dataset[key] === id) return element.getBoundingClientRect()
+      }
+      return anchor
     }
-    left = Math.max(margin, Math.min(left, window.innerWidth - rect.width - margin))
-    const top = anchor
-      ? Math.max(margin, Math.min(anchor.top - 22, window.innerHeight - rect.height - margin))
-      : margin
-    setPosition({ left, top })
-  }, [anchor, mobile, panelRef])
+    const place = () => {
+      const box = measure() ?? anchor
+      const width = panel.offsetWidth
+      const height = panel.offsetHeight
+      const margin = 12
+      let left = box ? box.right + margin : margin
+      if (left + width > window.innerWidth - margin) {
+        left = box ? box.left - width - margin : window.innerWidth - width - margin
+      }
+      left = Math.max(margin, Math.min(left, window.innerWidth - width - margin))
+      const top = box
+        ? Math.max(margin, Math.min(box.top - 22, window.innerHeight - height - margin))
+        : margin
+      setPosition({ left, top })
+    }
+
+    place()
+    window.addEventListener('resize', place)
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(place)
+    observer?.observe(panel)
+    return () => {
+      window.removeEventListener('resize', place)
+      observer?.disconnect()
+    }
+  }, [anchor, mobile, node, panelRef, rung, selection.path, selection.rungId])
 
   if (!rung) return null
 
@@ -282,22 +327,29 @@ export default function QuickEditor({
 
   return createPortal(
     <>
-      <div
-        className="qe-scrim"
-        aria-hidden="true"
-        onPointerDown={(event) => {
-          event.preventDefault()
-          onClose()
-        }}
-      />
+      {mobile && (
+        <div
+          className="qe-scrim"
+          aria-hidden="true"
+          onPointerDown={(event) => {
+            event.preventDefault()
+            onClose()
+          }}
+        />
+      )}
       <div
         className="qe-panel"
         ref={panelRef}
         style={mobile ? undefined : position}
-        role="dialog"
-        aria-modal="true"
+        role={mobile ? 'dialog' : 'group'}
+        aria-modal={mobile ? true : undefined}
         aria-label={`编辑${title}`}
         tabIndex={-1}
+        onKeyDown={(event) => {
+          if (mobile || event.key !== 'Escape') return
+          event.stopPropagation()
+          onClose()
+        }}
       >
         <header className="qe-head">
           <div>
@@ -551,7 +603,7 @@ export default function QuickEditor({
             <div className="qe-actions">
               {onDeleteOutput && (
                 <button type="button" className="qe-danger" onClick={onDeleteOutput}>
-                  删除梯级
+                  删除程序段
                 </button>
               )}
             </div>

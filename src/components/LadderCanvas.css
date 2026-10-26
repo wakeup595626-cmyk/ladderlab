@@ -46,7 +46,9 @@
   padding: 5px 8px;
   border-bottom: 1px solid var(--border);
   background: var(--raised);
-  transition: background-color 120ms ease, outline-color 120ms ease;
+  transition:
+    background-color var(--dur-press) var(--ease-out),
+    outline-color var(--dur-press) var(--ease-out);
 }
 
 .ll-rung-header.is-drop-target {
@@ -97,10 +99,22 @@
   background: var(--accent);
 }
 
+.ll-rung-index {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font: 600 12px/1.35 var(--sans);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 .ll-rung-name {
-  width: 0;
-  min-width: 72px;
-  flex: 1 1 180px;
+  /* 标题框跟着文字走：悬停时只在标题上出现一个窄框，
+     而不是横跨整行的大白条。field-sizing 不支持的浏览器退化为默认宽度。 */
+  width: auto;
+  min-width: 8.5em;
+  max-width: min(26em, 60%);
+  flex: 0 1 auto;
+  field-sizing: content;
   overflow: hidden;
   padding: 5px 7px;
   border: 1px solid transparent;
@@ -109,6 +123,11 @@
   color: var(--text);
   font: 600 13px/1.4 var(--sans);
   text-overflow: ellipsis;
+}
+
+.ll-rung-name::placeholder {
+  color: var(--faint);
+  font-weight: 500;
 }
 
 .ll-rung-name:hover:not([readonly]),
@@ -427,7 +446,7 @@
   opacity: 0;
   cursor: grab;
   touch-action: none;
-  transition: opacity 120ms ease;
+  transition: opacity var(--dur-press) var(--ease-out);
 }
 
 .ll-node-grip .ll-drag-handle-hit {
@@ -451,7 +470,7 @@
 .ll-slot-plus {
   opacity: 0;
   pointer-events: none;
-  transition: opacity 100ms ease;
+  transition: opacity var(--dur-press) var(--ease-out);
 }
 
 .ll-slot-plus rect {
@@ -470,6 +489,38 @@
 .ll-slot:hover .ll-slot-plus,
 .ll-slot.is-drop-target .ll-slot-plus {
   opacity: 1;
+}
+
+/* 选中的梯级把插入位和拖拽手柄“显影”出来，触屏用户没有 hover 也能发现编辑入口。 */
+.ll-rung.is-selected .ll-slot-plus {
+  opacity: 0.55;
+}
+
+.ll-rung.is-selected .ll-node-grip {
+  opacity: 0.45;
+}
+
+.ll-rung.is-selected .ll-slot:hover .ll-slot-plus {
+  opacity: 1;
+}
+
+.ll-slot:focus {
+  outline: none;
+}
+
+.ll-slot:focus-visible .ll-slot-plus {
+  opacity: 1;
+}
+
+.ll-slot:focus-visible .ll-slot-plus rect {
+  fill: var(--accent);
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+
+.ll-slot:focus-visible .ll-slot-plus path {
+  stroke: var(--accent-ink);
+  stroke-width: 2;
 }
 
 .ll-slot.is-drop-target .ll-slot-wide-hit {

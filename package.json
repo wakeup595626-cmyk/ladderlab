@@ -13,6 +13,7 @@
     "test": "vitest run",
     "lint": "oxlint",
     "check": "npm run test && npm run typecheck && npm run lint && npm run build",
+    "qa": "node scripts/qa-smoke.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

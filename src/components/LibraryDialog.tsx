@@ -7,7 +7,7 @@ import { CloseIcon, SearchIcon } from './Icons'
 export interface LibraryDialogProps {
   open: boolean
   onClose: () => void
-  onLoadSample: (id: string) => void
+  onLoadSample: (id: string) => boolean | Promise<boolean>
 }
 
 export default function LibraryDialog({ open, onClose, onLoadSample }: LibraryDialogProps) {
@@ -71,8 +71,9 @@ function LibraryDialogContent({ onClose, onLoadSample }: Omit<LibraryDialogProps
                   className="library-item"
                   key={item.id}
                   onClick={() => {
-                    onLoadSample(item.id)
-                    onClose()
+                    void Promise.resolve(onLoadSample(item.id)).then((loaded) => {
+                      if (loaded) onClose()
+                    })
                   }}
                   aria-label={`载入${item.name}`}
                   title={`载入${item.name}：${item.description}`}
@@ -98,8 +99,9 @@ function LibraryDialogContent({ onClose, onLoadSample }: Omit<LibraryDialogProps
                   className="library-item"
                   key={item.id}
                   onClick={() => {
-                    onLoadSample(item.id)
-                    onClose()
+                    void Promise.resolve(onLoadSample(item.id)).then((loaded) => {
+                      if (loaded) onClose()
+                    })
                   }}
                   aria-label={`载入${item.name}`}
                   title={`载入${item.name}：${item.description}`}

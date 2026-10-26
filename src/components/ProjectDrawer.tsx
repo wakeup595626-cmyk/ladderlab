@@ -84,7 +84,7 @@ export default function ProjectDrawer({
           </div>
 
           <div className="wb-project-branch" aria-label="程序块与数据">
-            <button type="button" className={`wb-tree-item${activeRungId ? ' is-active' : ''}`} aria-current={activeRungId ? 'page' : undefined}>
+            <button type="button" className={`wb-tree-item${activeRungId ? ' is-active' : ''}`} aria-current={activeRungId ? 'page' : undefined} onClick={onClose}>
               <LadderIcon size={18} />
               <span className="wb-tree-label">Main [OB1]</span>
               <span className="wb-tree-count" aria-hidden="true">{activeProfile.shortName}</span>

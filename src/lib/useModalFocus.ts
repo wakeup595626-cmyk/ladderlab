@@ -14,6 +14,7 @@ const FOCUSABLE = [
 // 已经退回 body，只有提前记住弹层外的上一个焦点，关闭后才能还回去。
 let lastExternalFocus: HTMLElement | null = null
 let tracking = false
+const modalStack: symbol[] = []
 
 function trackExternalFocus() {
   if (tracking || typeof document === 'undefined') return
@@ -47,13 +48,11 @@ export function useModalFocus<T extends HTMLElement>(
   useEffect(() => {
     if (!open) return
     trackExternalFocus()
+    const modalId = Symbol('modal')
+    modalStack.push(modalId)
     const active = document.activeElement
     let previous = active instanceof HTMLElement || active instanceof SVGElement ? active : null
-    if (
-      !previous
-      || previous === document.body
-      || (previous instanceof HTMLElement && previous.closest('[role="dialog"]'))
-    ) {
+    if (!previous || previous === document.body) {
       previous = lastExternalFocus
     }
 
@@ -66,6 +65,7 @@ export function useModalFocus<T extends HTMLElement>(
     ))
 
     const focusTimer = window.setTimeout(() => {
+      if (modalStack[modalStack.length - 1] !== modalId) return
       const preferred = initialFocusTarget.current?.current
       const items = focusable()
       // 指定了落点就严格用它；落点被隐藏时退回普通控件，避免手机自动弹出键盘。
@@ -78,6 +78,7 @@ export function useModalFocus<T extends HTMLElement>(
     }, 0)
 
     const onKeyDown = (event: KeyboardEvent) => {
+      if (modalStack[modalStack.length - 1] !== modalId) return
       if (event.key === 'Escape') {
         event.preventDefault()
         closeRef.current()
@@ -106,7 +107,10 @@ export function useModalFocus<T extends HTMLElement>(
     return () => {
       window.clearTimeout(focusTimer)
       window.removeEventListener('keydown', onKeyDown)
-      if (previous?.isConnected) previous.focus()
+      const wasTop = modalStack[modalStack.length - 1] === modalId
+      const index = modalStack.indexOf(modalId)
+      if (index >= 0) modalStack.splice(index, 1)
+      if (wasTop && previous?.isConnected) previous.focus()
     }
   }, [open])
 

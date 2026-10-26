@@ -30,7 +30,35 @@ interface Ctx {
   tags: Map<string, TagDef>
   timers: Set<string>
   counters: Set<string>
-  coilTags: Map<string, string>
+  drives: Map<string, DriveWriter[]>
+  guards: Map<string, Guard>
+}
+
+interface Drive {
+  label: string
+  continuous: boolean
+}
+
+interface DriveWriter extends Drive {
+  /** 同一个输出可能同时写多个字段；同一写入者不得对自己报冲突。 */
+  writer: string
+  /** 该梯级的串联条件，用于排除“复位/启动”这类互斥分支的误报。 */
+  guard: Guard
+}
+
+interface GuardTerm {
+  trueRefs: Set<string>
+  falseRefs: Set<string>
+  compares: Map<string, Array<{ op: string; value: number }>>
+}
+
+interface Guard {
+  /**
+   * 串联条件按并联支路展开成若干“同时成立”的组合。
+   * 只有任意两组组合都互斥时，两条梯级才算互斥，避免把
+   * 「SD 松开才入库」和「SD 保持才循环」误判成同时通电。
+   */
+  terms: GuardTerm[]
 }
 
 function push(ctx: Ctx, severity: 'error' | 'warning', message: string, rungId?: string, nodeId?: string) {
@@ -44,6 +72,124 @@ function error(ctx: Ctx, message: string, rungId?: string, nodeId?: string) {
 
 function warning(ctx: Ctx, message: string, rungId?: string, nodeId?: string) {
   push(ctx, 'warning', message, rungId, nodeId)
+}
+
+const MAX_GUARD_TERMS = 24
+
+function newGuardTerm(): GuardTerm {
+  return { trueRefs: new Set(), falseRefs: new Set(), compares: new Map() }
+}
+
+function cloneGuardTerm(term: GuardTerm): GuardTerm {
+  return {
+    trueRefs: new Set(term.trueRefs),
+    falseRefs: new Set(term.falseRefs),
+    compares: new Map(Array.from(term.compares, ([ref, list]) => [ref, [...list]])),
+  }
+}
+
+function applyContact(term: GuardTerm, node: Extract<LadderNode, { type: 'contact' }>) {
+  const ref = normalizeReference(node.tag)
+  if (!ref) return
+  if (node.kind === 'NO' || node.kind === 'P') term.trueRefs.add(ref)
+  else if (node.kind === 'NC' || node.kind === 'N') term.falseRefs.add(ref)
+  if (node.kind === 'CMP' && node.compare) {
+    const list = term.compares.get(ref) ?? []
+    list.push({ op: node.compare.op, value: node.compare.value })
+    term.compares.set(ref, list)
+  }
+}
+
+/** 把一条串联主干展开成若干组合；并联节点会分叉，深度超过 3 层时只看主干。 */
+function expandGuardTerms(chain: LadderNode[], terms: GuardTerm[], depth: number) {
+  let current = terms
+  for (const node of chain) {
+    if (node.type === 'contact') {
+      for (const term of current) applyContact(term, node)
+      continue
+    }
+    if (depth >= 3) continue
+    const next: GuardTerm[] = []
+    for (const term of current) {
+      for (const branch of node.branches) {
+        const copy = cloneGuardTerm(term)
+        expandGuardTerms(branch, [copy], depth + 1)
+        next.push(copy)
+      }
+    }
+    // 组合数失控时保留前若干组：可能多报，但不会漏报。
+    current = next.slice(0, MAX_GUARD_TERMS)
+    if (next.length > MAX_GUARD_TERMS) break
+  }
+  terms.splice(0, terms.length, ...current)
+}
+
+function guardFor(ctx: Ctx, rungId: string): Guard {
+  const cached = ctx.guards.get(rungId)
+  if (cached) return cached
+  const terms = [newGuardTerm()]
+  const rung = ctx.program.rungs.find((item) => item.id === rungId)
+  expandGuardTerms(rung?.nodes ?? [], terms, 0)
+  const guard: Guard = { terms }
+  ctx.guards.set(rungId, guard)
+  return guard
+}
+
+function compareDisjoint(
+  left: { op: string; value: number },
+  right: { op: string; value: number },
+): boolean {
+  const opposite = (a: string, b: string) => (left.op === a && right.op === b) || (left.op === b && right.op === a)
+  if (left.value !== right.value) {
+    return (left.op === '==' && right.op === '==') || opposite('==', '<>')
+  }
+  return opposite('==', '<>')
+    || opposite('<', '>=')
+    || opposite('<=', '>')
+    || opposite('>', '<=')
+    || opposite('>=', '<')
+}
+
+function termExclusive(left: GuardTerm, right: GuardTerm): boolean {
+  for (const ref of left.trueRefs) if (right.falseRefs.has(ref)) return true
+  for (const ref of left.falseRefs) if (right.trueRefs.has(ref)) return true
+  for (const [ref, leftCompares] of left.compares) {
+    const rightCompares = right.compares.get(ref)
+    if (!rightCompares) continue
+    for (const a of leftCompares) {
+      for (const b of rightCompares) {
+        if (compareDisjoint(a, b)) return true
+      }
+    }
+  }
+  return false
+}
+
+/** 两个梯级的串联条件如果出现相反极性或互相排斥的比较，就永远不会同时通电。 */
+function obviouslyExclusive(left: Guard, right: Guard): boolean {
+  return left.terms.every((a) => right.terms.every((b) => termExclusive(a, b)))
+}
+
+function noteDrive(ctx: Ctx, ref: string, drive: Drive, rungId: string, outputId: string) {
+  const writer = rungId + ':' + outputId
+  const guard = guardFor(ctx, rungId)
+  const previousWriters = ctx.drives.get(ref)
+  if (!previousWriters) {
+    ctx.drives.set(ref, [{ ...drive, writer, guard }])
+    return
+  }
+  // 一个指令同时写目标变量和步号时，若两者恰好指向同一地址，只算一次写入。
+  if (previousWriters.some((item) => item.writer === writer)) return
+  // 多个 SET/RESET 共同锁存同一变量是常见写法，只有连续写或混合写才构成冲突。
+  const previous = previousWriters.find((item) => (item.continuous || drive.continuous)
+    && !obviouslyExclusive(item.guard, guard))
+  previousWriters.push({ ...drive, writer, guard })
+  if (!previous) return
+  const sources = previous.label === drive.label ? previous.label : `${previous.label} 与 ${drive.label}`
+  const message = previous.label === '线圈' && drive.label === '线圈'
+    ? `变量“${ref}”被多个线圈驱动，扫描顺序靠后的线圈生效。`
+    : `变量“${ref}”被多处输出驱动（${sources}），扫描顺序靠后的输出生效。`
+  warning(ctx, message, rungId, outputId)
 }
 
 function walkChain(chain: LadderNode[], visit: (node: LadderNode) => void) {
@@ -90,8 +236,8 @@ function validateIds(ctx: Ctx) {
     check(tagIds, '变量', tag.id, `变量 #${index + 1}“${normalizeReference(tag.name) || '未命名'}”`)
   })
   for (const rung of ctx.program.rungs) {
-    const rungLabel = `梯级“${rung.label || normalizeReference(rung.id) || '未命名'}”`
-    check(rungIds, '梯级', rung.id, rungLabel)
+    const rungLabel = `程序段“${rung.label || normalizeReference(rung.id) || '未命名'}”`
+    check(rungIds, '程序段', rung.id, rungLabel)
     walkChain(rung.nodes, (node) => {
       if (node.type === 'contact' && (node.kind === 'P' || node.kind === 'N')) {
         check(nodeIds, '边沿触点', node.id, `${CONTACT_LABELS[node.kind]}“${node.id || '无 ID'}”`, rung.id, node.id)
@@ -321,14 +467,8 @@ function checkOutput(ctx: Ctx, rungId: string, output: Program['rungs'][number][
     if (tag.kind !== 'BOOL') {
       error(ctx, `线圈“${ref}”需要 BOOL 变量，当前类型是 ${tag.kind}。`, rungId, output.id)
     }
-    if (output.kind === 'COIL') {
-      const previous = ctx.coilTags.get(ref)
-      if (previous) {
-        warning(ctx, `变量“${ref}”被多个线圈驱动，扫描顺序靠后的线圈生效。`, rungId, output.id)
-      } else {
-        ctx.coilTags.set(ref, rungId)
-      }
-    }
+    const label = output.kind === 'COIL' ? '线圈' : output.kind === 'SET' ? 'SET 置位' : 'RESET 复位'
+    noteDrive(ctx, ref, { label, continuous: output.kind === 'COIL' }, rungId, output.id)
     return
   }
 
@@ -339,12 +479,38 @@ function checkOutput(ctx: Ctx, rungId: string, output: Program['rungs'][number][
     } else if (!NAME_RE.test(instanceName)) {
       error(ctx, `${output.kind} 实例名“${instanceName}”不合法：只能使用字母、数字、下划线，且不能以数字开头。`, rungId, output.id)
     }
-    if (!Number.isFinite(output.pt ?? NaN) || (output.pt ?? 0) <= 0) {
+    const pt = output.pt ?? NaN
+    if (!Number.isFinite(pt) || pt <= 0) {
       error(ctx, `${output.kind} ${output.tag || ''} 的预设时间 PT 必须大于 0。`, rungId, output.id)
+    } else if (!Number.isInteger(pt) || pt > 32767) {
+      error(
+        ctx,
+        `${output.kind} ${output.tag || ''} 的预设时间 PT 必须是 1～32767 的整数；ET 按 INT 存储，最多 32767 ms，需要更长延时请级联多个定时器或改用计数器。`,
+        rungId,
+        output.id,
+      )
     }
     if (output.kind === 'TONR') variableRef(output.resetTag, 'BOOL', 'TONR 复位变量')
-    variableRef(output.qTag, 'BOOL', '状态输出变量')
-    variableRef(output.valueTag, 'INT', '数值输出变量')
+    const qTag = variableRef(output.qTag, 'BOOL', '状态输出变量')
+    if (qTag) {
+      noteDrive(
+        ctx,
+        normalizeReference(qTag.name),
+        { label: `${output.kind} 的状态输出`, continuous: true },
+        rungId,
+        output.id,
+      )
+    }
+    const valueTag = variableRef(output.valueTag, 'INT', '数值输出变量')
+    if (valueTag) {
+      noteDrive(
+        ctx,
+        normalizeReference(valueTag.name),
+        { label: `${output.kind} 的数值输出`, continuous: true },
+        rungId,
+        output.id,
+      )
+    }
     return
   }
 
@@ -359,14 +525,42 @@ function checkOutput(ctx: Ctx, rungId: string, output: Program['rungs'][number][
       error(ctx, `CTU ${output.tag || ''} 的预设值 PV 必须是大于 0 的整数。`, rungId, output.id)
     }
     variableRef(output.resetTag, 'BOOL', 'CTU 复位变量')
-    variableRef(output.qTag, 'BOOL', '状态输出变量')
-    variableRef(output.valueTag, 'INT', '数值输出变量')
+    const qTag = variableRef(output.qTag, 'BOOL', '状态输出变量')
+    if (qTag) {
+      noteDrive(
+        ctx,
+        normalizeReference(qTag.name),
+        { label: 'CTU 的状态输出', continuous: true },
+        rungId,
+        output.id,
+      )
+    }
+    const valueTag = variableRef(output.valueTag, 'INT', '数值输出变量')
+    if (valueTag) {
+      noteDrive(
+        ctx,
+        normalizeReference(valueTag.name),
+        { label: 'CTU 的数值输出', continuous: true },
+        rungId,
+        output.id,
+      )
+    }
     return
   }
 
   if (output.kind === 'MOVE' || output.kind === 'ADD' || output.kind === 'SUB' || output.kind === 'SHL' || output.kind === 'ROL') {
+    let target: TagDef | null = null
     if (!normalizeReference(output.tag)) error(ctx, `${output.kind} 缺少目标 INT 变量。`, rungId, output.id)
-    else variableRef(output.tag, 'INT', `${output.kind} 目标变量`, true)
+    else target = variableRef(output.tag, 'INT', `${output.kind} 目标变量`, true)
+    if (target) {
+      noteDrive(
+        ctx,
+        normalizeReference(target.name),
+        { label: `${output.kind} 目标变量`, continuous: true },
+        rungId,
+        output.id,
+      )
+    }
     if (output.kind === 'MOVE') variableRef(output.sourceTag, 'INT', 'MOVE 源变量')
     else variableRef(output.valueTag, 'INT', `${output.kind} 操作数变量`)
     if (!normalizeReference(output.sourceTag ?? '') && output.value !== undefined) {
@@ -387,10 +581,29 @@ function checkOutput(ctx: Ctx, rungId: string, output: Program['rungs'][number][
   }
 
   if (output.kind === 'PATTERN') {
+    let target: TagDef | null = null
     if (!normalizeReference(output.tag)) error(ctx, 'PATTERN 输出变量不能为空。', rungId, output.id)
-    else variableRef(output.tag, 'INT', 'PATTERN 输出变量', true)
+    else target = variableRef(output.tag, 'INT', 'PATTERN 输出变量', true)
+    if (target) {
+      noteDrive(
+        ctx,
+        normalizeReference(target.name),
+        { label: 'PATTERN 输出变量', continuous: true },
+        rungId,
+        output.id,
+      )
+    }
     boolRef(output.pulseTag, 'PATTERN 节拍变量', true)
-    variableRef(output.stepTag, 'INT', 'PATTERN 步号变量')
+    const stepTag = variableRef(output.stepTag, 'INT', 'PATTERN 步号变量')
+    if (stepTag) {
+      noteDrive(
+        ctx,
+        normalizeReference(stepTag.name),
+        { label: 'PATTERN 步号变量', continuous: true },
+        rungId,
+        output.id,
+      )
+    }
     if (!output.pattern?.length) {
       error(ctx, 'PATTERN 至少需要一个灯字（0～255 的整数）。', rungId, output.id)
     } else if (output.pattern.length > 1024) {
@@ -409,7 +622,8 @@ export function compile(program: Program): CompileResult {
     tags: new Map(program.tags.map((tag) => [normalizeReference(tag.name), tag])),
     timers: new Set(),
     counters: new Set(),
-    coilTags: new Map(),
+    drives: new Map(),
+    guards: new Map(),
   }
 
   validateTagTable(ctx)
@@ -417,7 +631,7 @@ export function compile(program: Program): CompileResult {
   validateIds(ctx)
 
   if (program.rungs.length === 0) {
-    warning(ctx, '程序里还没有梯级，仿真不会执行任何逻辑。')
+    warning(ctx, '程序里还没有程序段，仿真不会执行任何逻辑。')
   }
 
   for (const rung of program.rungs) {

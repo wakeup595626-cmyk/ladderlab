@@ -39,6 +39,8 @@ export interface LadderCanvasProps {
     label: string,
   ) => void
   onRenameRung?: (rungId: string, label: string) => void
+  /** 点击或键盘激活画布上的插入位时调用；不传则插入位只作为拖放落点。 */
+  onInsertSlot?: (slot: { rungId: string; chain: number[]; index: number }) => void
 }
 
 interface Size {
@@ -58,6 +60,7 @@ interface DrawContext {
   onSelect: (selection: Selection) => void
   onEdit?: (selection: Selection, anchor: DOMRect) => void
   onMoveNode: (rungId: string, path: number[], delta: -1 | 1) => void
+  onInsertSlot?: (slot: { rungId: string; chain: number[]; index: number }) => void
   beginDrag: (
     event: ReactPointerEvent<SVGGElement>,
     payload: DragPayload,
@@ -125,12 +128,12 @@ const DEFAULT_METRICS: LadderMetrics = {
 }
 
 const COMPACT_METRICS: LadderMetrics = {
-  slotW: 12,
-  contactW: 86,
+  slotW: 10,
+  contactW: 80,
   contactH: 92,
   contactLineY: 50,
   compareW: 128,
-  coilW: 80,
+  coilW: 74,
   coilH: 92,
   coilLineY: 50,
   boxW: 168,
@@ -139,14 +142,14 @@ const COMPACT_METRICS: LadderMetrics = {
   emptyChainW: 92,
   emptyChainH: 92,
   emptyChainLineY: 50,
-  parallelGutter: 7,
+  parallelGutter: 6,
   parallelGap: 6,
-  minWidth: 312,
+  minWidth: 300,
   railLeft: 6,
   railRight: 6,
-  chainLeft: 14,
-  chainToOutput: 10,
-  outputToRail: 12,
+  chainLeft: 10,
+  chainToOutput: 8,
+  outputToRail: 8,
   nameChars: 10,
   addressChars: 12,
   boxChars: 18,
@@ -352,11 +355,31 @@ function renderSlot(
   }
   const active = slotMatches(context.dragTarget, context.rungId, chain, index)
 
+  const insertHere = () => {
+    context.onInsertSlot?.({ rungId: context.rungId, chain, index })
+  }
+  const interactive = Boolean(context.onInsertSlot)
+  const positionLabel = chain.length > 0
+    ? '第 ' + (index + 1) + ' 位（并联支路）'
+    : '第 ' + (index + 1) + ' 位'
+
   return (
     <g
       className={'ll-slot' + (active ? ' is-drop-target' : '')}
       data-drop={JSON.stringify(target)}
-      onClick={(event) => event.stopPropagation()}
+      role={interactive ? 'button' : undefined}
+      tabIndex={interactive ? 0 : undefined}
+      aria-label={interactive ? '在' + positionLabel + '插入常开触点' : undefined}
+      onClick={(event) => {
+        event.stopPropagation()
+        insertHere()
+      }}
+      onKeyDown={(event) => {
+        if (event.key !== 'Enter' && event.key !== ' ' && event.key !== 'Spacebar') return
+        event.preventDefault()
+        event.stopPropagation()
+        insertHere()
+      }}
       onPointerDown={(event) => event.stopPropagation()}
     >
       <title>{'插入位置 ' + (index + 1)}</title>
@@ -1018,11 +1041,17 @@ function RungSection({
   const seenOutputRef = useRef<string | null>(null)
   const [availableWidth, setAvailableWidth] = useState(0)
   const [titleDraft, setTitleDraft] = useState<string | null>(null)
-  const titleValue = titleDraft ?? rung.label ?? '未命名梯级'
+  // 与博途一致：每一段固定显示「程序段 N」，标题只是可选的补充说明。
+  // 编号永远由位置决定，复制、排序之后也不会带着旧编号跑。
+  const segmentLabel = '程序段 ' + (index + 1)
+  const titleValue = titleDraft ?? rung.label
   const metrics = metricsFor(availableWidth)
   const layout = measureRung(rung, availableWidth, metrics)
   const rungContext: DrawContext = { ...context, rungId: rung.id, metrics }
   const powered = context.runtime.rungPower[rung.id] === true
+  // 选中某个元件后，这一行才淡显插入位和拖拽手柄：
+  // 既保留空白画面的克制，也让第一次使用的人看得见“这里能点、能拖”。
+  const rungSelected = context.selection?.rungId === rung.id
   const draggedRungId = context.dragSource?.startsWith('rung:')
     ? context.dragSource.slice(5)
     : null
@@ -1072,14 +1101,19 @@ function RungSection({
       return
     }
     const nextLabel = titleDraft.trim()
-    if (!nextLabel || !onRenameRung) return
+    if (!onRenameRung) return
+    // 允许清空标题：程序段号已经能定位这一段，标题只是补充说明。
     if (nextLabel !== rung.label) onRenameRung(rung.id, nextLabel)
   }
 
   return (
     <article
-      className={'ll-rung' + (powered ? ' is-powered' : '')}
-      aria-label={'梯级 ' + (index + 1) + '：' + (rung.label || '未命名')}
+      className={[
+        'll-rung',
+        powered ? 'is-powered' : '',
+        rungSelected ? 'is-selected' : '',
+      ].filter(Boolean).join(' ')}
+      aria-label={segmentLabel + '：' + (rung.label || '未命名')}
     >
       <header
         className={[
@@ -1097,21 +1131,24 @@ function RungSection({
           context.beginDrag(
             event as unknown as ReactPointerEvent<SVGGElement>,
             { type: 'rung', rungId: rung.id },
-            rung.label || '未命名梯级',
+            rung.label || segmentLabel,
             'rung:' + rung.id,
           )
         }}
       >
         <div className="ll-rung-title">
-          <span className="ll-rung-drag" data-drag-handle title="拖动梯级">
+          <span className="ll-rung-drag" data-drag-handle title="拖动程序段">
             <GripIcon size={16} />
           </span>
           <span className="ll-rung-marker" aria-hidden="true" />
+          <span className="ll-rung-index">{segmentLabel}</span>
           <input
             className="ll-rung-name"
             value={titleValue}
             readOnly={!onRenameRung}
-            aria-label={'重命名梯级 ' + (index + 1)}
+            placeholder={onRenameRung ? '添加标题（可选）' : ''}
+            aria-label={'给' + segmentLabel + '添加标题'}
+            maxLength={120}
             data-no-rung-drag
             onChange={(event) => setTitleDraft(event.target.value)}
             onBlur={commitTitle}
@@ -1139,6 +1176,13 @@ function RungSection({
           <details
             className="ll-rung-menu"
             data-no-rung-drag
+            onToggle={(event) => {
+              const details = event.currentTarget
+              if (!details.open) return
+              window.requestAnimationFrame(() => {
+                details.querySelector<HTMLButtonElement>('.ll-rung-menu-panel button:not([disabled])')?.focus()
+              })
+            }}
             onBlur={(event) => {
               if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
                 event.currentTarget.removeAttribute('open')
@@ -1150,16 +1194,43 @@ function RungSection({
               event.currentTarget.querySelector('summary')?.focus()
             }}
           >
-            <summary aria-label="梯级操作" title="梯级操作">
+            <summary aria-label="程序段操作" title="程序段操作">
               <MoreIcon size={17} />
             </summary>
-            <div className="ll-rung-menu-panel" role="menu" aria-label="梯级操作">
+            <div
+              className="ll-rung-menu-panel"
+              role="menu"
+              aria-label="程序段操作"
+              onKeyDown={(event) => {
+                if (event.key === 'Escape') {
+                  event.preventDefault()
+                  const details = event.currentTarget.closest('details')
+                  details?.removeAttribute('open')
+                  details?.querySelector<HTMLElement>('summary')?.focus()
+                  return
+                }
+                if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return
+                const items = Array.from(
+                  event.currentTarget.querySelectorAll<HTMLButtonElement>('button:not([disabled])'),
+                )
+                if (items.length === 0) return
+                event.preventDefault()
+                const index = items.indexOf(document.activeElement as HTMLButtonElement)
+                let next = 0
+                if (event.key === 'ArrowDown') next = index < 0 ? 0 : (index + 1) % items.length
+                else if (event.key === 'ArrowUp') next = index < 0 ? items.length - 1 : (index - 1 + items.length) % items.length
+                else if (event.key === 'End') next = items.length - 1
+                items[next]?.focus()
+              }}
+            >
               <button
                 type="button"
                 role="menuitem"
                 disabled={index === 0}
                 onClick={(event) => {
-                  event.currentTarget.closest('details')?.removeAttribute('open')
+                  const details = event.currentTarget.closest('details')
+                  details?.removeAttribute('open')
+                  details?.querySelector<HTMLElement>('summary')?.focus()
                   onMoveRung(rung.id, -1)
                 }}
               >
@@ -1170,7 +1241,9 @@ function RungSection({
                 role="menuitem"
                 disabled={index === total - 1}
                 onClick={(event) => {
-                  event.currentTarget.closest('details')?.removeAttribute('open')
+                  const details = event.currentTarget.closest('details')
+                  details?.removeAttribute('open')
+                  details?.querySelector<HTMLElement>('summary')?.focus()
                   onMoveRung(rung.id, 1)
                 }}
               >
@@ -1180,19 +1253,36 @@ function RungSection({
                 type="button"
                 role="menuitem"
                 onClick={(event) => {
-                  event.currentTarget.closest('details')?.removeAttribute('open')
+                  const details = event.currentTarget.closest('details')
+                  details?.removeAttribute('open')
+                  details?.querySelector<HTMLElement>('summary')?.focus()
                   onDuplicateRung(rung.id)
                 }}
               >
-                复制梯级
+                复制程序段
               </button>
               <button
                 type="button"
                 role="menuitem"
                 className="is-danger"
-                onClick={() => onDeleteRung(rung.id)}
+                onClick={(event) => {
+                  const details = event.currentTarget.closest('details')
+                  const rungElement = details?.closest<HTMLElement>('.ll-rung')
+                  const rungIndex = rungElement
+                    ? Array.from(document.querySelectorAll<HTMLElement>('.ll-rung')).indexOf(rungElement)
+                    : -1
+                  details?.removeAttribute('open')
+                  onDeleteRung(rung.id)
+                  window.requestAnimationFrame(() => {
+                    const rungs = Array.from(document.querySelectorAll<HTMLElement>('.ll-rung'))
+                    const fallback = rungs[Math.max(0, rungIndex - 1)] ?? rungs[0]
+                    const target = fallback?.querySelector<HTMLElement>('.ll-rung-menu summary')
+                      ?? document.querySelector<HTMLElement>('.ll-empty-board button, .ll-add-rung')
+                    target?.focus()
+                  })
+                }}
               >
-                删除梯级
+                删除程序段
               </button>
             </div>
           </details>
@@ -1207,7 +1297,7 @@ function RungSection({
           viewBox={'0 0 ' + layout.width + ' ' + layout.height}
           style={{ minWidth: layout.naturalWidth }}
           role="group"
-          aria-label={(rung.label || '梯级') + ' 梯形图'}
+          aria-label={(rung.label || segmentLabel) + ' 梯形图'}
         >
           <line
             className="ll-rail"
@@ -1271,6 +1361,7 @@ export default function LadderCanvas({
   onEdit,
   onStartDrag,
   onRenameRung,
+  onInsertSlot,
 }: LadderCanvasProps) {
   const [dragSource, setDragSource] = useState<string | null>(null)
 
@@ -1301,6 +1392,7 @@ export default function LadderCanvas({
     onSelect,
     onEdit,
     onMoveNode,
+    onInsertSlot,
     beginDrag,
   }
 
@@ -1309,9 +1401,9 @@ export default function LadderCanvas({
       {program.rungs.length === 0 ? (
         <div className="ll-empty-board">
           <div className="ll-empty-symbol">—[ ]—( )</div>
-          <h3>程序里还没有梯级</h3>
-          <p>添加第一条梯级，然后从指令面板拖入触点或输出。</p>
-          <button type="button" onClick={onAddRung}>添加梯级</button>
+          <h3>程序里还没有程序段</h3>
+          <p>添加第一条程序段，然后从指令面板拖入触点或输出。</p>
+          <button type="button" onClick={onAddRung}>添加程序段</button>
         </div>
       ) : (
         <div className="ll-program-sheet">
@@ -1332,7 +1424,7 @@ export default function LadderCanvas({
       )}
       {program.rungs.length > 0 && (
         <button type="button" className="ll-add-rung" onClick={onAddRung}>
-          <span aria-hidden="true">+</span> 添加梯级
+          <span aria-hidden="true">+</span> 添加程序段
         </button>
       )}
     </div>

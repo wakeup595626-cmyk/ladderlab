@@ -1,26 +1,12 @@
-/* IBM Plex latin：本地自托管，避免运行时请求字体 CDN。 */
+/* IBM Plex latin：本地自托管，避免运行时请求字体 CDN。
+   这是一份带 wght 轴的变量字体，声明成区间才会真正渲染 500/600，
+   而不是把同一份 400 字面重复注册三次。 */
 @font-face {
   font-family: "IBM Plex Sans";
   font-style: normal;
-  font-weight: 400;
+  font-weight: 100 700;
   font-display: swap;
-  src: url("./assets/fonts/ibm-plex-sans-400.woff2") format("woff2");
-}
-
-@font-face {
-  font-family: "IBM Plex Sans";
-  font-style: normal;
-  font-weight: 500;
-  font-display: swap;
-  src: url("./assets/fonts/ibm-plex-sans-500.woff2") format("woff2");
-}
-
-@font-face {
-  font-family: "IBM Plex Sans";
-  font-style: normal;
-  font-weight: 600;
-  font-display: swap;
-  src: url("./assets/fonts/ibm-plex-sans-600.woff2") format("woff2");
+  src: url("./assets/fonts/ibm-plex-sans-var.woff2") format("woff2");
 }
 
 @font-face {
@@ -78,6 +64,15 @@
   --fs-kpi: 28px;
   --fs-body: 14px;
   --fs-small: 12px;
+
+  /* Motion: one vocabulary for presses, menus and sheets. */
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+  --dur-press: 120ms;
+  --dur-quick: 140ms;
+  --dur-base: 180ms;
+  --dur-sheet: 240ms;
 
   /* 旧组件迁移别名；新增样式直接使用上方的语义令牌。 */
   --bg: var(--ground);
@@ -193,7 +188,6 @@ button:not(:disabled) {
   *::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
 }
@@ -213,4 +207,70 @@ button:not(:disabled) {
 
 .mono {
   font-family: var(--mono);
+}
+
+.crash-screen {
+  display: grid;
+  min-height: 100dvh;
+  place-items: center;
+  padding: 24px;
+  background: var(--ground);
+  color: var(--text);
+}
+
+.crash-card {
+  width: min(440px, 100%);
+  padding: 26px;
+  border: 1px solid var(--control, #c9cfcb);
+  border-radius: 12px;
+  background: var(--surface, #fff);
+}
+
+.crash-card h1 {
+  margin: 0 0 10px;
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.crash-card p {
+  margin: 0 0 14px;
+  color: var(--muted, #5c655f);
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+.crash-card pre {
+  max-height: 140px;
+  overflow: auto;
+  margin: 0 0 16px;
+  padding: 10px;
+  border-radius: 6px;
+  background: var(--raised, #f2f4f1);
+  color: var(--muted, #5c655f);
+  font-size: 11.5px;
+  white-space: pre-wrap;
+}
+
+.crash-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.crash-actions button {
+  min-height: 34px;
+  padding: 0 14px;
+  border: 1px solid var(--control, #c9cfcb);
+  border-radius: 6px;
+  background: var(--surface, #fff);
+  color: var(--text);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.crash-actions button.is-primary {
+  border-color: var(--accent-ink, #21474a);
+  background: var(--accent, #2c6064);
+  color: #fff;
+  font-weight: 600;
 }
