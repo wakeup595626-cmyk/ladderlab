@@ -71,7 +71,21 @@ async function setViewport(width, height, mobile) {
 async function reload(clearStorage = false) {
   if (clearStorage) await evaluate('window.localStorage.clear()')
   await send('Page.navigate', { url: APP_URL })
-  await sleep(1100)
+  await waitForApp()
+  await sleep(250)
+}
+
+/** 等 React 真正挂载再开始点：远程预览首包慢时，固定 sleep 会误判成功能缺失。 */
+async function waitForApp(timeout = 12000) {
+  const deadline = Date.now() + timeout
+  while (Date.now() < deadline) {
+    const ready = await evaluate(
+      `document.readyState !== 'loading' && !!document.querySelector('.wb-topbar')`,
+    ).catch(() => false)
+    if (ready) return true
+    await sleep(200)
+  }
+  throw new Error(`等待页面就绪超时：${APP_URL}`)
 }
 
 async function screenshot(path) {
