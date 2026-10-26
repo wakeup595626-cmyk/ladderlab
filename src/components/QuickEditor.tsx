@@ -14,13 +14,12 @@ import {
   addTag,
   changeContactKind,
   changeOutputKind,
-  collapseParallel,
+  deleteBranch,
   getNodeAtPath,
   moveNodeBy,
   updateContact,
   updateOutput,
   updateTag,
-  wrapInParallel,
 } from '../state/programOps'
 import { CloseIcon } from './Icons'
 import { useModalFocus } from '../lib/useModalFocus'
@@ -436,52 +435,49 @@ export default function QuickEditor({
               </button>
               <button
                 type="button"
-                className="qe-quiet"
-                onClick={() => {
-                  onProgram(wrapInParallel(program, rung.id, selection.path!))
-                  onNotify('已添加一条并联支路')
-                }}
-              >
-                并联新支路
-              </button>
-              <button
-                type="button"
                 className="qe-danger"
                 onClick={() => onDeleteNode?.()}
               >
                 删除
               </button>
             </div>
+            <p className="qe-note">并联：点选图纸上的线路，再点段头的「打开分支」。</p>
           </div>
         )}
 
         {node?.type === 'parallel' && (
           <div className="qe-body">
-            <p className="qe-note">任一并联支路接通时，能流继续向右传递。拖入触点可继续扩展支路。</p>
+            <div className="qe-branches">
+              {node.branches.map((branch, index) => (
+                <div className="qe-branch-row" key={`${node.id}-${index}`}>
+                  <span>支路 {index + 1}</span>
+                  <small>{branch.length} 个元件</small>
+                  <button
+                    type="button"
+                    className="qe-quiet"
+                    disabled={node.branches.length < 2}
+                    aria-label={`删除支路 ${index + 1}`}
+                    onClick={() => {
+                      const next = deleteBranch(program, rung.id, selection.path!, index)
+                      if (next === program) return
+                      onProgram(next)
+                      onNotify(`支路 ${index + 1} 已删除`)
+                      onClose()
+                    }}
+                  >
+                    删除
+                  </button>
+                </div>
+              ))}
+            </div>
+            <p className="qe-note">任一并联支路接通时，能流继续向右传递。增加分支请点选线路后使用段头「打开分支」。</p>
             <div className="qe-actions">
-              <button
-                type="button"
-                className="qe-quiet"
-                onClick={() => {
-                  onProgram(wrapInParallel(program, rung.id, selection.path!))
-                  onNotify('已添加一条并联支路')
-                }}
-              >
-                添加支路
-              </button>
-              <button
-                type="button"
-                className="qe-quiet"
-                onClick={() => onProgram(collapseParallel(program, rung.id, selection.path!))}
-              >
-                只留第一条
-              </button>
               <button
                 type="button"
                 className="qe-danger"
                 onClick={() => onDeleteNode?.()}
               >
-                删除
+                删除整个并联
               </button>
             </div>
           </div>

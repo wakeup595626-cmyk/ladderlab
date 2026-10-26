@@ -17,6 +17,7 @@ import type {
 import type { DragPayload, DropTarget } from '../lib/dragTypes'
 import { FIELD_LIMITS } from '../lib/limits'
 import {
+  BranchIcon,
   ChevronDownIcon,
   GripIcon,
   MoreIcon,
@@ -50,6 +51,13 @@ export interface LadderCanvasProps {
   onInsertContact?: (rungId: string, kind: ContactKind) => void
   /** 删除当前选中的元件；删除整个程序段仍走 onDeleteRung。 */
   onDeleteNode?: (rungId: string, path: number[]) => void
+  /** 按博途的「打开分支 → 闭合分支」生成并联支路；返回 false 表示该位置不可用。 */
+  onOpenBranch?: (
+    rungId: string,
+    chain: number[],
+    openIndex: number,
+    closeIndex: number,
+  ) => boolean
 }
 
 interface Size {
@@ -70,6 +78,8 @@ interface DrawContext {
   onEdit?: (selection: Selection, anchor: DOMRect) => void
   onMoveNode: (rungId: string, path: number[], delta: -1 | 1) => void
   onInsertSlot?: (slot: { rungId: string; chain: number[]; index: number }) => void
+  branchDraft: BranchDraft | null
+  onSlotClick: (rungId: string, chain: number[], index: number, chainLength: number) => void
   beginDrag: (
     event: ReactPointerEvent<SVGGElement>,
     payload: DragPayload,
@@ -77,6 +87,11 @@ interface DrawContext {
     sourceKey: string,
   ) => void
 }
+
+/** 「打开分支」是两步操作：先选分支起点，再选闭合位置，和博途一致。 */
+type BranchDraft =
+  | { stage: 'open'; rungId: string }
+  | { stage: 'close'; rungId: string; chain: number[]; openIndex: number }
 
 interface LadderMetrics {
   slotW: number
@@ -209,6 +224,20 @@ function nodeAtPath(chain: LadderNode[], path: number[] | null): LadderNode | nu
   return current
 }
 
+/** 取链（偶数长度路径）：[] 是根链，[i, b] 是第 i 个并联节点的第 b 条支路。 */
+function chainAtPath(nodes: LadderNode[], path: number[]): LadderNode[] | null {
+  if (path.length % 2 !== 0) return null
+  let chain = nodes
+  for (let offset = 0; offset < path.length; offset += 2) {
+    const node = chain[path[offset]]
+    if (!node || node.type !== 'parallel') return null
+    const branch = node.branches[path[offset + 1]]
+    if (!branch) return null
+    chain = branch
+  }
+  return chain
+}
+
 const OUTPUT_LABELS: Record<OutputElement['kind'], string> = {
   COIL: '线圈',
   SET: '置位线圈',
@@ -292,8 +321,15 @@ function pathsEqual(left: number[] | null, right: number[] | null): boolean {
 }
 
 function isSelected(context: DrawContext, path: number[] | null): boolean {
+  // 选中线路时 path 同样是 null，不能把输出线圈一起点亮。
+  if (context.selection?.wire) return false
   return context.selection?.rungId === context.rungId
     && pathsEqual(context.selection.path, path)
+}
+
+function isWireSelected(context: DrawContext, chain: number[], index: number): boolean {
+  const wire = context.selection?.rungId === context.rungId ? context.selection.wire : null
+  return Boolean(wire && wire.index === index && pathsEqual(wire.chain, chain))
 }
 
 function shorten(value: string, limit = 20): string {
@@ -377,6 +413,7 @@ function nodeMatches(
 function renderSlot(
   context: DrawContext,
   chain: number[],
+  chainLength: number,
   index: number,
   lineY: number,
   powered: boolean,
@@ -393,31 +430,54 @@ function renderSlot(
   const insertHere = () => {
     context.onInsertSlot?.({ rungId: context.rungId, chain, index })
   }
-  const interactive = Boolean(context.onInsertSlot)
-  const positionLabel = chain.length > 0
-    ? '第 ' + (index + 1) + ' 位（并联支路）'
-    : '第 ' + (index + 1) + ' 位'
+  const selectWire = () => {
+    context.onSlotClick(context.rungId, chain, index, chainLength)
+  }
+  const wireSelected = isWireSelected(context, chain, index)
+  const draft = context.branchDraft
+  const draftHere = draft?.rungId === context.rungId ? draft : null
+  const sameChain = Boolean(draftHere && draftHere.stage === 'close' && pathsEqual(draftHere.chain, chain))
+  // 分支取点阶段整条导线都必须只用于选点。若保留中央“+”，用户按提示
+  // 点线时会误插触点，也会让后续点击被当成支路闭合位置。
+  const branchMode = Boolean(draftHere)
+  const branchOpen = Boolean(draftHere && draftHere.stage === 'close' && sameChain && draftHere.openIndex === index)
+  const branchCandidate = Boolean(draftHere && (
+    draftHere.stage === 'open'
+      // 博途要求主分支先有元件，才能从这条线路向下打开分支。
+      ? index >= 1 && index < chainLength
+      : sameChain && index > draftHere.openIndex && index <= chainLength
+  ))
+  const ariaLabel = branchCandidate
+    ? (draftHere?.stage === 'open' ? '从这里打开并联分支' : '在这里闭合并联分支')
+    : '选择线路 ' + (index + 1)
 
   return (
     <g
-      className={'ll-slot' + (active ? ' is-drop-target' : '')}
+      className={[
+        'll-slot',
+        active ? 'is-drop-target' : '',
+        wireSelected ? 'is-wire-selected' : '',
+        branchCandidate ? 'is-branch-candidate' : '',
+        branchOpen ? 'is-branch-open' : '',
+      ].filter(Boolean).join(' ')}
       data-drop={JSON.stringify(target)}
-      role={interactive ? 'button' : undefined}
-      tabIndex={interactive ? 0 : undefined}
-      aria-label={interactive ? '在' + positionLabel + '插入常开触点' : undefined}
+      role="button"
+      tabIndex={0}
+      aria-label={ariaLabel}
+      aria-pressed={wireSelected}
       onClick={(event) => {
         event.stopPropagation()
-        insertHere()
+        selectWire()
       }}
       onKeyDown={(event) => {
         if (event.key !== 'Enter' && event.key !== ' ' && event.key !== 'Spacebar') return
         event.preventDefault()
         event.stopPropagation()
-        insertHere()
+        selectWire()
       }}
       onPointerDown={(event) => event.stopPropagation()}
     >
-      <title>{'插入位置 ' + (index + 1)}</title>
+      <title>{ariaLabel + ' · 悬停后点 + 可直接插入常开触点'}</title>
       <rect
         className="ll-slot-hit"
         x="0"
@@ -439,10 +499,37 @@ function renderSlot(
         x2={slotW}
         y2={lineY}
       />
-      <g className="ll-slot-plus" transform={'translate(' + slotW / 2 + ' ' + lineY + ')'}>
-        <rect x="-8" y="-8" width="16" height="16" rx="3" />
-        <path d="M -5 0 H 5 M 0 -5 V 5" />
-      </g>
+      {wireSelected && (
+        <g className="ll-wire-handles" aria-hidden="true">
+          <rect x="-3" y={lineY - 3} width="6" height="6" />
+          <rect x={slotW - 3} y={lineY - 3} width="6" height="6" />
+        </g>
+      )}
+      {branchCandidate && (
+        <circle className="ll-branch-point" cx={slotW / 2} cy={lineY} r="4.5" aria-hidden="true" />
+      )}
+      {branchOpen && (
+        <g className="ll-branch-stub" aria-hidden="true">
+          <path d={'M ' + slotW / 2 + ' ' + lineY + ' v 26'} />
+          <circle cx={slotW / 2} cy={lineY + 30} r="3.5" />
+        </g>
+      )}
+      {!branchMode && (
+        <g
+          className="ll-slot-plus"
+          transform={'translate(' + slotW / 2 + ' ' + lineY + ')'}
+          aria-hidden="true"
+          onClick={(event) => {
+            event.stopPropagation()
+            insertHere()
+          }}
+          onPointerDown={(event) => event.stopPropagation()}
+        >
+          <rect className="ll-slot-plus-hit" x="-12" y="-16" width="24" height="32" />
+          <rect x="-8" y="-8" width="16" height="16" rx="3" />
+          <path d="M -5 0 H 5 M 0 -5 V 5" />
+        </g>
+      )}
     </g>
   )
 }
@@ -676,7 +763,7 @@ function renderChain(
   if (chain.length === 0) {
     return (
       <g className={'ll-empty-chain' + (incomingPower ? ' is-powered' : '')}>
-        {renderSlot(context, chainPath, 0, size.lineY, incomingPower)}
+        {renderSlot(context, chainPath, chain.length, 0, size.lineY, incomingPower)}
       </g>
     )
   }
@@ -688,7 +775,7 @@ function renderChain(
   chain.forEach((node, index) => {
     parts.push(
       <g key={node.id + '-slot-before-' + index} transform={'translate(' + cursorX + ', 0)'}>
-        {renderSlot(context, chainPath, index, size.lineY, currentPower)}
+        {renderSlot(context, chainPath, chain.length, index, size.lineY, currentPower)}
       </g>,
     )
     cursorX += m.slotW
@@ -709,7 +796,7 @@ function renderChain(
 
   parts.push(
     <g key="slot-after" transform={'translate(' + cursorX + ', 0)'}>
-      {renderSlot(context, chainPath, chain.length, size.lineY, currentPower)}
+      {renderSlot(context, chainPath, chain.length, chain.length, size.lineY, currentPower)}
     </g>,
   )
 
@@ -1060,6 +1147,7 @@ interface RungSectionProps {
   onRenameRung?: (rungId: string, label: string) => void
   onInsertContact?: (rungId: string, kind: ContactKind) => void
   onDeleteNode?: (rungId: string, path: number[]) => void
+  onStartBranch?: (rungId: string) => void
 }
 
 /** 程序段的“插入触点”下拉菜单，行为与右上角的程序段菜单保持一致。 */
@@ -1164,6 +1252,7 @@ function RungSection({
   onRenameRung,
   onInsertContact,
   onDeleteNode,
+  onStartBranch,
 }: RungSectionProps) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const cancelRenameRef = useRef(false)
@@ -1197,6 +1286,13 @@ function RungSection({
       ? CONTACT_LABELS[selectedNode.kind] + (selectedNode.tag ? ' · ' + selectedNode.tag : '')
       : '并联分支 · ' + selectedNode.branches.length + ' 路'
     : ''
+  const localWire = context.selection?.rungId === rung.id ? context.selection.wire ?? null : null
+  const localDraft = context.branchDraft?.rungId === rung.id ? context.branchDraft : null
+  const statusLabel = localDraft
+    ? localDraft.stage === 'open'
+      ? '点一条线路作为分支起点'
+      : '再点一条线路闭合分支'
+    : selectedLabel || (localWire ? '已选线路 ' + (localWire.index + 1) : '')
 
   useLayoutEffect(() => {
     const element = scrollRef.current
@@ -1315,6 +1411,22 @@ function RungSection({
                 onInsert={onInsertContact}
               />
             )}
+            {onStartBranch && (
+              <button
+                type="button"
+                className="ll-tool ll-tool-branch"
+                data-no-rung-drag
+                aria-pressed={Boolean(localDraft)}
+                disabled={rung.nodes.length < 2}
+                title={rung.nodes.length < 2
+                  ? '先插入至少两个元件，才能在元件之后打开并联分支'
+                  : '打开并联分支（Shift+F8）：先选起点，再选闭合位置'}
+                onClick={() => onStartBranch(rung.id)}
+              >
+                <BranchIcon size={15} />
+                <span className="ll-tool-label">打开分支</span>
+              </button>
+            )}
             <button
               type="button"
               className="ll-tool ll-tool-remove"
@@ -1331,16 +1443,21 @@ function RungSection({
               <span className="ll-tool-label">删除元件</span>
             </button>
           </div>
-          {selectedNode && (
-            <span className="ll-selected-chip" title={'已选中：' + selectedLabel}>
-              {selectedLabel}
+          {statusLabel && (
+            <span
+              className={'ll-selected-chip' + (localDraft ? ' is-branch-tip' : '')}
+              title={statusLabel + (localDraft ? '（Esc 取消）' : '')}
+              role="status"
+            >
+              {statusLabel}
             </span>
           )}
           <span
             className={'ll-power-state' + (powered ? ' is-on' : '')}
+            aria-label={powered ? '回路通电' : '回路断开'}
             title={powered ? '回路通电' : '回路断开'}
           >
-            <i />{powered ? '通电' : '断开'}
+            <i /><span className="ll-power-text">{powered ? '通电' : '断开'}</span>
           </span>
           <details
             className="ll-rung-menu"
@@ -1533,8 +1650,10 @@ export default function LadderCanvas({
   onInsertSlot,
   onInsertContact,
   onDeleteNode,
+  onOpenBranch,
 }: LadderCanvasProps) {
   const [dragSource, setDragSource] = useState<string | null>(null)
+  const [branchDraft, setBranchDraft] = useState<BranchDraft | null>(null)
 
   useEffect(() => {
     const clearDragSource = () => setDragSource(null)
@@ -1548,6 +1667,73 @@ export default function LadderCanvas({
     }
   }, [])
 
+  const startBranch = (rungId: string) => {
+    if (branchDraft?.rungId === rungId) {
+      setBranchDraft(null)
+      return
+    }
+    const rung = program.rungs.find((item) => item.id === rungId)
+    if (!rung) return
+    let chain: number[] = []
+    let openIndex = -1
+    if (selection?.rungId === rungId) {
+      if (selection.wire) {
+        chain = selection.wire.chain
+        openIndex = selection.wire.index
+      } else if (selection.path && selection.path.length > 0) {
+        // 选中元件时，博途在“所选元素之后”打开分支。
+        chain = selection.path.slice(0, -1)
+        openIndex = selection.path[selection.path.length - 1] + 1
+      }
+    }
+    const target = chainAtPath(rung.nodes, chain)
+    if (target && openIndex >= 1 && openIndex < target.length) {
+      setBranchDraft({ stage: 'close', rungId, chain, openIndex })
+      return
+    }
+    setBranchDraft({ stage: 'open', rungId })
+  }
+
+  const handleSlotClick = (rungId: string, chain: number[], index: number, chainLength: number) => {
+    if (branchDraft?.rungId === rungId) {
+      if (branchDraft.stage === 'open') {
+        if (index >= 1 && index < chainLength) {
+          setBranchDraft({ stage: 'close', rungId, chain, openIndex: index })
+          return
+        }
+      } else if (pathsEqual(branchDraft.chain, chain)
+        && index > branchDraft.openIndex && index <= chainLength) {
+        if (onOpenBranch?.(rungId, chain, branchDraft.openIndex, index)) {
+          setBranchDraft(null)
+        }
+        return
+      }
+    }
+    setBranchDraft(null)
+    onSelect({ rungId, path: null, wire: { chain, index } })
+  }
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target
+      if (target instanceof Element && target.closest(
+        'input, textarea, select, [contenteditable="true"], [role="dialog"]',
+      )) return
+      if (event.key === 'F8' && event.shiftKey && selection) {
+        event.preventDefault()
+        startBranch(selection.rungId)
+        return
+      }
+      if (!branchDraft) return
+      if (event.key === 'Escape' || (event.key === 'F9' && event.shiftKey)) {
+        event.preventDefault()
+        setBranchDraft(null)
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  })
+
   const beginDrag: DrawContext['beginDrag'] = (event, payload, label, sourceKey) => {
     setDragSource(sourceKey)
     onStartDrag?.(event, payload, label)
@@ -1560,10 +1746,16 @@ export default function LadderCanvas({
     dragSource,
     rungId: '',
     metrics: DEFAULT_METRICS,
-    onSelect,
+    onSelect: (next) => {
+      // 点元件即结束「打开分支」的取点状态，避免下一次选线被误当成闭合位置。
+      setBranchDraft(null)
+      onSelect(next)
+    },
     onEdit,
     onMoveNode,
     onInsertSlot,
+    branchDraft,
+    onSlotClick: handleSlotClick,
     beginDrag,
   }
 
@@ -1591,6 +1783,7 @@ export default function LadderCanvas({
               onRenameRung={onRenameRung}
               onInsertContact={onInsertContact}
               onDeleteNode={onDeleteNode}
+              onStartBranch={startBranch}
             />
           ))}
         </div>

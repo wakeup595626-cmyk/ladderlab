@@ -60,6 +60,7 @@ import {
   moveNodeBy,
   moveRung,
   moveRungTo,
+  openBranchAt,
   setProfile as setProgramProfile,
   setProjectName,
   updateRungLabel,
@@ -188,7 +189,7 @@ export default function App() {
   const [runtime, setRuntime] = useState<Runtime>(() => createRuntime(initialProgram))
   const [running, setRunning] = useState(false)
   const [speed, setSpeed] = useState(50)
-  const [selection, setSelection] = useState<Selection | null>(() =>
+  const [selectionState, setSelection] = useState<Selection | null>(() =>
     initialProgram.rungs[0] ? { rungId: initialProgram.rungs[0].id, path: null } : null,
   )
   const [toast, setToast] = useState<ToastState | null>(null)
@@ -243,6 +244,16 @@ export default function App() {
   const lastRuntimeSignatureRef = useRef<string | null>(null)
   const program = history.present
   const compileResult = useMemo(() => compile(program), [program])
+
+  // 删除支路或撤销后，旧路径可能指向已消失的元件；保留程序段选择，
+  // 但清掉元件路径，避免后续插入操作落到错误位置。这里直接按当前程序派生，
+  // 不回写 state，省掉一轮额外渲染。
+  const selection = useMemo<Selection | null>(() => {
+    if (!selectionState) return null
+    if (selectionState.wire || !selectionState.path) return selectionState
+    if (getNodeAtPath(program, selectionState.rungId, selectionState.path)) return selectionState
+    return { rungId: selectionState.rungId, path: null }
+  }, [program, selectionState])
 
   // 布局 effect 在提交后同步执行、早于任何后续任务：编辑后立刻刷新或切后台时，
   // pagehide 处理器一定能读到最新工程，避免用旧值覆盖最后一笔修改。
@@ -652,6 +663,9 @@ export default function App() {
       setQuickEdit(null)
       setMobilePanel('properties')
     } else {
+      // 桌面端属性栏本身就是完整的元件编辑面，和就近参数框只留一个，
+      // 否则同一个触点在屏幕上会出现两份同名字段。
+      setQuickEdit(null)
       setInspectorOpen(true)
     }
   }
@@ -686,9 +700,12 @@ export default function App() {
   const insertContactInRung = useCallback((rungId: string, kind: ContactKind) => {
     const rung = program.rungs.find((item) => item.id === rungId)
     if (!rung) return
-    const path = selection?.rungId === rungId ? selection.path : null
-    const chain = path ? path.slice(0, -1) : []
-    const index = path ? path[path.length - 1] + 1 : rung.nodes.length
+    const localSelection = selection?.rungId === rungId ? selection : null
+    const wire = localSelection?.wire ?? null
+    const path = localSelection?.path ?? null
+    // 线段也是有效的插入位置：先点线，再从段头插入，触点就落在所点的那一段导线上。
+    const chain = wire ? wire.chain : path ? path.slice(0, -1) : []
+    const index = wire ? wire.index : path ? path[path.length - 1] + 1 : rung.nodes.length
     const made = makeContactNode(program, kind)
     const next = insertNodeAt(made.program, rungId, { chain, index }, made.node)
     if (next === made.program) {
@@ -701,6 +718,27 @@ export default function App() {
     setMobilePanel('none')
     notify(`${instructionLabel('contact', kind)}已插入`)
   }, [commit, notify, program, selection])
+
+  // 和博途一致：先在图纸上选起点线路，再选闭合线路。新支路自带一个常开触点，
+  // 打开后立刻可以点它改名，不会留下无法编译的空支路。
+  const openBranch = useCallback((
+    rungId: string,
+    chain: number[],
+    openIndex: number,
+    closeIndex: number,
+  ): boolean => {
+    const opened = openBranchAt(program, rungId, chain, openIndex, closeIndex)
+    if (!opened) {
+      notify('这个位置不能打开分支，请在元件之后选择起止线路')
+      return false
+    }
+    commit(opened.program)
+    setSelection({ rungId, path: findNodePath(opened.program, rungId, opened.nodeId) })
+    setQuickEdit(null)
+    setMobilePanel('none')
+    notify('并联支路已打开，点支路里的触点可改名')
+    return true
+  }, [commit, notify, program])
 
   const removeNode = useCallback((rungId: string, path: number[]) => {
     const rung = program.rungs.find((item) => item.id === rungId)
@@ -1238,6 +1276,24 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [inspectorDocked, inspectorOpen, quickEdit, libraryOpen, guideOpen, aboutOpen])
 
+  // 手机端面板从底部升起，会盖住画布下半屏。打开时把选中的元件滚到
+  // 面板上方，调参数时仍能看见它在梯形图里的位置。
+  useEffect(() => {
+    if (inspectorDocked || !inspectorVisible) return
+    const pane = editorRef.current
+    if (!pane) return
+    const frame = window.requestAnimationFrame(() => {
+      const node = pane.querySelector<HTMLElement>('.ll-node.is-selected, .ll-output.is-selected')
+      const panel = document.querySelector<HTMLElement>('.wb-context-panel')
+      if (!node || !panel) return
+      const overlap = node.getBoundingClientRect().bottom - (panel.getBoundingClientRect().top - 20)
+      if (overlap > 0) {
+        pane.scrollTo({ top: pane.scrollTop + overlap, behavior: 'smooth' })
+      }
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [editorRef, inspectorDocked, inspectorVisible])
+
   return (
     <div
       className="app-shell wb-shell"
@@ -1484,6 +1540,7 @@ export default function App() {
                 onInsertSlot={(slot) => insert('NO', slot)}
                 onInsertContact={insertContactInRung}
                 onDeleteNode={removeNode}
+                onOpenBranch={openBranch}
               />
 
           </div>

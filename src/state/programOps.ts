@@ -671,6 +671,102 @@ export function collapseParallel(program: Program, rungId: string, path: number[
   }))
 }
 
+/** 就地改写某条链；路径必须指向链，而不是单个节点。 */
+function updateChainAtPath(
+  nodes: LadderNode[],
+  path: number[],
+  update: (chain: LadderNode[]) => LadderNode[] | null,
+): LadderNode[] | null {
+  if (!isChainPath(path)) return null
+  if (path.length === 0) return update(nodes)
+  const [nodeIndex, branchIndex, ...rest] = path
+  const target = nodes[nodeIndex]
+  if (!target || target.type !== 'parallel') return null
+  const branch = target.branches[branchIndex]
+  if (!branch) return null
+  const updated = updateChainAtPath(branch, rest, update)
+  if (!updated) return null
+  return nodes.map((item, position) => (position === nodeIndex
+    ? {
+      ...target,
+      branches: target.branches.map((itemBranch, index) => (index === branchIndex ? updated : itemBranch)),
+    }
+    : item))
+}
+
+export interface OpenedBranch {
+  program: Program
+  nodeId: string
+}
+
+/**
+ * 按博途的「打开分支」→「关闭分支」两步生成并联结构：
+ * 从 openIndex 处的线路向下打开，在 closeIndex 处闭合，两点之间的元件留在主支路，
+ * 新支路放入一个常开触点，保证程序始终可编译、可仿真。
+ */
+export function openBranchAt(
+  program: Program,
+  rungId: string,
+  chainPath: number[],
+  openIndex: number,
+  closeIndex: number,
+): OpenedBranch | null {
+  const rung = program.rungs.find((item) => item.id === rungId)
+  if (!rung) return null
+  const chain = chainAtPath(rung.nodes, chainPath)
+  if (!chain) return null
+  // 主分支必须先有元件；分支内也至少要有一个元件，否则会生成悬空网络。
+  if (openIndex < 1 || closeIndex <= openIndex || closeIndex > chain.length) return null
+  const made = makeContactNode(program, 'NO')
+  const parallel: LadderNode = {
+    type: 'parallel',
+    id: uid('par'),
+    branches: [chain.slice(openIndex, closeIndex), [made.node]],
+  }
+  const replaced = updateChainAtPath(rung.nodes, chainPath, (targetChain) => [
+    ...targetChain.slice(0, openIndex),
+    parallel,
+    ...targetChain.slice(closeIndex),
+  ])
+  if (!replaced) return null
+  return {
+    program: withRung(made.program, rungId, (item) => ({
+      ...item,
+      nodes: sanitizeChain(replaced),
+    })),
+    nodeId: made.node.id,
+  }
+}
+
+/** 删除一条支路；只剩两条时用留下的支路替换并联节点，避免留下空壳。 */
+export function deleteBranch(
+  program: Program,
+  rungId: string,
+  parallelPath: number[],
+  branchIndex: number,
+): Program {
+  const rung = program.rungs.find((item) => item.id === rungId)
+  if (!rung || parallelPath.length === 0 || parallelPath.length % 2 === 0) return program
+  const node = getNodeAtPath(program, rungId, parallelPath)
+  if (!node || node.type !== 'parallel' || node.branches.length < 2) return program
+  if (!Number.isInteger(branchIndex) || branchIndex < 0 || branchIndex >= node.branches.length) return program
+  const parentChain = parallelPath.slice(0, -1)
+  const nodeIndex = parallelPath[parallelPath.length - 1]
+  const replaced = updateChainAtPath(rung.nodes, parentChain, (chain) => {
+    const target = chain[nodeIndex]
+    if (!target || target.type !== 'parallel') return null
+    if (target.branches.length > 2) {
+      return chain.map((item, position) => (position === nodeIndex
+        ? { ...target, branches: target.branches.filter((_, index) => index !== branchIndex) }
+        : item))
+    }
+    const remaining = target.branches[branchIndex === 0 ? 1 : 0]
+    return [...chain.slice(0, nodeIndex), ...remaining, ...chain.slice(nodeIndex + 1)]
+  })
+  if (!replaced) return program
+  return withRung(program, rungId, (item) => ({ ...item, nodes: sanitizeChain(replaced) }))
+}
+
 export function updateContact(
   program: Program,
   rungId: string,

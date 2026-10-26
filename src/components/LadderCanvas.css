@@ -295,6 +295,12 @@
   white-space: nowrap;
 }
 
+.ll-selected-chip.is-branch-tip {
+  border-left-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+
 .ll-power-state {
   display: inline-flex;
   align-items: center;
@@ -610,12 +616,13 @@
 }
 
 .ll-slot {
-  cursor: crosshair;
+  cursor: pointer;
 }
 
 .ll-slot-plus {
   opacity: 0;
   pointer-events: none;
+  cursor: copy;
   transition: opacity var(--dur-press) var(--ease-out);
 }
 
@@ -635,11 +642,13 @@
 .ll-slot:hover .ll-slot-plus,
 .ll-slot.is-drop-target .ll-slot-plus {
   opacity: 1;
+  pointer-events: all;
 }
 
-/* 选中的程序段把插入位和拖拽手柄“显影”出来，触屏用户没有 hover 也能发现编辑入口。 */
+/* 选中的程序段把插入位和拖拽手柄“显影”出来；插入位保持可点，触屏也能使用。 */
 .ll-rung.is-selected .ll-slot-plus {
   opacity: 0.55;
+  pointer-events: all;
 }
 
 .ll-rung.is-selected .ll-node-grip {
@@ -656,6 +665,7 @@
 
 .ll-slot:focus-visible .ll-slot-plus {
   opacity: 1;
+  pointer-events: all;
 }
 
 .ll-slot:focus-visible .ll-slot-plus rect {
@@ -680,6 +690,59 @@
 
 .ll-slot.is-drop-target .ll-slot-plus path {
   stroke: var(--accent-ink);
+}
+
+/* 选中线路是“打开分支”的第一步：加粗整段线并给出端点，和博途的线路选择反馈一致。 */
+.ll-slot.is-wire-selected .ll-wire {
+  stroke: var(--accent);
+  stroke-width: 4;
+}
+
+.ll-wire-handles rect {
+  fill: var(--accent);
+  stroke: var(--surface);
+  stroke-width: 1.5;
+}
+
+/* 分支取点沿用工程蓝；绿色只表示仿真能流，避免运行时候选线路与带电线路混淆。 */
+.ll-slot.is-branch-candidate .ll-wire {
+  stroke: var(--accent);
+  stroke-width: 3;
+}
+
+.ll-slot.is-branch-candidate .ll-slot-wide-hit {
+  fill: var(--accent-wash);
+}
+
+.ll-branch-point {
+  fill: var(--surface);
+  stroke: var(--accent);
+  stroke-width: 2;
+  pointer-events: none;
+}
+
+.ll-slot.is-branch-open .ll-wire {
+  stroke: var(--accent);
+  stroke-width: 4;
+}
+
+.ll-branch-stub path {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2;
+  stroke-dasharray: 4 3;
+}
+
+.ll-branch-stub circle {
+  fill: var(--surface);
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+
+.ll-slot.is-branch-candidate .ll-slot-plus,
+.ll-slot.is-branch-open .ll-slot-plus {
+  opacity: 0;
+  pointer-events: none;
 }
 
 .ll-coil-mark {
@@ -833,11 +896,14 @@
   }
 
   .ll-rung-header {
+    position: relative;
     min-height: 42px;
     flex-wrap: wrap;
     gap: 5px;
     row-gap: 4px;
     padding-left: 6px;
+    /* 给右上角的程序段菜单留出固定位置，工具栏再用多少宽度都不会把它顶出屏幕。 */
+    padding-right: 50px;
   }
 
   .ll-rung-title {
@@ -855,6 +921,12 @@
     flex: 1 1 100%;
     gap: 4px;
     justify-content: flex-start;
+  }
+
+  .ll-rung-menu {
+    position: absolute;
+    top: 3px;
+    right: 4px;
   }
 
   .ll-power-state {
@@ -887,6 +959,15 @@
 @media (max-width: 560px) {
   .ll-rung-tools {
     gap: 3px;
+  }
+
+  .ll-rung-tools .ll-tool {
+    padding-inline: 7px;
+  }
+
+  /* 窄屏只留通断电圆点，省下的宽带给插入、分支、删除三个动作。 */
+  .ll-power-text {
+    display: none;
   }
 }
 

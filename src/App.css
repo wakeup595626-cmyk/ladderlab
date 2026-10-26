@@ -2748,6 +2748,34 @@
   line-height: 1.5;
 }
 
+.qe-branches {
+  display: grid;
+  gap: 4px;
+}
+
+.qe-branch-row {
+  display: flex;
+  min-height: 34px;
+  align-items: center;
+  gap: 10px;
+  padding: 0 4px 0 9px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--raised);
+  color: var(--text-soft);
+  font-size: 12px;
+}
+
+.qe-branch-row small {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.qe-branch-row .qe-quiet {
+  min-height: 28px;
+}
+
 .qe-foot {
   display: flex;
   align-items: center;

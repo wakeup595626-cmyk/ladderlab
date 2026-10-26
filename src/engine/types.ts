@@ -117,4 +117,6 @@ export interface Runtime {
 export interface Selection {
   rungId: string
   path: number[] | null
+  /** 选中线路时记录所属链路径与插入位；此时 path 仍为 null，表示没有选中元件。 */
+  wire?: { chain: number[]; index: number } | null
 }

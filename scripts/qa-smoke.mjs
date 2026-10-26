@@ -181,6 +181,36 @@ check('desktop/demo-runs', demoState.running, demoState)
 check('desktop/demo-opens-tags', demoState.tagPanel)
 check('desktop/no-page-overflow', !demoState.overflow)
 
+// 顶栏「更多」浮层不能被 40px 高的按钮组裁掉，也不能被右侧属性栏压住。
+await evaluate(`document.querySelector('.wb-more .icon-button')?.click()`)
+await sleep(300)
+const moreMenu = await evaluate(`(() => {
+  const menu = document.querySelector('.wb-more-menu')
+  if (!menu) return { open: false }
+  const rect = menu.getBoundingClientRect()
+  const items = [...menu.querySelectorAll('[role="menuitem"], [role="menuitemradio"]')]
+  const misses = items.filter((item) => {
+    const r = item.getBoundingClientRect()
+    const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)
+    return !(item === hit || item.contains(hit))
+  }).length
+  return {
+    open: true,
+    items: items.length,
+    misses,
+    fits: rect.left >= 0 && rect.right <= innerWidth + 1 && rect.top >= 0 && rect.bottom <= innerHeight + 1,
+    rect: { top: Math.round(rect.top), bottom: Math.round(rect.bottom), right: Math.round(rect.right) },
+  }
+})()`)
+check(
+  'desktop/more-menu-not-clipped',
+  moreMenu.open && moreMenu.items >= 6 && moreMenu.misses === 0 && moreMenu.fits,
+  moreMenu,
+)
+await screenshot('docs/qa/desktop-more-menu.png')
+await evaluate(`document.querySelector('.wb-more .icon-button')?.click()`)
+await sleep(200)
+
 // 点 StartBtn 切换仿真输入，电机应自锁。
 const started = await evaluate(`(() => {
   const card = [...document.querySelectorAll('.tag-card')]
@@ -225,6 +255,10 @@ const editor = await evaluate(`({
     const plus = document.querySelector('.ll-rung.is-selected .ll-slot-plus')
     return plus ? getComputedStyle(plus).opacity : null
   })(),
+  plusClickable: (() => {
+    const plus = document.querySelector('.ll-rung.is-selected .ll-slot-plus')
+    return plus ? getComputedStyle(plus).pointerEvents !== 'none' : false
+  })(),
   inspectorOpen: !!document.querySelector('.wb-context-panel'),
   inspectorTab: document.querySelector('.inspector-tabs button.active')?.textContent?.trim() ?? null,
   fits: (() => {
@@ -242,6 +276,7 @@ check('desktop/insert-affordance-visible', editor.slotVisible, {
   slotCount: editor.slotCount,
   plusOpacity: editor.plusOpacity,
 })
+check('desktop/insert-affordance-clickable', editor.plusClickable)
 check('desktop/editor-is-single-layer', !editor.inspectorOpen, {
   inspectorOpen: editor.inspectorOpen,
   editorMode: editor.open ? 'inline editor' : 'missing',
@@ -263,9 +298,38 @@ const kindApplied = await evaluate(`(() => {
 check('desktop/contact-kind-edits', kindSwitch && kindApplied === '常闭', kindApplied)
 await screenshot('docs/qa/desktop-quick-editor.png')
 
-// 插入位点击后元件数增加。
+// 反方向也必须是单层：就近参数框开着时点「变量表」，参数框要收起，
+// 不能让同一个触点同时出现在浮动框和右侧属性栏里。
+await evaluate(`[...document.querySelectorAll('.wb-doc-action')]
+  .find((button) => button.textContent?.includes('变量表'))?.click()`)
+await sleep(320)
+const inspectorSwitch = await evaluate(`({
+  editor: !!document.querySelector('.qe-panel'),
+  inspector: !!document.querySelector('.wb-context-panel'),
+})`)
+check(
+  'desktop/inspector-and-editor-exclusive',
+  !inspectorSwitch.editor && inspectorSwitch.inspector,
+  inspectorSwitch,
+)
+await evaluate(`document.querySelector('.wb-context-panel button[aria-label="关闭属性面板"]')?.click()`)
+await sleep(280)
+
+// 点线路只选线、不改程序；点悬浮加号才插入触点（博途式分工）。
 const beforeInsert = await evaluate(`document.querySelectorAll('.ll-node[data-node-id]').length`)
-await evaluate(`document.querySelector('.ll-slot')?.dispatchEvent(new MouseEvent('click', { bubbles: true }))`)
+await evaluate(`document.querySelector('.ll-rung.is-selected .ll-slot')?.dispatchEvent(new MouseEvent('click', { bubbles: true }))`)
+await sleep(250)
+const wireSelection = await evaluate(`({
+  nodes: document.querySelectorAll('.ll-node[data-node-id]').length,
+  wires: document.querySelectorAll('.ll-slot.is-wire-selected').length,
+  chip: document.querySelector('.ll-selected-chip')?.textContent?.trim() ?? null,
+})`)
+check(
+  'desktop/wire-selects-without-insert',
+  wireSelection.nodes === beforeInsert && wireSelection.wires === 1 && String(wireSelection.chip ?? '').includes('已选线路'),
+  wireSelection,
+)
+await evaluate(`document.querySelector('.ll-rung.is-selected .ll-slot-plus')?.dispatchEvent(new MouseEvent('click', { bubbles: true }))`)
 await sleep(400)
 const afterInsert = await evaluate(`document.querySelectorAll('.ll-node[data-node-id]').length`)
 const insertToast = await evaluate(`document.querySelector('.toast-message')?.textContent?.trim() ?? null`)
@@ -287,6 +351,44 @@ await evaluate(`document.querySelector('.wb-history-actions [aria-label="重做�
 await sleep(450)
 const afterRedo = await evaluate(`document.querySelectorAll('.ll-node[data-node-id]').length`)
 check('desktop/history-works', afterUndo === beforeInsert && afterRedo === afterInsert, { afterUndo, afterRedo })
+
+// 选线路后再用段头「插入触点」，触点必须落在这条线上，而不是跑到段尾。
+await evaluate(`(() => {
+  const rung = document.querySelectorAll('.ll-rung')[0]
+  const slot = rung?.querySelectorAll('.ll-slot')[1]
+  if (!slot) return false
+  slot.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+  return true
+})()`)
+await sleep(280)
+const wireForToolbar = await evaluate(`({
+  selectedWires: document.querySelectorAll('.ll-slot.is-wire-selected').length,
+  chip: document.querySelector('.ll-selected-chip')?.textContent?.trim() ?? null,
+})`)
+await evaluate(`document.querySelector('.ll-insert-trigger')?.click()`)
+await sleep(280)
+await evaluate(`[...document.querySelectorAll('.ll-insert-panel button')]
+  .find((button) => button.textContent?.includes('常开触点'))?.click()`)
+await sleep(420)
+const wireInserted = await evaluate(`(() => {
+  const rung = document.querySelectorAll('.ll-rung')[0]
+  const nodes = [...(rung?.querySelectorAll('.ll-node[data-node-id]') ?? [])]
+  return {
+    selectedIndex: nodes.findIndex((node) => node.classList.contains('is-selected')),
+    selectedCount: nodes.filter((node) => node.classList.contains('is-selected')).length,
+    count: nodes.length,
+  }
+})()`)
+check(
+  'desktop/toolbar-insert-uses-selected-wire',
+  wireForToolbar.selectedWires === 1
+    && String(wireForToolbar.chip ?? '').includes('已选线路')
+    && wireInserted.selectedIndex === 1
+    && wireInserted.selectedCount === 1,
+  { wireForToolbar, wireInserted },
+)
+await evaluate(`document.querySelector('.wb-history-actions [aria-label="撤销上一步"]')?.click()`)
+await sleep(420)
 
 /* 程序段工具栏：插入与删除是常显按钮，不再只靠画布角上的小加号。 */
 await pressEscape()
@@ -394,13 +496,63 @@ check('desktop/backspace-removes-contact', backspaceCount === beforeBarInsert - 
 
 // 删除并联支路最后一个触点会折叠整条并联结构；Toast 撤销必须恢复完整快照，
 // 不能只给出“已恢复”的假确认。
-await evaluate(`document.querySelector('.ll-contact')?.dispatchEvent(
+await evaluate(`document.querySelector('.ll-output')?.dispatchEvent(
   new MouseEvent('click', { bubbles: true }),
 )`)
 await sleep(360)
-await evaluate(`[...document.querySelectorAll('.qe-quiet')]
-  .find((button) => button.textContent?.includes('并联新支路'))?.click()`)
-await sleep(440)
+await pressEscape()
+await evaluate(`document.querySelector('.ll-tool-branch')?.click()`)
+await sleep(280)
+const branchOpenStage = await evaluate(`({
+  candidates: document.querySelectorAll('.ll-slot.is-branch-candidate').length,
+  plusInCandidates: document.querySelectorAll('.ll-slot.is-branch-candidate .ll-slot-plus').length,
+  nodes: document.querySelectorAll('.ll-node[data-node-id]').length,
+  chip: document.querySelector('.ll-selected-chip')?.textContent?.trim() ?? null,
+})`)
+check(
+  'desktop/branch-open-stage',
+  branchOpenStage.candidates >= 1 && String(branchOpenStage.chip ?? '').includes('起点'),
+  branchOpenStage,
+)
+check(
+  'desktop/branch-open-stage-no-misinsert-controls',
+  branchOpenStage.plusInCandidates === 0,
+  branchOpenStage.plusInCandidates,
+)
+await screenshot('docs/qa/branch-open-stage.png')
+await evaluate(`document.querySelectorAll('.ll-slot.is-branch-candidate')[0]
+  ?.dispatchEvent(new MouseEvent('click', { bubbles: true }))`)
+await sleep(260)
+const branchCloseStage = await evaluate(`({
+  candidates: document.querySelectorAll('.ll-slot.is-branch-candidate').length,
+  nodes: document.querySelectorAll('.ll-node[data-node-id]').length,
+  chip: document.querySelector('.ll-selected-chip')?.textContent?.trim() ?? null,
+})`)
+check(
+  'desktop/branch-close-stage',
+  branchCloseStage.candidates >= 1 &&
+    branchCloseStage.nodes === branchOpenStage.nodes &&
+    String(branchCloseStage.chip ?? '').includes('闭合'),
+  branchCloseStage,
+)
+await screenshot('docs/qa/branch-close-stage.png')
+await evaluate(`[...document.querySelectorAll('.ll-slot.is-branch-candidate')].at(-1)
+  ?.dispatchEvent(new MouseEvent('click', { bubbles: true }))`)
+await sleep(460)
+const branchOpened = await evaluate(`({
+  parallels: document.querySelectorAll('.ll-parallel').length,
+  selected: document.querySelectorAll('.ll-parallel .ll-contact.is-selected').length,
+  toast: document.querySelector('.toast-message')?.textContent?.trim() ?? null,
+})`)
+check(
+  'desktop/branch-opened',
+  branchOpened.parallels >= 1 && branchOpened.selected === 1,
+  branchOpened,
+)
+await evaluate(`document.querySelector('.ll-parallel.is-selected')
+  ?.dispatchEvent(new MouseEvent('click', { bubbles: true }))`)
+await sleep(420)
+await screenshot('docs/qa/branch-branches-panel.png')
 await pressEscape()
 const parallelBeforeDelete = await evaluate(`({
   nodes: document.querySelectorAll('.ll-node[data-node-id]').length,
@@ -528,6 +680,36 @@ const mobileFirst = await evaluate(`({
 check('mobile/no-page-overflow', !mobileFirst.overflow)
 check('mobile/tabbar-present', mobileFirst.tabbar)
 
+// 手机顶栏的「更多」浮层也必须完整落在视口内，且每个菜单项都点得到。
+await evaluate(`document.querySelector('.wb-more .icon-button')?.click()`)
+await sleep(300)
+const mobileMore = await evaluate(`(() => {
+  const menu = document.querySelector('.wb-more-menu')
+  if (!menu) return { open: false }
+  const rect = menu.getBoundingClientRect()
+  const items = [...menu.querySelectorAll('[role="menuitem"], [role="menuitemradio"]')]
+  const misses = items.filter((item) => {
+    const r = item.getBoundingClientRect()
+    const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)
+    return !(item === hit || item.contains(hit))
+  }).length
+  return {
+    open: true,
+    items: items.length,
+    misses,
+    fits: rect.left >= 0 && rect.right <= innerWidth + 1 && rect.top >= 0 && rect.bottom <= innerHeight + 1,
+    rect: { top: Math.round(rect.top), bottom: Math.round(rect.bottom), right: Math.round(rect.right) },
+  }
+})()`)
+check(
+  'mobile/more-menu-usable',
+  mobileMore.open && mobileMore.items >= 6 && mobileMore.misses === 0 && mobileMore.fits,
+  mobileMore,
+)
+await screenshot('docs/qa/mobile-more-menu.png')
+await evaluate(`document.querySelector('.wb-more .icon-button')?.click()`)
+await sleep(250)
+
 await loadDemoFromAnywhere()
 await sleep(800)
 await evaluate(`window.scrollTo({ top: 0, left: 0, behavior: 'instant' })`)
@@ -561,6 +743,38 @@ const mobileTools = await evaluate(`(() => {
 })()`)
 check('mobile/rung-toolbar-visible', mobileTools.present && mobileTools.insert && mobileTools.remove, mobileTools)
 check('mobile/rung-toolbar-in-viewport', mobileTools.inViewport)
+
+// 窄屏段头工具很多，程序段菜单必须固定在可见位置，不能被挤出屏幕。
+const mobileSegMenu = await evaluate(`(() => {
+  const summary = document.querySelector('.ll-rung-menu > summary')
+  if (!summary) return { present: false }
+  const rect = summary.getBoundingClientRect()
+  return {
+    present: true,
+    left: Math.round(rect.left),
+    right: Math.round(rect.right),
+    width: Math.round(rect.width),
+    inViewport: rect.left >= -1 && rect.right <= innerWidth + 1 && rect.width >= 40,
+  }
+})()`)
+check('mobile/segment-menu-in-viewport', mobileSegMenu.present && mobileSegMenu.inViewport, mobileSegMenu)
+await evaluate(`document.querySelector('.ll-rung-menu > summary')?.click()`)
+await sleep(320)
+const mobileSegOpen = await evaluate(`(() => {
+  const menu = document.querySelector('.ll-rung-menu')
+  const panel = document.querySelector('.ll-rung-menu-panel')
+  if (!menu?.open || !panel) return { open: false }
+  const rect = panel.getBoundingClientRect()
+  return {
+    open: true,
+    fits: rect.left >= 0 && rect.right <= innerWidth + 1 && rect.top >= 0 && rect.bottom <= innerHeight + 1,
+    items: panel.querySelectorAll('button').length,
+  }
+})()`)
+check('mobile/segment-menu-opens', mobileSegOpen.open && mobileSegOpen.fits && mobileSegOpen.items >= 3, mobileSegOpen)
+await screenshot('docs/qa/mobile-segment-menu.png')
+await pressEscape()
+await sleep(200)
 
 await evaluate(`document.querySelector('.ll-insert-trigger')?.click()`)
 await sleep(340)
@@ -608,12 +822,92 @@ await screenshot('docs/qa/mobile-quick-editor.png')
 await pressEscape()
 check('mobile/escape-closes-sheet', !(await evaluate(`!!document.querySelector('.qe-panel')`)))
 
+// 打开底部「变量」面板时，已选元件要滚到面板上方，不能被盖住。
+await evaluate(`document.querySelector('.ll-node[data-node-id]')
+  ?.dispatchEvent(new MouseEvent('click', { bubbles: true }))`)
+await sleep(420)
+await pressEscape()
+await sleep(300)
+await evaluate(`[...document.querySelectorAll('.wb-tabbar .mobile-tab-action')]
+  .find((button) => button.textContent?.trim() === '变量')?.click()`)
+await sleep(800)
+const mobilePanel = await evaluate(`(() => {
+  const panel = document.querySelector('.wb-context-panel')
+  const node = document.querySelector('.ll-node.is-selected, .ll-output.is-selected')
+  if (!panel || !node) return { panel: !!panel, node: !!node }
+  const panelRect = panel.getBoundingClientRect()
+  const nodeRect = node.getBoundingClientRect()
+  return {
+    panel: true,
+    node: true,
+    panelTop: Math.round(panelRect.top),
+    nodeTop: Math.round(nodeRect.top),
+    nodeBottom: Math.round(nodeRect.bottom),
+    visible: nodeRect.top >= 0 && nodeRect.bottom <= panelRect.top + 1,
+  }
+})()`)
+check('mobile/panel-keeps-selection-visible', mobilePanel.panel && mobilePanel.node && mobilePanel.visible, mobilePanel)
+await screenshot('docs/qa/mobile-variables-panel.png')
+await pressEscape()
+await sleep(260)
+
 // 手机端切到指令标签，应能打开指令抽屉。
 await evaluate(`[...document.querySelectorAll('.wb-tabbar button')].find((button) => button.textContent?.includes('指令'))?.click()`)
 await sleep(450)
 const drawer = await evaluate(`!!document.querySelector('.wb-instruction-drawer-backdrop')`)
 check('mobile/instructions-reachable', drawer)
 await screenshot('docs/qa/mobile-instructions.png')
+
+/* ------------------------------------------------------ 窄屏 360 复核 */
+
+await setViewport(360, 800, true)
+await reload(false)
+await sleep(700)
+const narrowHeader = await evaluate(`(() => {
+  const summary = document.querySelector('.ll-rung-menu > summary')
+  const tools = document.querySelector('.ll-rung-tools')
+  if (!summary || !tools) return { present: false }
+  const rect = summary.getBoundingClientRect()
+  const toolsRect = tools.getBoundingClientRect()
+  return {
+    present: true,
+    left: Math.round(rect.left),
+    right: Math.round(rect.right),
+    width: Math.round(rect.width),
+    toolsRight: Math.round(toolsRect.right),
+    fits: rect.left >= -1 && rect.right <= innerWidth + 1 && rect.width >= 40
+      && toolsRect.left >= -1 && toolsRect.right <= innerWidth + 1,
+  }
+})()`)
+check('mobile/360-header-fits', narrowHeader.present && narrowHeader.fits, narrowHeader)
+await screenshot('docs/qa/mobile-360.png')
+
+await evaluate(`document.querySelector('.ll-node[data-node-id]')
+  ?.dispatchEvent(new MouseEvent('click', { bubbles: true }))`)
+await sleep(420)
+await pressEscape()
+await sleep(300)
+await evaluate(`[...document.querySelectorAll('.wb-tabbar .mobile-tab-action')]
+  .find((button) => button.textContent?.trim() === '变量')?.click()`)
+await sleep(800)
+const narrowPanel = await evaluate(`(() => {
+  const panel = document.querySelector('.wb-context-panel')
+  const node = document.querySelector('.ll-node.is-selected, .ll-output.is-selected')
+  if (!panel || !node) return { panel: !!panel, node: !!node }
+  const panelRect = panel.getBoundingClientRect()
+  const nodeRect = node.getBoundingClientRect()
+  return {
+    panel: true,
+    node: true,
+    panelTop: Math.round(panelRect.top),
+    nodeTop: Math.round(nodeRect.top),
+    nodeBottom: Math.round(nodeRect.bottom),
+    visible: nodeRect.top >= 0 && nodeRect.bottom <= panelRect.top + 1,
+  }
+})()`)
+check('mobile/360-panel-keeps-selection-visible', narrowPanel.panel && narrowPanel.node && narrowPanel.visible, narrowPanel)
+await screenshot('docs/qa/mobile-360-panel.png')
+await pressEscape()
 
 socket.close()
 console.log(JSON.stringify({ checks, details, demoState, editor, mobileFirst, mobileDemo, errors }, null, 2))

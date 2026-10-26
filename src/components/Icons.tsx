@@ -244,6 +244,16 @@ export function ArrowRightIcon(props: IconProps) {
   )
 }
 
+/** 打开分支：主线路末尾向下分出一条支路。 */
+export function BranchIcon(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <path d="M3 6h18" />
+      <path d="M8 6v9a4 4 0 0 0 4 4h9" />
+    </IconBase>
+  )
+}
+
 export function GripIcon(props: IconProps) {
   return (
     <IconBase {...props}>
