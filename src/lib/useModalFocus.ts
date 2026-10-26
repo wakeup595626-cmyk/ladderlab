@@ -103,10 +103,12 @@ export function useModalFocus<T extends HTMLElement>(
       }
     }
 
-    window.addEventListener('keydown', onKeyDown)
+    // 捕获阶段接管 Esc：弹层里的输入框或第三方扩展常会截断冒泡，
+    // 用冒泡监听会出现“按 Esc 没反应”的假死感。
+    window.addEventListener('keydown', onKeyDown, true)
     return () => {
       window.clearTimeout(focusTimer)
-      window.removeEventListener('keydown', onKeyDown)
+      window.removeEventListener('keydown', onKeyDown, true)
       const wasTop = modalStack[modalStack.length - 1] === modalId
       const index = modalStack.indexOf(modalId)
       if (index >= 0) modalStack.splice(index, 1)

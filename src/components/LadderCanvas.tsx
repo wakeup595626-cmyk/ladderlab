@@ -5,6 +5,7 @@ import type {
   ReactNode,
 } from 'react'
 import type {
+  ContactKind,
   ContactNode,
   LadderNode,
   OutputElement,
@@ -16,8 +17,11 @@ import type {
 import type { DragPayload, DropTarget } from '../lib/dragTypes'
 import { FIELD_LIMITS } from '../lib/limits'
 import {
+  ChevronDownIcon,
   GripIcon,
   MoreIcon,
+  PlusIcon,
+  TrashIcon,
 } from './Icons'
 import './LadderCanvas.css'
 
@@ -42,6 +46,10 @@ export interface LadderCanvasProps {
   onRenameRung?: (rungId: string, label: string) => void
   /** 点击或键盘激活画布上的插入位时调用；不传则插入位只作为拖放落点。 */
   onInsertSlot?: (slot: { rungId: string; chain: number[]; index: number }) => void
+  /** 程序段工具栏的“插入触点”：插在已选元件之后，没有选中就接到段尾。 */
+  onInsertContact?: (rungId: string, kind: ContactKind) => void
+  /** 删除当前选中的元件；删除整个程序段仍走 onDeleteRung。 */
+  onDeleteNode?: (rungId: string, path: number[]) => void
 }
 
 interface Size {
@@ -173,6 +181,32 @@ const CONTACT_LABELS: Record<ContactNode['kind'], string> = {
   P: '上升沿触点',
   N: '下降沿触点',
   CMP: '比较触点',
+}
+
+/* 程序段工具栏的插入菜单：顺序与博途的位逻辑工具栏一致，
+   先常开/常闭，再沿检测，最后是比较。 */
+const CONTACT_CHOICES: { kind: ContactKind; label: string; symbol: string }[] = [
+  { kind: 'NO', label: '常开触点', symbol: '−| |−' },
+  { kind: 'NC', label: '常闭触点', symbol: '−|/|−' },
+  { kind: 'P', label: '上升沿触点', symbol: '−|P|−' },
+  { kind: 'N', label: '下降沿触点', symbol: '−|N|−' },
+  { kind: 'CMP', label: '比较触点', symbol: '−[≥]−' },
+]
+
+/** 按画布路径取节点：路径是 [链下标, 并联支路下标, 链下标, …]。 */
+function nodeAtPath(chain: LadderNode[], path: number[] | null): LadderNode | null {
+  if (!path || path.length === 0) return null
+  let current: LadderNode | null = null
+  let scope = chain
+  for (let index = 0; index < path.length; index += 2) {
+    current = scope[path[index]] ?? null
+    if (!current) return null
+    if (index + 1 < path.length) {
+      if (current.type !== 'parallel') return null
+      scope = current.branches[path[index + 1]] ?? []
+    }
+  }
+  return current
 }
 
 const OUTPUT_LABELS: Record<OutputElement['kind'], string> = {
@@ -1024,6 +1058,99 @@ interface RungSectionProps {
   onDeleteRung: (rungId: string) => void
   onMoveRung: (rungId: string, delta: -1 | 1) => void
   onRenameRung?: (rungId: string, label: string) => void
+  onInsertContact?: (rungId: string, kind: ContactKind) => void
+  onDeleteNode?: (rungId: string, path: number[]) => void
+}
+
+/** 程序段的“插入触点”下拉菜单，行为与右上角的程序段菜单保持一致。 */
+function RungInsertMenu({
+  rungId,
+  segmentLabel,
+  onInsert,
+}: {
+  rungId: string
+  segmentLabel: string
+  onInsert: (rungId: string, kind: ContactKind) => void
+}) {
+  const detailsRef = useRef<HTMLDetailsElement>(null)
+
+  function close(restoreFocus: boolean) {
+    const details = detailsRef.current
+    if (!details) return
+    details.removeAttribute('open')
+    if (restoreFocus) details.querySelector<HTMLElement>('summary')?.focus()
+  }
+
+  return (
+    <details
+      className="ll-insert"
+      data-no-rung-drag
+      ref={detailsRef}
+      onToggle={(event) => {
+        if (!event.currentTarget.open) return
+        window.requestAnimationFrame(() => {
+          detailsRef.current
+            ?.querySelector<HTMLButtonElement>('.ll-insert-panel button')
+            ?.focus()
+        })
+      }}
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+          event.currentTarget.removeAttribute('open')
+        }
+      }}
+      onKeyDown={(event) => {
+        if (event.key === 'Escape') {
+          event.preventDefault()
+          close(true)
+          return
+        }
+        if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return
+        const items = Array.from(
+          detailsRef.current?.querySelectorAll<HTMLButtonElement>('.ll-insert-panel button') ?? [],
+        )
+        if (items.length === 0) return
+        event.preventDefault()
+        if (!detailsRef.current?.open) {
+          detailsRef.current?.setAttribute('open', '')
+          window.requestAnimationFrame(() => items[0]?.focus())
+          return
+        }
+        const index = items.indexOf(document.activeElement as HTMLButtonElement)
+        let next = 0
+        if (event.key === 'ArrowDown') next = index < 0 ? 0 : (index + 1) % items.length
+        else if (event.key === 'ArrowUp') next = index < 0 ? items.length - 1 : (index - 1 + items.length) % items.length
+        else if (event.key === 'End') next = items.length - 1
+        items[next]?.focus()
+      }}
+    >
+      <summary
+        className="ll-tool ll-insert-trigger"
+        aria-label={segmentLabel + '：插入触点'}
+        title={'在' + segmentLabel + '插入触点'}
+      >
+        <PlusIcon size={15} />
+        <span className="ll-tool-label">插入触点</span>
+        <ChevronDownIcon size={13} />
+      </summary>
+      <div className="ll-insert-panel" role="menu" aria-label="插入触点">
+        {CONTACT_CHOICES.map((choice) => (
+          <button
+            key={choice.kind}
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              close(true)
+              onInsert(rungId, choice.kind)
+            }}
+          >
+            <span className="ll-insert-symbol" aria-hidden="true">{choice.symbol}</span>
+            <span>{choice.label}</span>
+          </button>
+        ))}
+      </div>
+    </details>
+  )
 }
 
 function RungSection({
@@ -1035,6 +1162,8 @@ function RungSection({
   onDeleteRung,
   onMoveRung,
   onRenameRung,
+  onInsertContact,
+  onDeleteNode,
 }: RungSectionProps) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const cancelRenameRef = useRef(false)
@@ -1059,6 +1188,15 @@ function RungSection({
   const isDropTarget = context.dragTarget?.type === 'rung'
     && context.dragTarget.index === index
     && draggedRungId !== rung.id
+  // 段内工具栏只在“这一段里有选中元件”时启用删除：用户先点元件，再按删除，
+  // 和博途里选中网络元素后按 Delete 的次序一致。
+  const localSelection = context.selection?.rungId === rung.id ? context.selection.path : null
+  const selectedNode = nodeAtPath(rung.nodes, localSelection)
+  const selectedLabel = selectedNode
+    ? selectedNode.type === 'contact'
+      ? CONTACT_LABELS[selectedNode.kind] + (selectedNode.tag ? ' · ' + selectedNode.tag : '')
+      : '并联分支 · ' + selectedNode.branches.length + ' 路'
+    : ''
 
   useLayoutEffect(() => {
     const element = scrollRef.current
@@ -1169,6 +1307,35 @@ function RungSection({
           />
         </div>
         <div className="ll-rung-header-right">
+          <div className="ll-rung-tools" role="toolbar" aria-label={segmentLabel + ' 编辑工具'}>
+            {onInsertContact && (
+              <RungInsertMenu
+                rungId={rung.id}
+                segmentLabel={segmentLabel}
+                onInsert={onInsertContact}
+              />
+            )}
+            <button
+              type="button"
+              className="ll-tool ll-tool-remove"
+              data-no-rung-drag
+              disabled={!selectedNode || !onDeleteNode}
+              title={selectedNode ? '删除选中的元件（Delete）' : '先在图纸上点选一个元件'}
+              aria-label={selectedNode ? '删除选中的' + selectedLabel : '删除元件（先选中一个元件）'}
+              onClick={() => {
+                if (!selectedNode || !localSelection) return
+                onDeleteNode?.(rung.id, localSelection)
+              }}
+            >
+              <TrashIcon size={15} />
+              <span className="ll-tool-label">删除元件</span>
+            </button>
+          </div>
+          {selectedNode && (
+            <span className="ll-selected-chip" title={'已选中：' + selectedLabel}>
+              {selectedLabel}
+            </span>
+          )}
           <span
             className={'ll-power-state' + (powered ? ' is-on' : '')}
             title={powered ? '回路通电' : '回路断开'}
@@ -1364,6 +1531,8 @@ export default function LadderCanvas({
   onStartDrag,
   onRenameRung,
   onInsertSlot,
+  onInsertContact,
+  onDeleteNode,
 }: LadderCanvasProps) {
   const [dragSource, setDragSource] = useState<string | null>(null)
 
@@ -1420,6 +1589,8 @@ export default function LadderCanvas({
               onDeleteRung={onDeleteRung}
               onMoveRung={onMoveRung}
               onRenameRung={onRenameRung}
+              onInsertContact={onInsertContact}
+              onDeleteNode={onDeleteNode}
             />
           ))}
         </div>

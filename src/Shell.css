@@ -3,31 +3,42 @@
    flat: rules define structure, the ladder diagram carries the visual weight. */
 
 .wb-shell {
-  --ground: #f3f5f0;
+  --ground: #f0f1ef;
   --surface: #ffffff;
-  --raised: #f7f8f4;
-  --active: #ecefe8;
-  --frame: #eef1eb;
-  --frame-ink: #222820;
-  --border: #dfe3d8;
-  --rule: #eaede4;
-  --control: #c7cdc1;
-  --text: #171b17;
-  --muted: #4f574c;
-  --faint: #626a5e;
-  --accent: #176a78;
-  --accent-ink: #0e4b55;
-  --accent-wash: #e7f1f1;
-  --positive: #1b7047;
-  --positive-wash: #e7f3eb;
-  --negative: #b42a2e;
-  --negative-wash: #fbeceb;
-  --warning: #855811;
-  --warning-wash: #fbf3e3;
+  --raised: #f6f7f5;
+  --active: #eaebe8;
+  --frame: #e9ebe8;
+  --frame-ink: #151816;
+  --border: #dcdfda;
+  --rule: #e8eae5;
+  --control: #c2c7c0;
+  --text: #151816;
+  --muted: #49504b;
+  --faint: #697069;
+  --accent: #0f6b7a;
+  --accent-ink: #0a4c58;
+  --accent-wash: #e3eef0;
+  --positive: #157347;
+  --positive-wash: #e8f3ec;
+  --negative: #b3261e;
+  --negative-wash: #f8e8e6;
+  --warning: #8a5a13;
+  --warning-wash: #f7f0e2;
+  --radius-control: 3px;
   --radius-card: 6px;
-  --radius-control: 5px;
-  --radius-sheet: 10px;
+  --radius-sheet: 8px;
+  --sheet-inset: 8px;
   --row-height: 42px;
+  --sidebar-width: 244px;
+  --gap: 24px;
+  --pad: 24px;
+  --control-height: 34px;
+  --fs-title: 20px;
+  --fs-section: 15px;
+  --fs-kpi: 28px;
+  --fs-body: 13px;
+  --fs-small: 11.5px;
+  --shadow-overlay: 0 16px 36px rgba(21, 24, 22, 0.15);
   display: flex;
   width: 100%;
   height: 100vh;
@@ -1985,6 +1996,931 @@ body[data-drag-kind] {
   }
 }
 
+/* ================================================== visual polish pass ===
+   Instrument-panel material: one cool frame, white working paper, segmented
+   controls and rules instead of stacked cards. */
+
+.wb-shell .wb-topbar {
+  gap: 12px;
+  padding-inline: 18px;
+  border-bottom-color: var(--control);
+  background: var(--frame);
+}
+
+.wb-shell .wb-brand {
+  gap: 7px;
+  padding-right: 12px;
+  border-right: 1px solid var(--control);
+}
+
+.wb-shell .brand-mark {
+  width: 28px;
+  height: 28px;
+  flex-basis: 28px;
+  border: 1px solid var(--control);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+}
+
+.wb-brand-name strong {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+
+.wb-project-name {
+  max-width: 360px;
+  min-width: 96px;
+}
+
+.wb-project-name input {
+  height: 34px;
+  padding-inline: 7px;
+  border-color: transparent;
+  border-radius: var(--radius-control);
+  background: transparent;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.wb-project-name input:hover {
+  border-color: var(--rule);
+  background: var(--raised);
+}
+
+.wb-project-name input:focus {
+  border-color: var(--accent);
+  background: var(--surface);
+  outline: 2px solid var(--accent-wash);
+}
+
+.wb-history-actions {
+  height: 34px;
+  gap: 0;
+  padding-right: 12px;
+  border-right-color: var(--control);
+}
+
+.wb-history-actions .wb-history-button {
+  width: 34px;
+  height: 34px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--muted);
+}
+
+.wb-history-actions .wb-history-button + .wb-history-button {
+  border-left: 1px solid var(--rule);
+}
+
+.wb-history-actions .wb-history-button:hover:not(:disabled) {
+  background: var(--active);
+  color: var(--text);
+}
+
+/* The compact icon measurement above is the mobile default. On wide screens
+   restore the labeled pair after that rule so the text is never clipped. */
+@media (min-width: 1181px) {
+  .wb-history-actions .wb-history-button {
+    width: auto;
+    padding-inline: 9px;
+  }
+}
+
+.wb-topbar-actions {
+  height: 34px;
+  gap: 0;
+  overflow: hidden;
+  border: 1px solid var(--control);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+}
+
+.wb-project-button {
+  height: 100%;
+  padding-inline: 10px;
+  border: 0;
+  border-right: 1px solid var(--border);
+  border-radius: 0;
+  background: var(--surface);
+  font-size: 12.5px;
+}
+
+.wb-project-button:hover {
+  border-color: var(--border);
+  background: var(--active);
+}
+
+.wb-shell .wb-run-toggle {
+  min-width: 82px;
+  height: 100%;
+  padding-inline: 13px;
+  border: 0;
+  border-radius: 0;
+  font-size: 12.5px;
+}
+
+.wb-shell .wb-run-toggle:disabled {
+  border: 0;
+  background: var(--active);
+}
+
+.wb-shell .wb-more .icon-button {
+  width: 34px;
+  height: 100%;
+  border: 0;
+  border-left: 1px solid var(--accent-ink);
+  border-radius: 0;
+  background: var(--surface);
+}
+
+.wb-shell .wb-more .icon-button:hover:not(:disabled) {
+  border-color: var(--accent-ink);
+  background: var(--active);
+  color: var(--text);
+}
+
+.wb-more-menu.topbar-menu {
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-overlay);
+}
+
+.wb-speed-row button {
+  border-radius: var(--radius-control);
+}
+
+.wb-documentbar {
+  gap: 16px;
+  padding-inline: 18px;
+  border-bottom-color: var(--control);
+}
+
+.wb-doc-tab {
+  align-self: stretch;
+  height: 100%;
+  padding: 0 2px;
+  border: 0;
+  border-bottom: 2px solid var(--accent);
+  border-radius: 0;
+  background: transparent;
+  color: var(--accent-ink);
+}
+
+.wb-doc-tab h1 {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.wb-doc-action {
+  height: 34px;
+  border-radius: var(--radius-control);
+  font-size: 12px;
+}
+
+.wb-doc-action:hover {
+  border-color: transparent;
+  background: var(--active);
+}
+
+.wb-doc-action.is-active,
+.wb-doc-action.is-active:hover {
+  border-color: var(--control);
+  background: var(--accent-wash);
+}
+
+.wb-instruction-strip {
+  min-height: 54px;
+  gap: 14px;
+  padding: 8px 18px;
+  border-bottom-color: var(--control);
+}
+
+.wb-instruction-intro {
+  min-width: 66px;
+}
+
+.wb-instruction-intro h2 {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+
+.wb-instruction-tools {
+  height: 38px;
+  gap: 0;
+  overflow: hidden;
+  border: 1px solid var(--control);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+}
+
+.wb-instruction-list {
+  height: 100%;
+  align-items: stretch;
+  gap: 0;
+  border-right: 1px solid var(--control);
+}
+
+.wb-instruction-button {
+  height: 100%;
+  gap: 7px;
+  padding: 0 10px;
+  border: 0;
+  border-right: 1px solid var(--rule);
+  border-radius: 0;
+  background: transparent;
+  font-size: 12.5px;
+  font-weight: 500;
+}
+
+.wb-instruction-button:hover:not(:disabled) {
+  border-color: var(--rule);
+  background: var(--active);
+  color: var(--accent-ink);
+}
+
+.wb-instruction-button:disabled {
+  background: transparent;
+  opacity: 0.38;
+}
+
+.wb-instruction-symbol {
+  min-width: 40px;
+  height: 24px;
+  padding-inline: 4px;
+  border: 0;
+  border-radius: 2px;
+  background: var(--raised);
+  font-size: 10.5px;
+  font-weight: 500;
+}
+
+.wb-drag-mark {
+  color: var(--control);
+  opacity: 1;
+}
+
+.wb-instruction-button.is-all {
+  border: 0;
+  background: var(--raised);
+  font-weight: 600;
+}
+
+.wb-instruction-button.is-all:hover {
+  background: var(--active);
+}
+
+.wb-instruction-list .wb-instruction-button:last-child {
+  border-right: 0;
+}
+
+.wb-all-mark {
+  width: 22px;
+  height: 22px;
+  border-color: var(--control);
+  border-radius: 2px;
+  background: var(--surface);
+  font-size: 15px;
+}
+
+.wb-coach {
+  min-height: 42px;
+  gap: 16px;
+  padding: 6px 18px;
+  border-bottom: 1px solid var(--border);
+  background: var(--raised);
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+.wb-coach-path {
+  gap: 20px;
+}
+
+.wb-coach-path b {
+  width: 18px;
+  height: 18px;
+  border: 1px solid var(--control);
+  border-radius: 2px;
+  background: var(--surface);
+  color: var(--accent-ink);
+  font-size: 10.5px;
+}
+
+.wb-coach-demo,
+.wb-coach-dismiss {
+  height: 30px;
+  border-radius: var(--radius-control);
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.wb-coach-demo {
+  border-color: var(--control);
+  background: var(--surface);
+  color: var(--text);
+}
+
+.wb-coach-demo:hover,
+.wb-coach-dismiss:hover {
+  border-color: var(--accent);
+  background: var(--surface);
+  color: var(--accent-ink);
+}
+
+.wb-coach-compact {
+  color: var(--muted);
+}
+
+.wb-coach-compact i {
+  color: var(--faint);
+}
+
+.wb-program-pane {
+  padding: 18px 18px 30px;
+}
+
+.wb-statusbar.status-bar {
+  height: 30px;
+  flex-basis: 30px;
+  gap: 14px;
+  padding-inline: 18px;
+  border-top-color: var(--border);
+  background: var(--frame);
+  font-size: 11.5px;
+}
+
+.wb-statusbar .save-state {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  color: #5c635c;
+}
+
+/* The docked property sheet is one continuous surface. Rows are divided by
+   rules; only editable controls get a border. */
+.wb-context-panel {
+  border-left: 1px solid var(--border);
+  background: var(--surface);
+  box-shadow: none;
+}
+
+.wb-context-panel .inspector-mobile-head {
+  min-height: 50px;
+  padding-inline: 14px;
+  border-bottom: 1px solid var(--control);
+  background: var(--surface);
+}
+
+.wb-context-panel .inspector-mobile-head strong {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.inspector-context {
+  gap: 2px;
+  padding: 9px 14px 10px;
+  border-bottom: 1px solid var(--rule);
+  background: var(--surface);
+}
+
+.context-label,
+.field > span,
+.tag-card-fields label > span,
+.qe-field > span,
+.tag-monitor-editor label,
+.panel-label {
+  color: var(--faint);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.inspector-context strong {
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.inspector-tabs button {
+  height: 40px;
+  font-size: 11.5px;
+  font-weight: 500;
+}
+
+.inspector-tabs button span {
+  min-width: 0;
+  height: auto;
+  padding: 0 1px;
+  border-radius: 0;
+  background: transparent;
+  color: var(--faint);
+  font-size: 10.5px;
+}
+
+.inspector-tabs button.active span {
+  color: var(--accent-ink);
+}
+
+.inspector-tabs .badge-error {
+  background: transparent;
+  color: var(--negative);
+}
+
+.inspector-body {
+  padding: 12px 14px 18px;
+}
+
+.property-form,
+.tags-panel,
+.diagnostics-panel {
+  gap: 11px;
+}
+
+.property-heading h3,
+.tags-toolbar h3,
+.panel-heading h3 {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.property-type {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.property-heading p,
+.panel-note,
+.form-note,
+.tags-help span,
+.empty-diagnostics p,
+.empty-inspector p {
+  font-size: 11.5px;
+}
+
+.field input,
+.field select,
+.field textarea,
+.table-input,
+.qe-input,
+.live-value {
+  min-height: 30px;
+  border-color: var(--control);
+  border-radius: var(--radius-control);
+  font-size: 12px;
+}
+
+.field input,
+.field select,
+.qe-input {
+  padding-inline: 8px;
+}
+
+.secondary-button,
+.qe-quiet,
+.qe-danger,
+.tag-monitor-edit,
+.tag-monitor-delete {
+  min-height: 30px;
+  border-radius: var(--radius-control);
+  font-size: 11.5px;
+  font-weight: 500;
+}
+
+.secondary-button {
+  border-color: var(--control);
+  background: transparent;
+}
+
+.secondary-button:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: var(--active);
+}
+
+.tag-card {
+  padding: 9px 0 10px;
+}
+
+.tag-card + .tag-card {
+  border-top-color: var(--rule);
+}
+
+.tag-card-head {
+  grid-template-columns: minmax(0, 1fr) auto 26px;
+  gap: 5px;
+  margin-bottom: 6px;
+}
+
+.table-input {
+  height: 30px;
+  padding-inline: 7px;
+}
+
+.tag-name-input {
+  font-family: var(--sans);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.comment-input {
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+.comment-input:hover {
+  border-color: var(--rule);
+  background: var(--raised);
+}
+
+.type-pill {
+  padding: 0 4px;
+  border-color: var(--rule);
+  border-radius: 2px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 10.5px;
+  line-height: 18px;
+}
+
+.delete-mini {
+  width: 26px;
+  height: 26px;
+  border-radius: var(--radius-control);
+  color: var(--faint);
+}
+
+.delete-mini:hover:not(:disabled) {
+  background: var(--negative-wash);
+  color: var(--negative);
+}
+
+.tag-card-fields {
+  gap: 6px;
+}
+
+.tag-card-fields label {
+  gap: 3px;
+}
+
+.live-value {
+  height: 30px;
+  padding-inline: 7px;
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+.live-value.on {
+  background: var(--positive);
+  border-color: var(--positive);
+}
+
+.tags-help {
+  gap: 3px;
+  padding: 8px 0 0;
+  border: 0;
+  border-top: 1px solid var(--rule);
+  border-radius: 0;
+  background: transparent;
+}
+
+.tags-help strong {
+  font-size: 11.5px;
+}
+
+.instance-section h3 {
+  font-size: 11.5px;
+  letter-spacing: 0.02em;
+}
+
+.instance-list {
+  gap: 0;
+}
+
+.instance-card {
+  padding: 7px 0;
+  border: 0;
+  border-top: 1px solid var(--rule);
+  border-radius: 0;
+  background: transparent;
+}
+
+.diagnostic {
+  padding: 8px 0;
+  border: 0;
+  border-top: 1px solid var(--rule);
+  border-radius: 0;
+  background: transparent;
+}
+
+.diagnostic:hover:not(:disabled) {
+  background: var(--raised);
+}
+
+.diagnostic-help {
+  padding: 8px 10px;
+  border: 0;
+  border-left: 2px solid var(--control);
+  border-radius: 0;
+  background: transparent;
+}
+
+.compile-state {
+  border-radius: 2px;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.tag-monitor-card {
+  border: 0;
+  border-top: 1px solid var(--rule);
+  border-radius: 0;
+  background: transparent;
+}
+
+.tag-monitor-card.is-expanded {
+  border-color: var(--control);
+}
+
+.tag-monitor-id strong,
+.tag-monitor-id span,
+.tag-monitor-card .live-value {
+  font-variant-numeric: tabular-nums;
+}
+
+.tag-monitor-edit {
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
+}
+
+.tag-monitor-edit:hover {
+  border-color: var(--rule);
+  background: var(--active);
+  color: var(--accent-ink);
+}
+
+.tag-monitor-editor {
+  border-top-color: var(--rule);
+}
+
+.qe-panel {
+  border-color: var(--control);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-overlay);
+}
+
+.qe-head {
+  border-bottom-color: var(--control);
+  background: var(--raised);
+}
+
+.qe-head h2 {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.qe-close {
+  border-radius: var(--radius-control);
+}
+
+.qe-input {
+  height: 30px;
+  border-radius: var(--radius-control);
+}
+
+.qe-segments {
+  border-radius: var(--radius-control);
+}
+
+.qe-segments button,
+.qe-chips button {
+  border-radius: 2px;
+}
+
+.qe-quiet,
+.qe-danger {
+  border-radius: var(--radius-control);
+}
+
+.qe-note {
+  border: 0;
+  border-left: 2px solid var(--control);
+  border-radius: 0;
+  background: transparent;
+}
+
+.toast {
+  border-radius: var(--radius-control);
+}
+
+.toast-action {
+  border-radius: 2px;
+}
+
+.toast-close {
+  border-radius: 2px;
+}
+
+.tree-count {
+  border-radius: 2px;
+}
+
+.wb-project-drawer,
+.wb-instruction-drawer-backdrop .project-sidebar,
+.wb-about {
+  border-radius: var(--radius-sheet);
+  box-shadow: var(--shadow-overlay);
+}
+
+.wb-project-actions button,
+.wb-help-links button,
+.wb-tree-item,
+.wb-device-mark {
+  border-radius: var(--radius-control);
+}
+
+@media (max-width: 1180px) {
+  .wb-context-panel {
+    border-top-color: var(--control);
+    border-radius: var(--radius-sheet) var(--radius-sheet) 0 0;
+    box-shadow: var(--shadow-overlay);
+  }
+}
+
+@media (max-width: 720px) {
+  .wb-shell .wb-topbar {
+    gap: 6px;
+    padding-inline: 12px;
+  }
+
+  .wb-project-name {
+    min-width: 80px;
+    flex: 1 1 auto;
+  }
+
+  .wb-project-name input {
+    height: 40px;
+    padding-inline: 6px;
+    font-size: 12.5px;
+  }
+
+  .wb-history-actions {
+    height: 40px;
+    padding-right: 5px;
+  }
+
+  .wb-history-actions .wb-history-button {
+    width: auto;
+    height: 40px;
+    padding-inline: 6px;
+  }
+
+  .wb-topbar-actions {
+    height: 40px;
+  }
+
+  .wb-project-button,
+  .wb-shell .wb-more .icon-button {
+    width: 40px;
+    height: 40px;
+  }
+
+  .wb-project-button {
+    padding: 0;
+  }
+
+  .wb-shell .wb-run-toggle {
+    min-width: 66px;
+    height: 40px;
+    padding-inline: 9px;
+  }
+
+  .wb-documentbar {
+    height: 50px;
+    flex-basis: 50px;
+    padding-inline: 12px;
+  }
+
+  .wb-doc-tab {
+    max-width: 52vw;
+  }
+
+  .wb-doc-tab h1 {
+    font-size: 14.5px;
+  }
+
+  .wb-coach {
+    gap: 4px;
+    padding: 6px 8px 6px 12px;
+  }
+
+  .wb-coach-compact {
+    color: var(--muted);
+    font-size: 11px;
+  }
+
+  .wb-coach-demo {
+    height: 40px;
+    padding-inline: 9px;
+    font-size: 11.5px;
+  }
+
+  .wb-coach-dismiss {
+    width: 40px;
+    min-width: 40px;
+    height: 40px;
+    min-height: 40px;
+  }
+
+  .wb-program-pane {
+    padding: 14px 12px 24px;
+  }
+
+  .wb-statusbar.status-bar {
+    gap: 8px;
+    padding-inline: 12px;
+    font-size: 11px;
+  }
+
+  .inspector-tabs button,
+  .field input,
+  .field select,
+  .field textarea,
+  .table-input,
+  .live-value,
+  .qe-input,
+  .qe-segments button,
+  .qe-chips button,
+  .secondary-button,
+  .tag-monitor-edit,
+  .tag-monitor-delete {
+    min-height: 40px;
+  }
+
+  .tag-card-head {
+    grid-template-columns: minmax(0, 1fr) auto 40px;
+  }
+
+  .delete-mini {
+    width: 40px;
+    height: 40px;
+  }
+
+  .tag-card-fields {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .tag-card-fields label:last-child {
+    grid-column: 1 / -1;
+  }
+
+  .wb-tabbar .mobile-tab-action {
+    min-height: 56px;
+  }
+
+  .wb-project-drawer,
+  .wb-instruction-drawer-backdrop .project-sidebar,
+  .qe-panel {
+    border-radius: var(--radius-sheet) var(--radius-sheet) 0 0;
+  }
+}
+
+@media (max-width: 400px) {
+  .wb-history-actions {
+    padding-right: 4px;
+  }
+
+  .wb-history-actions .wb-history-button {
+    width: 40px;
+    padding: 0;
+    justify-content: center;
+  }
+
+  .wb-history-label {
+    display: none;
+  }
+
+  .wb-shell .wb-run-toggle {
+    width: 40px;
+    min-width: 40px;
+    padding: 0;
+  }
+
+  .wb-doc-tab {
+    max-width: 58vw;
+  }
+
+  .wb-coach-demo {
+    padding-inline: 8px;
+    font-size: 11px;
+  }
+}
+
 @media (prefers-reduced-motion: no-preference) {
   @keyframes ll-pop-in {
     from {
@@ -2063,5 +2999,291 @@ body[data-drag-kind] {
     .wb-context-panel[role="dialog"] {
       transform: translateX(100%);
     }
+  }
+}
+
+/* ================================================== craft pass =========
+   Final material pass. The ladder is the drawing; chrome behaves like an
+   engineering document: crisp rules, tabular numerals, paper notifications,
+   and restrained elevation only for things that truly float. */
+
+.wb-shell {
+  --border: #d2d7d0;
+  --rule: #e1e5de;
+  --control: #aeb6ae;
+  --input-rule: #98a098;
+  --shadow-overlay: 0 4px 12px rgba(21, 24, 22, 0.12);
+}
+
+/* The sheet should read as white drafting paper, not a tiled dashboard. */
+.wb-program-pane {
+  background-image: none;
+}
+
+.wb-shell .ll-program-sheet {
+  border-radius: 2px;
+}
+
+/* Addressing is reference data: a step up from micro-copy, still subordinate
+   to the symbolic names that engineers scan first. */
+.wb-shell .ll-node-address,
+.wb-shell .ll-output-address {
+  font-size: 12px;
+  letter-spacing: 0;
+}
+
+/* -------------------------------------------------- editing typography */
+
+.context-label,
+.field > span,
+.tag-card-fields label > span,
+.qe-field > span,
+.tag-monitor-editor label > span,
+.panel-label {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0;
+}
+
+.field input,
+.field select,
+.field textarea,
+.table-input,
+.qe-input,
+.live-value,
+.qe-segments button,
+.qe-quiet,
+.qe-danger,
+.secondary-button {
+  font-size: 12.5px;
+}
+
+.inspector-tabs button {
+  font-size: 12.5px;
+}
+
+.inspector-tabs button span {
+  font-size: 11.5px;
+}
+
+.wb-statusbar.status-bar {
+  font-size: 12.5px;
+}
+
+/* Inputs need enough edge contrast to be recognizable as editable fields. */
+.wb-shell .field input,
+.wb-shell .field select,
+.wb-shell .field textarea,
+.wb-shell .table-input,
+.wb-shell .qe-input,
+.wb-shell .live-value {
+  border-color: var(--input-rule);
+}
+
+/* One focus language everywhere: a precise teal rule, never a fuzzy halo. */
+.wb-shell :where(button, summary, a, [tabindex]):focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.wb-shell :where(input, select, textarea):focus-visible {
+  border-color: var(--accent);
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+  box-shadow: none;
+}
+
+.wb-shell .field input:focus,
+.wb-shell .field select:focus,
+.wb-shell .field textarea:focus,
+.wb-shell .table-input:focus,
+.wb-shell .qe-input:focus {
+  border-color: var(--accent);
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+  box-shadow: none;
+}
+
+.wb-shell .ll-rung-name:focus {
+  border-color: var(--accent);
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+  box-shadow: none;
+}
+
+/* The insert menu and row menu float; give them just enough separation to
+   escape the paper without the generic "AI card" shadow. */
+.wb-shell .ll-insert-panel,
+.wb-shell .ll-rung-menu-panel {
+  border-radius: 2px;
+  box-shadow: 0 4px 12px rgba(21, 24, 22, 0.12);
+}
+
+/* A dragged instruction shows its grip only while it is being considered. */
+.wb-shell .wb-drag-mark {
+  opacity: 0;
+  transition: opacity var(--dur-press) linear;
+}
+
+.wb-shell .wb-instruction-button:hover .wb-drag-mark,
+.wb-shell .wb-instruction-button:focus-visible .wb-drag-mark,
+.wb-shell .wb-instruction-button:focus-within .wb-drag-mark {
+  opacity: 0.65;
+}
+
+.wb-shell .wb-doc-action.is-active,
+.wb-shell .wb-doc-action.is-active:hover {
+  border-color: transparent;
+  background: var(--surface);
+  box-shadow: inset 0 -2px 0 var(--accent);
+  color: var(--accent-ink);
+}
+
+/* ------------------------------------------------ paper notification */
+
+.wb-shell .toast {
+  padding: 8px 12px;
+  border: 1px solid var(--control);
+  border-left: 3px solid var(--accent);
+  border-radius: 2px;
+  background: var(--surface);
+  box-shadow: 0 4px 12px rgba(21, 24, 22, 0.12);
+  color: var(--text);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.wb-shell .toast.is-error {
+  border-color: var(--control);
+  border-left-color: var(--negative);
+  background: var(--surface);
+  color: var(--text);
+}
+
+.wb-shell .toast-action {
+  padding: 2px 7px;
+  border-color: var(--input-rule);
+  border-radius: 2px;
+  color: var(--accent-ink);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.wb-shell .toast-action:hover {
+  border-color: var(--accent);
+  background: var(--accent-wash);
+}
+
+.wb-shell .toast-close {
+  border-radius: 2px;
+  color: var(--muted);
+}
+
+.wb-shell .toast-close:hover {
+  background: var(--active);
+  color: var(--text);
+}
+
+/* ---------------------------------------------- boolean monitor toggle */
+
+/* TRUE/FALSE is an instrument reading, not a solid-colored button. The LED
+   dot carries state while the text stays high-contrast and legible. */
+.wb-shell .live-value {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.wb-shell .live-value::before {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 7px;
+  border: 1px solid var(--control);
+  border-radius: 50%;
+  background: transparent;
+  content: "";
+}
+
+.wb-shell .live-value.on {
+  border-color: var(--positive);
+  background: var(--surface);
+  color: var(--positive);
+}
+
+.wb-shell .live-value.on::before {
+  border-color: var(--positive);
+  background: var(--positive);
+}
+
+.wb-shell .live-value.on:hover {
+  border-color: var(--positive);
+  background: var(--positive-wash);
+}
+
+/* ---------------------------------------------------- add-rung action */
+
+/* An insertion rule is the quietest possible affordance and reads exactly
+   where the next rung will land. */
+.wb-shell .ll-add-rung {
+  min-height: 36px;
+  justify-content: flex-start;
+  gap: 9px;
+  padding: 5px 4px;
+  border: 0;
+  border-top: 1px dashed var(--control);
+  border-radius: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+.wb-shell .ll-add-rung span {
+  width: 18px;
+  height: 18px;
+  border-radius: 2px;
+  background: transparent;
+  color: var(--accent);
+  font-size: 16px;
+  font-weight: 500;
+}
+
+.wb-shell .ll-add-rung:hover,
+.wb-shell .ll-add-rung:focus-visible {
+  border-top-color: var(--accent);
+  background: transparent;
+  color: var(--accent-ink);
+}
+
+@media (pointer: coarse) {
+  .wb-shell .ll-add-rung {
+    min-height: 48px;
+  }
+}
+
+@media (max-width: 720px) {
+  .wb-coach-compact {
+    font-size: 12.5px;
+    line-height: 1.4;
+  }
+
+  .wb-coach-demo {
+    display: none;
+  }
+
+  .wb-statusbar.status-bar {
+    font-size: 12px;
+  }
+
+  /* A notification must never sit on top of the fields in a bottom sheet. */
+  .app-shell[data-sheet='open'] .toast {
+    top: calc(8px + env(safe-area-inset-top, 0px));
+    bottom: auto;
+    z-index: 140;
   }
 }

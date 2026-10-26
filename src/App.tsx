@@ -23,6 +23,7 @@ import { blankProgram, buildSample } from './engine/samples'
 import { createRuntime, step, writeRuntimeValue } from './engine/simulate'
 import type {
   ContactKind,
+  LadderNode,
   OutputKind,
   Program,
   Rung,
@@ -366,6 +367,34 @@ export default function App() {
     })
   }, [])
 
+  // 撤销“删除元件”时优先回到删除前的快照。并联支路只剩最后一个触点时，
+  // sanitizeChain 会折叠整条并联结构，原路径已不存在，单靠 insertNodeAt 会
+  // 静默失败。没有后续编辑时用完整快照恢复，有后续编辑时再尝试按原位置插回。
+  const restoreNodeAt = useCallback((
+    rungId: string,
+    chain: number[],
+    index: number,
+    node: LadderNode,
+    beforeDelete: Program,
+    afterDelete: Program,
+  ): boolean => {
+    const current = latestProgramRef.current
+    const existing = findNodePath(current, rungId, node.id)
+    if (existing) {
+      setSelection({ rungId, path: existing })
+      return true
+    }
+
+    const next = current === afterDelete
+      ? beforeDelete
+      : insertNodeAt(current, rungId, { chain, index }, node)
+    if (next === current || !findNodePath(next, rungId, node.id)) return false
+
+    commit(next)
+    setSelection({ rungId, path: findNodePath(next, rungId, node.id) })
+    return true
+  }, [commit])
+
   const undo = useCallback(() => {
     setHistory((previous) => {
       const previousProgram = previous.past.at(-1)
@@ -619,6 +648,8 @@ export default function App() {
   const openInspector = (tab: InspectorTab) => {
     setInspectorTab(tab)
     if (window.matchMedia('(max-width: 1024px)').matches) {
+      // 手机上属性抽屉和元件参数框都是整屏弹层，同时开会叠成一团。
+      setQuickEdit(null)
       setMobilePanel('properties')
     } else {
       setInspectorOpen(true)
@@ -649,6 +680,72 @@ export default function App() {
     setMobilePanel('none')
     notify('触点已插入')
   }, [activeRungId, commit, notify, program, selection])
+
+  // 段头工具栏没有拖放落点时，按博途的习惯接到已选元件后面；
+  // 没有选中元件就接到这一段的末尾，始终留在用户当前正在编辑的程序段里。
+  const insertContactInRung = useCallback((rungId: string, kind: ContactKind) => {
+    const rung = program.rungs.find((item) => item.id === rungId)
+    if (!rung) return
+    const path = selection?.rungId === rungId ? selection.path : null
+    const chain = path ? path.slice(0, -1) : []
+    const index = path ? path[path.length - 1] + 1 : rung.nodes.length
+    const made = makeContactNode(program, kind)
+    const next = insertNodeAt(made.program, rungId, { chain, index }, made.node)
+    if (next === made.program) {
+      notify('这个位置放不下新的触点')
+      return
+    }
+    commit(next)
+    setSelection({ rungId, path: findNodePath(next, rungId, made.node.id) })
+    setQuickEdit(null)
+    setMobilePanel('none')
+    notify(`${instructionLabel('contact', kind)}已插入`)
+  }, [commit, notify, program, selection])
+
+  const removeNode = useCallback((rungId: string, path: number[]) => {
+    const rung = program.rungs.find((item) => item.id === rungId)
+    const node = getNodeAtPath(program, rungId, path)
+    if (!rung || !node) return
+    const next = deleteNode(program, rungId, path)
+    if (next === program) return
+    const chain = path.slice(0, -1)
+    const index = path[path.length - 1]
+    commit(next)
+    setSelection({ rungId, path: null })
+    setQuickEdit(null)
+    const label = node.type === 'contact'
+      ? instructionLabel('contact', node.kind)
+      : '并联分支'
+    notify(label + '已删除', {
+      action: {
+        label: '撤销',
+        run: () => {
+          if (restoreNodeAt(rungId, chain, index, node, program, next)) {
+            notify(label + '已恢复')
+          } else {
+            notify('元件位置已改变，请用顶部的“撤销上一步”恢复', { tone: 'error' })
+          }
+        },
+      },
+    })
+  }, [commit, notify, program, restoreNodeAt])
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Delete' && event.key !== 'Backspace') return
+      if (event.ctrlKey || event.metaKey || event.altKey) return
+      const target = event.target
+      if (target instanceof Element && target.closest(
+        'input, textarea, select, [contenteditable="true"], .ll-insert-panel, .ll-rung-menu-panel',
+      )) return
+      if (document.querySelector('[role="dialog"][aria-modal="true"]')) return
+      if (!selection?.path) return
+      event.preventDefault()
+      removeNode(selection.rungId, selection.path)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [removeNode, selection])
 
   const changeOutput = (kind: OutputKind, targetRungId = activeRungId) => {
     if (!targetRungId) {
@@ -1123,6 +1220,8 @@ export default function App() {
   )
   const inspectorVisible = inspectorOpen || mobilePanel === 'properties'
   const inspectorDocked = useMediaQuery('(min-width: 1025px)')
+  /** 手机端一次只允许一层底部面板；提示条需要知道它是否被面板占住了底部。 */
+  const sheetOpen = Boolean(quickEdit) || mobilePanel !== 'none'
 
   // 停靠的变量表是页面的一部分，不抢焦点；但按 Esc 也应该能收起，
   // 并把焦点交还给打开它的按钮。手机端的变量面板是对话框，由它自己处理 Esc。
@@ -1143,6 +1242,7 @@ export default function App() {
     <div
       className="app-shell wb-shell"
       data-mobile-panel={mobilePanel}
+      data-sheet={sheetOpen ? 'open' : 'closed'}
       data-inspector={inspectorVisible ? 'open' : 'closed'}
     >
       <WorkspaceTopBar
@@ -1367,6 +1467,12 @@ export default function App() {
                 onEdit={(next, anchor) => {
                   setSelection(next)
                   setQuickEdit({ selection: next, anchor })
+                  // 点元件进入参数编辑时收起属性抽屉。桌面端只留就近参数框，
+                  // 手机端只留一层底部弹层，避免同名字段在屏幕上出现两份。
+                  setInspectorOpen(false)
+                  if (window.matchMedia('(max-width: 1024px)').matches) {
+                    setMobilePanel((panel) => (panel === 'properties' ? 'none' : panel))
+                  }
                 }}
                 onStartDrag={drag.start}
                 onRenameRung={(rungId, label) => commit(updateRungLabel(program, rungId, label))}
@@ -1376,6 +1482,8 @@ export default function App() {
                 onMoveNode={(rungId, path, delta) => commit(moveNodeBy(program, rungId, path, delta))}
                 onAddRung={insertRung}
                 onInsertSlot={(slot) => insert('NO', slot)}
+                onInsertContact={insertContactInRung}
+                onDeleteNode={removeNode}
               />
 
           </div>
@@ -1570,6 +1678,11 @@ export default function App() {
           onProgram={commit}
           onClose={() => setQuickEdit(null)}
           onNotify={notify}
+          onDeleteNode={() => {
+            if (quickEdit.selection.path) {
+              removeNode(quickEdit.selection.rungId, quickEdit.selection.path)
+            }
+          }}
           onDeleteOutput={() => {
             removeRung(quickEdit.selection.rungId)
             setQuickEdit(null)

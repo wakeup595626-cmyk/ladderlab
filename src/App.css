@@ -3485,3 +3485,145 @@ body[data-drag-kind] * {
     }
   }
 }
+
+/* ================================================== visual polish pass ===
+   Shared editing surfaces use the same instrument-panel grammar as the
+   workspace chrome: 3px control geometry, rules for grouping, and elevation
+   reserved for floating UI. */
+
+.wb-shell .icon-button {
+  border-radius: var(--radius-control);
+}
+
+.wb-shell .icon-button:hover:not(:disabled) {
+  border-color: var(--control);
+  background: var(--active);
+}
+
+.wb-shell .secondary-button,
+.wb-shell .qe-quiet,
+.wb-shell .qe-danger {
+  border-radius: var(--radius-control);
+  background: transparent;
+}
+
+.wb-shell .secondary-button:hover:not(:disabled),
+.wb-shell .qe-quiet:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: var(--active);
+  color: var(--accent-ink);
+}
+
+.wb-shell .qe-danger:hover:not(:disabled) {
+  border-color: var(--negative);
+  background: var(--negative-wash);
+}
+
+.wb-shell .field input,
+.wb-shell .field select,
+.wb-shell .field textarea,
+.wb-shell .table-input,
+.wb-shell .qe-input,
+.wb-shell .live-value {
+  border-radius: var(--radius-control);
+  box-shadow: none;
+}
+
+.wb-shell .field input:focus,
+.wb-shell .field select:focus,
+.wb-shell .field textarea:focus,
+.wb-shell .table-input:focus,
+.wb-shell .qe-input:focus {
+  border-color: var(--accent);
+  outline: 0;
+  box-shadow: 0 0 0 2px var(--accent-wash);
+}
+
+.wb-shell .type-pill {
+  min-height: 18px;
+  border-radius: 2px;
+  background: transparent;
+}
+
+.wb-shell .delete-mini,
+.wb-shell .qe-close {
+  border-radius: var(--radius-control);
+}
+
+.wb-shell .tags-help,
+.wb-shell .instance-card,
+.wb-shell .diagnostic,
+.wb-shell .diagnostic-help,
+.wb-shell .qe-note {
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.wb-shell .compile-state,
+.wb-shell .tree-count,
+.wb-shell .toast-action,
+.wb-shell .toast-close {
+  border-radius: 2px;
+}
+
+.wb-shell .qe-panel,
+.wb-shell .toast {
+  box-shadow: var(--shadow-overlay);
+}
+
+@media (pointer: coarse), (max-width: 720px) {
+  .qe-panel .qe-close {
+    width: 40px;
+    height: 40px;
+  }
+
+  .qe-panel .qe-quiet,
+  .qe-panel .qe-danger,
+  .qe-panel .qe-segments button,
+  .qe-panel .qe-chips button,
+  .qe-panel .qe-input {
+    min-height: 40px;
+  }
+
+  .wb-shell .toast {
+    gap: 7px;
+    padding: 5px 6px 5px 12px;
+  }
+
+  .wb-shell .toast-action {
+    min-height: 40px;
+    padding-inline: 10px;
+  }
+
+  .wb-shell .toast-close {
+    width: 40px;
+    height: 40px;
+  }
+
+  .qe-panel .qe-more {
+    min-height: 40px;
+  }
+}
+
+@media (max-width: 720px) {
+  .qe-panel {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    padding-bottom: 0;
+  }
+
+  .qe-head,
+  .qe-foot {
+    flex: 0 0 auto;
+  }
+
+  .qe-body {
+    min-height: 0;
+    overflow-y: auto;
+  }
+
+  .qe-foot {
+    padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+  }
+}

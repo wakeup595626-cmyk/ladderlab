@@ -15,7 +15,6 @@ import {
   changeContactKind,
   changeOutputKind,
   collapseParallel,
-  deleteNode,
   getNodeAtPath,
   moveNodeBy,
   updateContact,
@@ -34,6 +33,7 @@ interface QuickEditorProps {
   onProgram: (program: Program) => void
   onClose: () => void
   onNotify: (message: string) => void
+  onDeleteNode?: () => void
   onDeleteOutput?: () => void
 }
 
@@ -184,6 +184,7 @@ export default function QuickEditor({
   onProgram,
   onClose,
   onNotify,
+  onDeleteNode,
   onDeleteOutput,
 }: QuickEditorProps) {
   const [position, setPosition] = useState({ left: 16, top: 16 })
@@ -446,11 +447,7 @@ export default function QuickEditor({
               <button
                 type="button"
                 className="qe-danger"
-                onClick={() => {
-                  onProgram(deleteNode(program, rung.id, selection.path!))
-                  onClose()
-                  onNotify('元件已删除')
-                }}
+                onClick={() => onDeleteNode?.()}
               >
                 删除
               </button>
@@ -482,10 +479,7 @@ export default function QuickEditor({
               <button
                 type="button"
                 className="qe-danger"
-                onClick={() => {
-                  onProgram(deleteNode(program, rung.id, selection.path!))
-                  onClose()
-                }}
+                onClick={() => onDeleteNode?.()}
               >
                 删除
               </button>

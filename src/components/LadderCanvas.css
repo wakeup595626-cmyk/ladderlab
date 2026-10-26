@@ -29,7 +29,8 @@
   background: var(--surface);
 }
 
-.ll-rung:has(.ll-rung-menu[open]) {
+.ll-rung:has(.ll-rung-menu[open]),
+.ll-rung:has(.ll-insert[open]) {
   z-index: 2;
 }
 
@@ -144,9 +145,154 @@
 
 .ll-rung-header-right {
   display: flex;
+  min-width: 0;
   flex: 0 0 auto;
   align-items: center;
   gap: 8px;
+}
+
+/* 段内编辑工具栏：插入 / 删除放在每一段自己身上，
+   不需要先去找画布里的加号，也不用打开右侧属性面板。 */
+.ll-rung-tools {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
+}
+
+.ll-tool {
+  display: inline-flex;
+  height: 28px;
+  align-items: center;
+  gap: 5px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--surface);
+  color: var(--text);
+  font: 500 12px/1 var(--sans);
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color var(--dur-press) var(--ease-out),
+    border-color var(--dur-press) var(--ease-out);
+}
+
+.ll-tool:hover:not(:disabled) {
+  border-color: var(--control);
+  background: var(--active);
+}
+
+.ll-insert {
+  position: relative;
+  display: flex;
+}
+
+.ll-insert-trigger {
+  border-color: var(--control);
+  color: var(--accent-ink);
+  list-style: none;
+}
+
+.ll-insert-trigger::-webkit-details-marker {
+  display: none;
+}
+
+.ll-insert-trigger svg:first-child {
+  color: var(--accent);
+}
+
+.ll-insert-trigger svg:last-child {
+  color: var(--faint);
+}
+
+.ll-insert[open] > .ll-insert-trigger {
+  border-color: var(--accent);
+  background: var(--accent-wash);
+}
+
+.ll-insert-panel {
+  position: absolute;
+  z-index: 8;
+  top: calc(100% + 5px);
+  left: 0;
+  display: grid;
+  width: 176px;
+  gap: 1px;
+  padding: 4px;
+  border: 1px solid var(--control);
+  border-radius: 4px;
+  background: var(--surface);
+  box-shadow: 0 12px 26px rgba(21, 24, 22, 0.14);
+}
+
+.ll-insert-panel button {
+  display: flex;
+  min-height: 34px;
+  align-items: center;
+  gap: 9px;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--text);
+  font: 450 12.5px/1.3 var(--sans);
+  text-align: left;
+  cursor: pointer;
+}
+
+.ll-insert-panel button:hover,
+.ll-insert-panel button:focus-visible {
+  background: var(--accent-wash);
+  color: var(--accent-ink);
+  outline: none;
+}
+
+.ll-insert-symbol {
+  width: 52px;
+  flex: 0 0 52px;
+  color: var(--muted);
+  font: 500 12px/1 var(--mono);
+  letter-spacing: -0.02em;
+}
+
+.ll-insert-panel button:hover .ll-insert-symbol {
+  color: var(--accent);
+}
+
+.ll-tool-remove {
+  color: var(--muted);
+}
+
+.ll-tool-remove:not(:disabled) {
+  border-color: var(--border);
+  color: var(--negative);
+}
+
+.ll-tool-remove:hover:not(:disabled) {
+  border-color: var(--negative);
+  background: var(--negative-wash);
+}
+
+.ll-tool:disabled {
+  border-color: transparent;
+  background: transparent;
+  color: var(--faint);
+  cursor: default;
+  opacity: 0.72;
+}
+
+.ll-selected-chip {
+  max-width: 190px;
+  min-width: 0;
+  flex: 0 1 auto;
+  overflow: hidden;
+  padding-left: 8px;
+  border-left: 1px solid var(--border);
+  color: var(--muted);
+  font: 500 11.5px/1.3 var(--sans);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .ll-power-state {
@@ -688,11 +834,14 @@
 
   .ll-rung-header {
     min-height: 42px;
+    flex-wrap: wrap;
     gap: 5px;
+    row-gap: 4px;
     padding-left: 6px;
   }
 
   .ll-rung-title {
+    flex: 1 1 100%;
     gap: 5px;
   }
 
@@ -702,7 +851,18 @@
   }
 
   .ll-rung-header-right {
+    width: 100%;
+    flex: 1 1 100%;
     gap: 4px;
+    justify-content: flex-start;
+  }
+
+  .ll-power-state {
+    margin-left: auto;
+  }
+
+  .ll-selected-chip {
+    display: none;
   }
 
   .ll-node-name,
@@ -715,7 +875,7 @@
   .ll-pin-label,
   .ll-box-data,
   .ll-box-value {
-    font-size: 11px;
+    font-size: 12px;
   }
 
   .ll-empty-board {
@@ -725,8 +885,8 @@
 }
 
 @media (max-width: 560px) {
-  .ll-power-state {
-    display: none;
+  .ll-rung-tools {
+    gap: 3px;
   }
 }
 
@@ -739,6 +899,16 @@
   .ll-rung-menu > summary {
     width: 44px;
     height: 44px;
+  }
+
+  .ll-tool {
+    height: 40px;
+    padding: 0 10px;
+    font-size: 12.5px;
+  }
+
+  .ll-insert-panel button {
+    min-height: 44px;
   }
 
   .ll-add-rung,

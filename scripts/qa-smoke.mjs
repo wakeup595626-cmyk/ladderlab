@@ -66,10 +66,26 @@ async function evaluate(expression) {
 
 async function setViewport(width, height, mobile) {
   await send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile })
+  // 手机验收同时模拟粗指针，触控尺寸（44px）才按真实设备生效。
+  await send('Emulation.setTouchEmulationEnabled', { enabled: mobile, maxTouchPoints: mobile ? 5 : 1 })
+  await send('Emulation.setEmulatedMedia', {
+    features: mobile
+      ? [{ name: 'pointer', value: 'coarse' }, { name: 'any-pointer', value: 'coarse' }]
+      : [{ name: 'pointer', value: 'fine' }, { name: 'any-pointer', value: 'fine' }],
+  })
 }
 
 async function reload(clearStorage = false) {
-  if (clearStorage) await evaluate('window.localStorage.clear()')
+  if (clearStorage) {
+    // 应用在 pagehide 里会补写一次待保存工程，直接清 localStorage 再刷新会被
+    // 刚离开的页面写回去。先切到空白页触发收尾，再按源清空，才是真正的首访。
+    await send('Page.navigate', { url: 'about:blank' })
+    await sleep(320)
+    await send('Storage.clearDataForOrigin', {
+      origin: new URL(APP_URL).origin,
+      storageTypes: 'local_storage',
+    })
+  }
   await send('Page.navigate', { url: APP_URL })
   await waitForApp()
   await sleep(250)
@@ -89,6 +105,11 @@ async function waitForApp(timeout = 12000) {
 }
 
 async function screenshot(path) {
+  // 验收用的浏览器带着第三方侧边栏扩展，它会把浮标注入页面；
+  // 截图前移除，保证交付截图里只有应用本身。
+  await evaluate(
+    `document.querySelectorAll('plasmo-csui, #dx-sibebar-container').forEach((node) => node.remove())`,
+  ).catch(() => {})
   const shot = await send('Page.captureScreenshot', { format: 'png', fromSurface: true })
   await writeFile(resolve(path), Buffer.from(shot.data, 'base64'))
 }
@@ -204,6 +225,7 @@ const editor = await evaluate(`({
     const plus = document.querySelector('.ll-rung.is-selected .ll-slot-plus')
     return plus ? getComputedStyle(plus).opacity : null
   })(),
+  inspectorOpen: !!document.querySelector('.wb-context-panel'),
   inspectorTab: document.querySelector('.inspector-tabs button.active')?.textContent?.trim() ?? null,
   fits: (() => {
     const panel = document.querySelector('.qe-panel')
@@ -220,7 +242,10 @@ check('desktop/insert-affordance-visible', editor.slotVisible, {
   slotCount: editor.slotCount,
   plusOpacity: editor.plusOpacity,
 })
-check('desktop/inspector-follows-selection', String(editor.inspectorTab ?? '').includes('属性'), editor.inspectorTab)
+check('desktop/editor-is-single-layer', !editor.inspectorOpen, {
+  inspectorOpen: editor.inspectorOpen,
+  editorMode: editor.open ? 'inline editor' : 'missing',
+})
 
 // 面板里切换触点类型，梯形图应立刻反映。
 const kindSwitch = await evaluate(`(() => {
@@ -262,6 +287,163 @@ await evaluate(`document.querySelector('.wb-history-actions [aria-label="重做�
 await sleep(450)
 const afterRedo = await evaluate(`document.querySelectorAll('.ll-node[data-node-id]').length`)
 check('desktop/history-works', afterUndo === beforeInsert && afterRedo === afterInsert, { afterUndo, afterRedo })
+
+/* 程序段工具栏：插入与删除是常显按钮，不再只靠画布角上的小加号。 */
+await pressEscape()
+await evaluate(`document.querySelectorAll('.ll-node[data-node-id]')[0]
+  ?.dispatchEvent(new MouseEvent('click', { bubbles: true }))`)
+await sleep(320)
+await pressEscape()
+
+const rungTools = await evaluate(`(() => {
+  const tools = document.querySelector('.ll-rung-tools')
+  const trigger = tools?.querySelector('.ll-insert-trigger')
+  const remove = tools?.querySelector('.ll-tool-remove')
+  if (!tools || !trigger || !remove) return { present: false }
+  const rect = tools.getBoundingClientRect()
+  return {
+    present: true,
+    insertLabel: trigger.textContent?.trim() ?? '',
+    removeLabel: remove.textContent?.trim() ?? '',
+    removeEnabled: remove.disabled === false,
+    removeTitle: remove.getAttribute('title'),
+    inViewport: rect.left >= 0 && rect.right <= innerWidth + 1,
+    height: Math.round(rect.height),
+  }
+})()`)
+check(
+  'desktop/rung-toolbar-visible',
+  rungTools.present
+    && rungTools.insertLabel.includes('插入触点')
+    && rungTools.removeLabel.includes('删除元件'),
+  rungTools,
+)
+check('desktop/rung-toolbar-in-viewport', rungTools.inViewport)
+check('desktop/delete-enabled-on-selection', rungTools.removeEnabled, rungTools.removeTitle)
+
+// 打开「插入触点」菜单，选常开触点：元件 +1，新元件保持选中，删除键随之可用。
+const beforeBarInsert = await evaluate(`document.querySelectorAll('.ll-node[data-node-id]').length`)
+await evaluate(`document.querySelector('.ll-insert-trigger')?.click()`)
+await sleep(320)
+const insertMenu = await evaluate(`(() => {
+  const panel = document.querySelector('.ll-insert-panel')
+  if (!panel) return { open: false }
+  const rect = panel.getBoundingClientRect()
+  return {
+    open: true,
+    items: [...panel.querySelectorAll('button')].map((button) => button.textContent?.trim()),
+    fits: rect.left >= 0 && rect.right <= innerWidth + 1 && rect.top >= 0 && rect.bottom <= innerHeight + 1,
+  }
+})()`)
+check('desktop/insert-menu-opens', insertMenu.open && insertMenu.items.length >= 5, insertMenu.items)
+check('desktop/insert-menu-fits', insertMenu.fits)
+
+await evaluate(`[...document.querySelectorAll('.ll-insert-panel button')]
+  .find((button) => button.textContent?.includes('常开触点'))?.click()`)
+await sleep(420)
+const barInserted = await evaluate(`({
+  count: document.querySelectorAll('.ll-node[data-node-id]').length,
+  selected: document.querySelectorAll('.ll-node.is-selected').length,
+  deleteEnabled: document.querySelector('.ll-tool-remove')?.disabled === false,
+  menuOpen: document.querySelector('details.ll-insert')?.open === true,
+})`)
+check(
+  'desktop/toolbar-insert-adds-contact',
+  barInserted.count === beforeBarInsert + 1,
+  { beforeBarInsert, ...barInserted },
+)
+check('desktop/inserted-contact-selected', barInserted.selected >= 1 && barInserted.deleteEnabled)
+check('desktop/insert-menu-closes', !barInserted.menuOpen)
+
+// 「删除元件」删掉选中元件，Toast 提供撤销，撤销后位置与数量原样回来。
+await evaluate(`document.querySelector('.ll-tool-remove')?.click()`)
+await sleep(420)
+const barDeleted = await evaluate(`({
+  count: document.querySelectorAll('.ll-node[data-node-id]').length,
+  toast: document.querySelector('.toast-message')?.textContent?.trim() ?? null,
+  undo: !!document.querySelector('.toast-action'),
+})`)
+check('desktop/delete-button-removes-contact', barDeleted.count === beforeBarInsert, barDeleted)
+check(
+  'desktop/delete-toast-offers-undo',
+  barDeleted.undo && String(barDeleted.toast ?? '').includes('已删除'),
+  barDeleted.toast,
+)
+
+await evaluate(`document.querySelector('.toast-action')?.click()`)
+await sleep(420)
+const barRestored = await evaluate(`document.querySelectorAll('.ll-node[data-node-id]').length`)
+check('desktop/delete-undo-restores-contact', barRestored === beforeBarInsert + 1, barRestored)
+
+// 键盘 Delete / Backspace 直接删选中元件；焦点在输入框时不抢键。
+await evaluate(`document.querySelectorAll('.ll-node[data-node-id]')[0]
+  ?.dispatchEvent(new MouseEvent('click', { bubbles: true }))`)
+await sleep(320)
+await pressEscape()
+await pressKey('Delete', 'Delete', 46)
+const deleteKeyCount = await evaluate(`document.querySelectorAll('.ll-node[data-node-id]').length`)
+check('desktop/delete-key-removes-contact', deleteKeyCount === beforeBarInsert, deleteKeyCount)
+
+await evaluate(`document.querySelectorAll('.ll-node[data-node-id]')[0]
+  ?.dispatchEvent(new MouseEvent('click', { bubbles: true }))`)
+await sleep(320)
+await pressEscape()
+await pressKey('Backspace', 'Backspace', 8)
+const backspaceCount = await evaluate(`document.querySelectorAll('.ll-node[data-node-id]').length`)
+check('desktop/backspace-removes-contact', backspaceCount === beforeBarInsert - 1, backspaceCount)
+
+// 删除并联支路最后一个触点会折叠整条并联结构；Toast 撤销必须恢复完整快照，
+// 不能只给出“已恢复”的假确认。
+await evaluate(`document.querySelector('.ll-contact')?.dispatchEvent(
+  new MouseEvent('click', { bubbles: true }),
+)`)
+await sleep(360)
+await evaluate(`[...document.querySelectorAll('.qe-quiet')]
+  .find((button) => button.textContent?.includes('并联新支路'))?.click()`)
+await sleep(440)
+await pressEscape()
+const parallelBeforeDelete = await evaluate(`({
+  nodes: document.querySelectorAll('.ll-node[data-node-id]').length,
+  parallels: document.querySelectorAll('.ll-parallel').length,
+})`)
+await evaluate(`(() => {
+  const contacts = document.querySelectorAll('.ll-parallel .ll-contact')
+  contacts[contacts.length - 1]?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+  return contacts.length
+})()`)
+await sleep(360)
+await pressEscape()
+await evaluate(`document.querySelector('.ll-rung-tools .ll-tool-remove')?.click()`)
+await sleep(440)
+const collapsedParallel = await evaluate(`({
+  nodes: document.querySelectorAll('.ll-node[data-node-id]').length,
+  parallels: document.querySelectorAll('.ll-parallel').length,
+  undo: !!document.querySelector('.toast-action'),
+})`)
+check(
+  'desktop/parallel-collapse-delete',
+  parallelBeforeDelete.parallels >= 1
+    && collapsedParallel.parallels === parallelBeforeDelete.parallels - 1
+    && collapsedParallel.nodes < parallelBeforeDelete.nodes
+    && collapsedParallel.undo,
+  { parallelBeforeDelete, collapsedParallel },
+)
+await evaluate(`document.querySelector('.toast-action')?.click()`)
+await sleep(440)
+const restoredParallel = await evaluate(`({
+  nodes: document.querySelectorAll('.ll-node[data-node-id]').length,
+  parallels: document.querySelectorAll('.ll-parallel').length,
+  selected: document.querySelectorAll('.ll-contact.is-selected').length,
+  toast: document.querySelector('.toast-message')?.textContent?.trim() ?? null,
+})`)
+check(
+  'desktop/parallel-collapse-undo-restores',
+  restoredParallel.nodes === parallelBeforeDelete.nodes
+    && restoredParallel.parallels === parallelBeforeDelete.parallels
+    && restoredParallel.selected === 1
+    && String(restoredParallel.toast ?? '').includes('已恢复'),
+  restoredParallel,
+)
 
 // 程序段号跟着位置走：新增一段显示「程序段 2」，上移后仍是 1、2。
 const firstTitle = await evaluate(`document.querySelector('.ll-rung-name')?.value ?? null`)
@@ -364,6 +546,41 @@ details['mobile/ladder-overflow-px'] = mobileDemo.ladderScrolls
 await screenshot('docs/qa/mobile-390.png')
 await screenshot('docs/ui-check.png')
 
+// 手机端程序段工具栏换到第二行，插入菜单必须完整落在屏幕内。
+const mobileTools = await evaluate(`(() => {
+  const tools = document.querySelector('.ll-rung-tools')
+  if (!tools) return { present: false }
+  const rect = tools.getBoundingClientRect()
+  return {
+    present: true,
+    insert: !!tools.querySelector('.ll-insert-trigger'),
+    remove: !!tools.querySelector('.ll-tool-remove'),
+    inViewport: rect.left >= -1 && rect.right <= innerWidth + 1,
+    height: Math.round(rect.height),
+  }
+})()`)
+check('mobile/rung-toolbar-visible', mobileTools.present && mobileTools.insert && mobileTools.remove, mobileTools)
+check('mobile/rung-toolbar-in-viewport', mobileTools.inViewport)
+
+await evaluate(`document.querySelector('.ll-insert-trigger')?.click()`)
+await sleep(340)
+const mobileMenu = await evaluate(`(() => {
+  const panel = document.querySelector('.ll-insert-panel')
+  if (!panel) return { open: false }
+  if (document.querySelector('details.ll-insert')?.open !== true) return { open: false }
+  const rect = panel.getBoundingClientRect()
+  return {
+    open: true,
+    fits: rect.left >= 0 && rect.right <= innerWidth + 1 && rect.top >= 0 && rect.bottom <= innerHeight + 1,
+    itemHeight: Math.round(panel.querySelector('button')?.getBoundingClientRect().height ?? 0),
+  }
+})()`)
+check('mobile/insert-menu-fits', mobileMenu.open && mobileMenu.fits, mobileMenu)
+check('mobile/insert-menu-touch-target', mobileMenu.itemHeight >= 40, mobileMenu.itemHeight)
+await screenshot('docs/qa/mobile-rung-menu.png')
+await evaluate(`document.querySelector('.ll-insert-trigger')?.click()`)
+await sleep(240)
+
 // 手机端点元件应打开底部参数面板，并有遮罩。
 await evaluate(`document.querySelector('.ll-node[data-node-id]')
   ?.dispatchEvent(new MouseEvent('click', { bubbles: true }))`)
@@ -372,6 +589,9 @@ const mobileEditor = await evaluate(`({
   open: !!document.querySelector('.qe-panel'),
   dialog: document.querySelector('.qe-panel')?.getAttribute('role') ?? null,
   scrim: !!document.querySelector('.qe-scrim'),
+  heading: document.querySelector('.qe-panel h2')?.textContent?.trim() ?? null,
+  modals: document.querySelectorAll('[role="dialog"][aria-modal="true"]').length,
+  propertiesOpen: !!document.querySelector('.wb-context-panel'),
   inViewport: (() => {
     const panel = document.querySelector('.qe-panel')
     if (!panel) return false
@@ -380,6 +600,8 @@ const mobileEditor = await evaluate(`({
   })(),
 })`)
 check('mobile/node-opens-sheet', mobileEditor.open && mobileEditor.dialog === 'dialog', mobileEditor)
+check('mobile/only-one-modal-layer', mobileEditor.modals === 1 && !mobileEditor.propertiesOpen, mobileEditor)
+check('mobile/sheet-shows-contact-editor', String(mobileEditor.heading ?? '').includes('触点'), mobileEditor.heading)
 check('mobile/sheet-in-viewport', mobileEditor.inViewport)
 await screenshot('docs/qa/mobile-quick-editor.png')
 
