@@ -288,7 +288,20 @@ function outputSize(output: OutputElement, m: LadderMetrics): Size {
     : { width: m.boxW, height: m.boxH, lineY: m.boxLineY }
 }
 
-function measureChain(chain: LadderNode[], m: LadderMetrics): Size {
+/** 同一并联组内按列取最宽元件，保证每条支路的同序号元件落在同一 X 上。 */
+function chainColumnWidths(chains: LadderNode[][], m: LadderMetrics): number[] {
+  const depth = Math.max(0, ...chains.map((chain) => chain.length))
+  return Array.from({ length: depth }, (_, index) => Math.max(
+    0,
+    ...chains.map((chain) => chain[index] ? measureNode(chain[index], m).width : 0),
+  ))
+}
+
+function measureChain(
+  chain: LadderNode[],
+  m: LadderMetrics,
+  columnWidths?: number[],
+): Size {
   if (chain.length === 0) {
     return {
       width: m.emptyChainW,
@@ -300,9 +313,9 @@ function measureChain(chain: LadderNode[], m: LadderMetrics): Size {
   let nodeWidth = 0
   let top = 0
   let bottom = 0
-  for (const node of chain) {
+  for (const [index, node] of chain.entries()) {
     const size = measureNode(node, m)
-    nodeWidth += size.width
+    nodeWidth += columnWidths?.[index] ?? size.width
     top = Math.max(top, size.lineY)
     bottom = Math.max(bottom, size.height - size.lineY)
   }
@@ -324,7 +337,8 @@ function measureNode(node: LadderNode, m: LadderMetrics): Size {
     }
   }
 
-  const branches = node.branches.map((branch) => measureChain(branch, m))
+  const columnWidths = chainColumnWidths(node.branches, m)
+  const branches = node.branches.map((branch) => measureChain(branch, m, columnWidths))
   const contentW = Math.max(...branches.map((branch) => branch.width))
     + m.parallelGutter * 2
     + m.parallelJoinW
@@ -844,9 +858,11 @@ function renderChain(
   mergeColumn?: number,
   /** 外层并联的分叉列（当前链坐标系）。链首的并联直接从这里分出。 */
   splitColumn?: number,
+  /** 同一并联组共享的列宽，保证各支路同序号元件左边缘对齐。 */
+  columnWidths?: number[],
 ): ReactNode {
   const m = context.metrics
-  const size = measureChain(chain, m)
+  const size = measureChain(chain, m, columnWidths)
 
   if (chain.length === 0) {
     return (
@@ -869,6 +885,7 @@ function renderChain(
     cursorX += m.slotW
 
     const nodeSize = measureNode(node, m)
+    const columnWidth = columnWidths?.[index] ?? nodeSize.width
     const nodeY = size.lineY - nodeSize.lineY
     const inheritedMerge = index === chain.length - 1 && node.type === 'parallel'
       ? mergeColumn
@@ -879,6 +896,7 @@ function renderChain(
     parts.push(
       <g
         key={node.id}
+        data-chain-node-index={index}
         transform={'translate(' + cursorX + ', ' + nodeY + ')'}
       >
         {renderNode(
@@ -889,10 +907,17 @@ function renderChain(
           inheritedMerge === undefined ? undefined : inheritedMerge - cursorX,
           inheritedSplit === undefined ? undefined : inheritedSplit - cursorX,
         )}
+        {columnWidth > nodeSize.width && (
+          <path
+            className={'ll-wire' + (context.runtime.nodePower[node.id] === true ? ' is-on' : '')}
+            d={'M ' + nodeSize.width + ' ' + nodeSize.lineY
+              + ' H ' + columnWidth}
+          />
+        )}
       </g>,
     )
     currentPower = context.runtime.nodePower[node.id] === true
-    cursorX += nodeSize.width
+    cursorX += columnWidth
   })
 
   parts.push(
@@ -2436,7 +2461,10 @@ function renderParallel(
 ): ReactNode {
   const m = context.metrics
   const size = measureNode(node, m)
-  const branchSizes = node.branches.map((branch) => measureChain(branch, m))
+  const columnWidths = chainColumnWidths(node.branches, m)
+  const branchSizes = node.branches.map(
+    (branch) => measureChain(branch, m, columnWidths),
+  )
   const selected = isSelected(context, path)
   const primary = isPrimarySelected(context, path)
   const grouped = selected && (context.selection?.paths?.length ?? 0) > 1
@@ -2447,6 +2475,9 @@ function renderParallel(
   // 嵌套在支路链首的并联也从外层同一根左侧分叉竖线起笔，避免阶梯式起点。
   // 未闭合的草稿支路仍保留自己的暂存坐标。
   const splitX = !isOpen && splitColumn !== undefined ? splitColumn : ownSplitX
+  // 支路首列与分叉竖线保持半个 gutter；顶层仍是 18px，继承外层分叉时
+  // 则与外层兄弟支路的首列重合，嵌套元件不会逐层向右错位。
+  const branchOriginX = splitX + m.parallelGutter / 2
   const contentW = size.width - (isOpen ? m.openMergeW : 0)
   const ownCollectX = contentW - m.parallelGutter / 2
   // 博途把嵌套并联的所有支路都画到同一根右侧汇合竖线上；只有未闭合的
@@ -2539,7 +2570,7 @@ function renderParallel(
       {placements.map((placement, index) => {
         const branch = node.branches[index]
         const branchPower = chainOutputPower(branch, context.runtime, incomingPower)
-        const endX = m.parallelGutter + branchSizes[index].width
+        const endX = branchOriginX + branchSizes[index].width
         return (
           <g key={node.id + '-branch-wires-' + index}>
             <path
@@ -2547,7 +2578,7 @@ function renderParallel(
               data-parallel-branch={index}
               data-parallel-branch-side="left"
               d={'M ' + splitX + ' ' + placement.centerY
-                + ' H ' + m.parallelGutter}
+                + ' H ' + branchOriginX}
             />
             {isOpen && index === 0 ? (
               // 未闭合时主线直接接到输出，草稿支路等在右侧汇合。
@@ -2630,15 +2661,17 @@ function renderParallel(
         return (
           <g
             key={node.id + '-branch-' + index}
-            transform={'translate(' + m.parallelGutter + ', ' + placement.y + ')'}
+            data-parallel-branch-index={index}
+            transform={'translate(' + branchOriginX + ', ' + placement.y + ')'}
           >
             {renderChain(
               branch,
               context,
               [...path, index],
               incomingPower,
-              isOpen ? undefined : collectX - m.parallelGutter,
-              isOpen ? undefined : splitX - m.parallelGutter,
+              isOpen ? undefined : collectX - branchOriginX,
+              isOpen ? undefined : splitX - branchOriginX,
+              columnWidths,
             )}
           </g>
         )

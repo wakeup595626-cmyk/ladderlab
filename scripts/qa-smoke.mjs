@@ -863,6 +863,26 @@ const parallelGeometry = await evaluate(`(() => {
     const parentSplit = parent ? findDirect(parent, '[data-parallel-branch-side="left"]') : null
     const parentJoin = parent ? findDirect(parent, '[data-parallel-join]') : null
     const joinX = pathStartX(join)
+    // 同列检测取各元件包装组的 SVG 原点，而不是包围盒左缘：嵌套并联本身
+    // 会向左延伸去共享外层分叉线，包围盒左缘并不等于它在链中的列起点。
+    const directColumnXs = (owner) => [...owner.querySelectorAll('[data-chain-node-index]')]
+      .filter((node) => node.closest('.ll-parallel') === owner)
+      .map((node) => ({
+        index: Number(node.getAttribute('data-chain-node-index')),
+        x: node.getScreenCTM()?.e ?? null,
+      }))
+      .filter((item) => Number.isFinite(item.index) && item.x !== null)
+    const columnXs = directColumnXs(group)
+    const columns = new Map()
+    for (const item of columnXs) {
+      const values = columns.get(item.index) ?? []
+      values.push(item.x)
+      columns.set(item.index, values)
+    }
+    const columnSpreads = [...columns.values()]
+      .filter((values) => values.length >= 2)
+      .map((values) => Math.round((Math.max(...values) - Math.min(...values)) * 10) / 10)
+    const parentFirstColumnX = parent ? directColumnXs(parent)[0]?.x ?? null : null
     return {
       branches: right.length,
       ys: right.map((item) => Math.round(item.y * 10) / 10),
@@ -879,6 +899,9 @@ const parallelGeometry = await evaluate(`(() => {
         : null,
       mergeInherited: group.getAttribute('data-merge-inherited') === 'true',
       parentJoinX: parentJoin ? Math.round(pathStartX(parentJoin) * 10) / 10 : null,
+      firstColumnX: columnXs.find((item) => item.index === 0)?.x ?? null,
+      parentFirstColumnX,
+      columnSpreads,
     }
   })
 })()`)
@@ -893,6 +916,13 @@ check(
   parallelGeometry,
 )
 check(
+  'desktop/parallel-columns-share-same-x',
+  parallelLayers.length >= 2
+    && parallelLayers.every((group) => group.columnSpreads.every((spread) => spread < 1.5))
+    && parallelLayers.some((group) => group.columnSpreads.length > 0),
+  parallelGeometry,
+)
+check(
   'desktop/nested-parallel-shares-outer-left-split-column',
   parallelLayers.some((group) => group.splitInherited)
     && parallelLayers
@@ -900,6 +930,18 @@ check(
       .every((group) => group.parentSplitX !== null
         && group.splitX !== null
         && Math.abs(group.splitX - group.parentSplitX) <= 1.5),
+  parallelGeometry,
+)
+check(
+  'desktop/nested-parallel-first-column-aligns-with-outer-branch',
+  parallelLayers.some((group) => group.splitInherited
+    && group.firstColumnX !== null
+    && group.parentFirstColumnX !== null)
+    && parallelLayers
+      .filter((group) => group.splitInherited)
+      .every((group) => group.firstColumnX === null
+        || group.parentFirstColumnX === null
+        || Math.abs(group.firstColumnX - group.parentFirstColumnX) <= 1.5),
   parallelGeometry,
 )
 check(
