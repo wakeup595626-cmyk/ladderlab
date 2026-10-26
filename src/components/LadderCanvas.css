@@ -1,4 +1,14 @@
 .ll-canvas {
+  /* 取自《PLC第五组_实验六》PPT：灰紫指令框、深灰标题带、黄绿参数引线、青色地址。 */
+  --ladder-box: #dedfe6;
+  --ladder-box-head: #c4c6d1;
+  --ladder-box-edge: #d2d4dc;
+  --ladder-ink: #161616;
+  --ladder-symbol-ink: #2b2f33;
+  --ladder-param-line: #c0bf48;
+  --ladder-param-value: #747974;
+  --ladder-muted-ink: #aeb0ba;
+  --ladder-address: #2f847c;
   display: flex;
   width: 100%;
   min-width: 0;
@@ -566,7 +576,7 @@
 
 .ll-node-name,
 .ll-output-name {
-  fill: var(--muted);
+  fill: var(--ladder-symbol-ink);
   font-family: var(--sans);
   font-size: 10px;
   font-weight: 500;
@@ -575,8 +585,8 @@
 
 .ll-node-address,
 .ll-output-address {
-  fill: var(--address-ink);
-  font-family: var(--mono);
+  fill: var(--ladder-address);
+  font-family: var(--sans);
   font-size: 11px;
   font-weight: 700;
   pointer-events: none;
@@ -761,24 +771,14 @@
 }
 
 .ll-instruction-box {
-  fill: var(--raised);
-  stroke: var(--control);
+  fill: var(--ladder-box);
+  stroke: var(--ladder-box-edge);
   stroke-width: 1;
 }
 
 .ll-box-heading {
-  fill: var(--active);
-  stroke: var(--control);
-  stroke-width: 1;
-}
-
-.ll-output.is-powered .ll-instruction-box,
-.ll-output.is-powered .ll-box-heading {
-  stroke: var(--positive);
-}
-
-.ll-output.is-powered .ll-box-heading {
-  fill: var(--positive-wash);
+  fill: var(--ladder-box-head);
+  stroke: none;
 }
 
 .ll-box-title,
@@ -786,21 +786,25 @@
 .ll-box-data,
 .ll-box-value,
 .ll-box-subtitle,
-.ll-box-operand,
-.ll-box-external-value {
-  font-family: var(--mono);
+.ll-box-external-value,
+.ll-box-external-note {
+  font-family: var(--sans);
   pointer-events: none;
 }
 
 .ll-box-title {
-  fill: var(--text);
+  fill: var(--ladder-ink);
   font-size: 12px;
   font-weight: 700;
 }
 
 .ll-pin-label {
-  fill: var(--muted);
+  fill: var(--ladder-ink);
   font-size: 11px;
+}
+
+.ll-pin-label.is-muted {
+  fill: var(--ladder-muted-ink);
 }
 
 .ll-box-data {
@@ -815,25 +819,20 @@
 }
 
 .ll-box-subtitle {
-  fill: var(--muted);
+  fill: #464c55;
   font-size: 9.5px;
 }
 
 .ll-pin-terminal {
   fill: none;
-  stroke: var(--muted);
-  stroke-width: 1.25;
-  stroke-linecap: square;
-}
-
-.ll-box-operand {
-  fill: var(--muted);
-  font-size: 9.5px;
+  stroke: var(--ladder-param-line);
+  stroke-width: 2;
+  stroke-linecap: butt;
 }
 
 /* 博途把 PT / ET 和 PV / CV 的当前值放在框外；底描边保证跨过导线时仍可读。 */
 .ll-box-external-value {
-  fill: var(--accent-ink);
+  fill: var(--ladder-param-value);
   font-size: 10.5px;
   font-weight: 600;
   paint-order: stroke fill;
@@ -842,8 +841,19 @@
   stroke-linejoin: round;
 }
 
-.ll-output.is-powered .ll-pin-terminal {
-  stroke: var(--positive);
+.ll-box-external-value.is-address {
+  fill: var(--ladder-address);
+  font-weight: 700;
+}
+
+.ll-box-external-note {
+  fill: #4b5563;
+  font-size: 9px;
+  font-weight: 500;
+  paint-order: stroke fill;
+  stroke: var(--surface);
+  stroke-width: 3px;
+  stroke-linejoin: round;
 }
 
 .ll-output.is-true .ll-box-value,
@@ -986,8 +996,8 @@
   .ll-box-data,
   .ll-box-value,
   .ll-box-subtitle,
-  .ll-box-operand,
-  .ll-box-external-value {
+  .ll-box-external-value,
+  .ll-box-external-note {
     font-size: 12px;
   }
 

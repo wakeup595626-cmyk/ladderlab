@@ -833,32 +833,45 @@ check(
   { candidatesClosed, ...mergedBranch },
 )
 
-// 博途式并联：每条支路有自己的水平线，末端进入独立的汇合竖线。
-// 父子并联的汇合竖线也必须错开，不能把两层的竖线叠成一根。
+// 博途式并联：每条支路有自己的水平线，末端进入同一根汇合竖线。
+// 嵌套在最外层支路末端的并联，必须把汇合竖线并到外层的同一列。
 const parallelGeometry = await evaluate(`(() => {
   const groups = [...document.querySelectorAll('.ll-parallel')]
   return groups.map((group) => {
     const right = [...group.querySelectorAll('[data-parallel-branch-side="right"]')]
       .filter((path) => path.closest('.ll-parallel') === group)
       .map((path) => {
-        const box = path.getBBox()
-        return { x: box.x, y: box.y, end: box.x + box.width }
+        const box = path.getBoundingClientRect()
+        return { x: box.x, y: box.y, end: box.right }
       })
-    const join = [...group.querySelectorAll('[data-parallel-join]')]
-      .find((path) => path.closest('.ll-parallel') === group)?.getBBox()
+    const findJoin = (owner) => [...owner.querySelectorAll('[data-parallel-join]')]
+      .find((path) => path.closest('.ll-parallel') === owner)
+    // 取路径首点（M collectX ...）的真实屏幕坐标。不要用包围盒中心：
+    // 汇合路径同时包含水平出线和竖直汇合线，包围盒中心并不等于竖线位置。
+    const joinStartX = (path) => {
+      if (!path) return null
+      const point = path.getPointAtLength(0)
+      const matrix = path.getScreenCTM()
+      return matrix ? new DOMPoint(point.x, point.y).matrixTransform(matrix).x : null
+    }
+    const join = findJoin(group)
+    const parent = group.parentElement?.closest('.ll-parallel')
+    const parentJoin = parent ? findJoin(parent) : null
+    const joinX = joinStartX(join)
     return {
       branches: right.length,
       ys: right.map((item) => Math.round(item.y * 10) / 10),
       spans: right.map((item) => Math.round((item.end - item.x) * 10) / 10),
-      joinX: join ? Math.round(join.x * 10) / 10 : null,
+      joinX: joinX === null ? null : Math.round(joinX * 10) / 10,
       joinXGap: join && right.length
-        ? Math.max(...right.map((item) => Math.abs(join.x - item.end)))
+        ? Math.max(...right.map((item) => Math.abs(joinX - item.end)))
         : null,
+      inherited: group.getAttribute('data-merge-inherited') === 'true',
+      parentJoinX: parentJoin ? Math.round(joinStartX(parentJoin) * 10) / 10 : null,
     }
   })
 })()`)
 const parallelLayers = parallelGeometry.filter((group) => group.branches >= 2)
-const parallelJoinXs = new Set(parallelLayers.map((group) => group.joinX))
 check(
   'desktop/parallel-has-separate-branch-lanes',
   parallelLayers.length >= 2
@@ -868,9 +881,13 @@ check(
   parallelGeometry,
 )
 check(
-  'desktop/nested-parallel-joins-are-distinct',
-  parallelJoinXs.size >= 2,
-  { joins: [...parallelJoinXs] },
+  'desktop/nested-parallel-shares-outer-merge-column',
+  parallelLayers.some((group) => group.inherited)
+    && parallelLayers
+      .filter((group) => group.inherited)
+      .every((group) => group.parentJoinX !== null
+        && Math.abs(group.joinX - group.parentJoinX) <= 1.5),
+  parallelGeometry,
 )
 await screenshot('docs/qa/desktop-parallel-standard.png')
 
@@ -1029,6 +1046,96 @@ check(
   timerLayout,
 )
 await screenshot('docs/qa/desktop-timer-standard.png')
+
+// MOVE 按实验六 PPT：常量在 IN 左侧框外，OUT1 的地址与符号名在框外右侧，
+// 框内只保留 EN / ENO / IN / OUT1。颜色同时锁定 PPT 中的灰紫框、黄绿参数线、青色地址。
+await evaluate(`(() => {
+  if (!document.querySelector('.library-dialog') && !document.querySelector('.wb-project-drawer')) {
+    document.querySelector('.wb-project-button')?.click()
+  }
+  return true
+})()`)
+await sleep(340)
+const openedMoveLab = await evaluate(`(() => {
+  if (document.querySelector('.library-dialog')) return true
+  const item = [...document.querySelectorAll('.wb-tree-item')]
+    .find((node) => node.textContent?.includes('实验库'))
+  item?.click()
+  return !!item
+})()`)
+await sleep(380)
+const pickedMoveLab = await evaluate(`(() => {
+  const item = [...document.querySelectorAll('.library-item')]
+    .find((node) => node.textContent?.includes('装配流水线'))
+  item?.click()
+  return !!item
+})()`)
+await sleep(320)
+await evaluate(`document.querySelector('.confirm-ok')?.click()`)
+await sleep(800)
+const moveLayout = await evaluate(`(() => {
+  const graphics = [...document.querySelectorAll('[data-instruction="MOVE"]')]
+  const graphic = graphics.find((item) =>
+    item.querySelector('[data-pin-value="IN"]')?.textContent?.trim() === '1')
+  if (!graphic) return { present: false, count: graphics.length }
+  const box = graphic.querySelector('.ll-instruction-box')?.getBoundingClientRect()
+  const heading = graphic.querySelector('.ll-box-heading')
+  const terminal = graphic.querySelector('.ll-pin-terminal')
+  const left = graphic.querySelector('[data-pin-value="IN"]')
+  const right = graphic.querySelector('[data-pin-value="OUT1"]')
+  const note = graphic.querySelector('[data-pin-note="OUT1"]')
+  const leftRect = left?.getBoundingClientRect()
+  const rightRect = right?.getBoundingClientRect()
+  const noteRect = note?.getBoundingClientRect()
+  const style = (node) => node ? getComputedStyle(node) : null
+  return {
+    present: true,
+    count: graphics.length,
+    title: graphic.querySelector('.ll-box-title')?.textContent?.trim() ?? null,
+    pins: [...graphic.querySelectorAll('[data-pin]')].map((pin) => pin.getAttribute('data-pin')),
+    leftText: left?.textContent?.trim() ?? null,
+    rightText: right?.textContent?.trim() ?? null,
+    noteText: note?.textContent?.trim() ?? null,
+    leftOutside: box && leftRect ? leftRect.right <= box.left + 0.5 : null,
+    rightOutside: box && rightRect ? rightRect.left >= box.right - 0.5 : null,
+    noteBelowAddress: rightRect && noteRect ? noteRect.top >= rightRect.bottom - 1 : null,
+    noLegacyOperand: graphic.querySelectorAll('.ll-box-operand').length === 0,
+    box: box ? { left: box.left, right: box.right, top: box.top, bottom: box.bottom } : null,
+    colors: {
+      box: style(graphic.querySelector('.ll-instruction-box'))?.fill ?? null,
+      heading: style(heading)?.fill ?? null,
+      terminal: style(terminal)?.stroke ?? null,
+      address: style(right)?.fill ?? null,
+    },
+    overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth + 1,
+  }
+})()`)
+check(
+  'desktop/move-follows-course-ppt-layout',
+  openedMoveLab
+    && pickedMoveLab
+    && moveLayout.present
+    && moveLayout.title === 'MOVE'
+    && ['EN', 'ENO', 'IN', 'OUT1'].every((pin) => moveLayout.pins.includes(pin))
+    && moveLayout.leftText === '1'
+    && /^%MB6$/.test(String(moveLayout.rightText))
+    && moveLayout.noteText === '"ShiftByte"'
+    && moveLayout.leftOutside === true
+    && moveLayout.rightOutside === true
+    && moveLayout.noteBelowAddress === true
+    && moveLayout.noLegacyOperand
+    && moveLayout.colors.box === 'rgb(222, 223, 230)'
+    && moveLayout.colors.heading === 'rgb(196, 198, 209)'
+    && moveLayout.colors.terminal === 'rgb(192, 191, 72)'
+    && moveLayout.colors.address === 'rgb(47, 132, 124)'
+    && !moveLayout.overflow,
+  moveLayout,
+)
+await evaluate(`[...document.querySelectorAll('[data-instruction="MOVE"]')]
+  .find((item) => item.querySelector('[data-pin-value="IN"]')?.textContent?.trim() === '1')
+  ?.closest('.ll-rung')?.scrollIntoView({ block: 'center' })`)
+await sleep(500)
+await screenshot('docs/qa/desktop-move-standard.png')
 
 // 工程改名后刷新仍保留。
 const renameReady = await evaluate(`(() => {

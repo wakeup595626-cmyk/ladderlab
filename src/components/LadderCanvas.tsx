@@ -827,10 +827,11 @@ function renderNode(
   context: DrawContext,
   path: number[],
   incomingPower: boolean,
+  mergeColumn?: number,
 ): ReactNode {
   return node.type === 'contact'
     ? renderContact(node, context, path, incomingPower)
-    : renderParallel(node, context, path, incomingPower)
+    : renderParallel(node, context, path, incomingPower, mergeColumn)
 }
 
 function renderChain(
@@ -838,6 +839,8 @@ function renderChain(
   context: DrawContext,
   chainPath: number[],
   incomingPower: boolean,
+  /** 外层并联的汇合列（当前链坐标系）。末端的并联直接并到这一列。 */
+  mergeColumn?: number,
 ): ReactNode {
   const m = context.metrics
   const size = measureChain(chain, m)
@@ -864,12 +867,21 @@ function renderChain(
 
     const nodeSize = measureNode(node, m)
     const nodeY = size.lineY - nodeSize.lineY
+    const inheritedMerge = index === chain.length - 1 && node.type === 'parallel'
+      ? mergeColumn
+      : undefined
     parts.push(
       <g
         key={node.id}
         transform={'translate(' + cursorX + ', ' + nodeY + ')'}
       >
-        {renderNode(node, context, [...chainPath, index], currentPower)}
+        {renderNode(
+          node,
+          context,
+          [...chainPath, index],
+          currentPower,
+          inheritedMerge === undefined ? undefined : inheritedMerge - cursorX,
+        )}
       </g>,
     )
     currentPower = context.runtime.nodePower[node.id] === true
@@ -887,9 +899,12 @@ function renderChain(
 
 interface InstructionPinSpec {
   label: string
-  /** 框内显示的操作数；PT / ET / PV / CV 使用 externalValue 放到框外。 */
-  value?: string
+  /** 博途把参数值画在框外，框内只保留引脚名。 */
   externalValue?: string
+  /** 地址下方的符号名。 */
+  externalNote?: string
+  /** ENO 之类的弱化引脚。 */
+  muted?: boolean
 }
 
 interface InstructionRowSpec {
@@ -899,22 +914,45 @@ interface InstructionRowSpec {
 
 interface InstructionSpec {
   title: string
-  subtitle: string
+  subtitle?: string
   rows: InstructionRowSpec[]
+}
+
+const INSTANCE_HEADER_KINDS = new Set<OutputElement['kind']>([
+  'TON', 'TOF', 'TONR', 'CTU',
+])
+
+function operandLabel(
+  tags: TagDef[],
+  reference: string | undefined,
+  fallback: string,
+): string {
+  if (!reference) return fallback
+  const details = tagDetails(tags, reference)
+  return details.bound ? details.address : details.name
 }
 
 /**
  * 指令框按 IEC / 博途的习惯排引脚：能流从第一行 IN 进、Q 出，
  * 参数在左侧，当前值在右侧；PT/ET 这类参数值放在框外，避免和引脚名挤在一起。
  */
-function instructionSpec(output: OutputElement, runtime: Runtime): InstructionSpec {
-  const target = shorten(output.tag || '—', 14)
-  const reset = output.resetTag ? shorten(output.resetTag, 12) : undefined
-  const source = shorten(
-    output.sourceTag || (output.kind === 'MOVE' ? String(output.value ?? 0) : output.tag || '—'),
-    14,
-  )
-  const operand = shorten(output.valueTag || String(output.value ?? 1), 14)
+function instructionSpec(
+  output: OutputElement,
+  runtime: Runtime,
+  tags: TagDef[],
+  target: { address: string; symbol: string },
+): InstructionSpec {
+  const targetValue = target.address || target.symbol || '—'
+  const targetNote = target.address && target.symbol ? target.symbol : undefined
+  const reset = output.resetTag
+    ? operandLabel(tags, output.resetTag, '—')
+    : undefined
+  const source = output.sourceTag
+    ? operandLabel(tags, output.sourceTag, '—')
+    : String(output.value ?? 0)
+  const operand = output.valueTag
+    ? operandLabel(tags, output.valueTag, '—')
+    : String(output.value ?? 1)
 
   if (output.kind === 'TON' || output.kind === 'TOF') {
     return {
@@ -939,7 +977,7 @@ function instructionSpec(output: OutputElement, runtime: Runtime): InstructionSp
       subtitle: 'Time',
       rows: [
         { left: { label: 'IN' }, right: { label: 'Q' } },
-        { left: { label: 'R', value: reset } },
+        { left: { label: 'R', externalValue: reset } },
         {
           left: { label: 'PT', externalValue: formatTime(output.pt ?? 0) },
           right: {
@@ -957,7 +995,7 @@ function instructionSpec(output: OutputElement, runtime: Runtime): InstructionSp
       subtitle: 'Int',
       rows: [
         { left: { label: 'CU' }, right: { label: 'Q' } },
-        { left: { label: 'R', value: reset } },
+        { left: { label: 'R', externalValue: reset } },
         {
           left: { label: 'PV', externalValue: String(output.pv ?? 1) },
           right: {
@@ -972,10 +1010,12 @@ function instructionSpec(output: OutputElement, runtime: Runtime): InstructionSp
   if (output.kind === 'MOVE') {
     return {
       title: 'MOVE',
-      subtitle: 'Int',
       rows: [
-        { left: { label: 'EN' }, right: { label: 'ENO' } },
-        { left: { label: 'IN', value: source }, right: { label: 'OUT', value: target } },
+        { left: { label: 'EN' }, right: { label: 'ENO', muted: true } },
+        {
+          left: { label: 'IN', externalValue: source },
+          right: { label: 'OUT1', externalValue: targetValue, externalNote: targetNote },
+        },
       ],
     }
   }
@@ -985,9 +1025,12 @@ function instructionSpec(output: OutputElement, runtime: Runtime): InstructionSp
       title: output.kind,
       subtitle: 'Int',
       rows: [
-        { left: { label: 'EN' }, right: { label: 'ENO' } },
-        { left: { label: 'IN1', value: source }, right: { label: 'OUT', value: target } },
-        { left: { label: 'IN2', value: operand } },
+        { left: { label: 'EN' }, right: { label: 'ENO', muted: true } },
+        {
+          left: { label: 'IN1', externalValue: source },
+          right: { label: 'OUT', externalValue: targetValue, externalNote: targetNote },
+        },
+        { left: { label: 'IN2', externalValue: operand } },
       ],
     }
   }
@@ -997,9 +1040,12 @@ function instructionSpec(output: OutputElement, runtime: Runtime): InstructionSp
       title: output.kind,
       subtitle: 'Int',
       rows: [
-        { left: { label: 'EN' }, right: { label: 'ENO' } },
-        { left: { label: 'IN', value: source }, right: { label: 'OUT', value: target } },
-        { left: { label: 'N', value: operand } },
+        { left: { label: 'EN' }, right: { label: 'ENO', muted: true } },
+        {
+          left: { label: 'IN', externalValue: source },
+          right: { label: 'OUT', externalValue: targetValue, externalNote: targetNote },
+        },
+        { left: { label: 'N', externalValue: operand } },
       ],
     }
   }
@@ -1010,19 +1056,44 @@ function instructionSpec(output: OutputElement, runtime: Runtime): InstructionSp
     title: 'PATTERN',
     subtitle: '教学扩展',
     rows: [
-      { left: { label: 'EN' }, right: { label: 'ENO' } },
+      { left: { label: 'EN' }, right: { label: 'ENO', muted: true } },
       {
-        left: { label: 'PULSE', value: shorten(output.pulseTag || '—', 12) },
-        right: { label: 'OUT', value: target },
+        left: {
+          label: 'PULSE',
+          externalValue: output.pulseTag
+            ? operandLabel(tags, output.pulseTag, '—')
+            : undefined,
+        },
+        right: { label: 'OUT', externalValue: targetValue, externalNote: targetNote },
       },
       {
         left: {
           label: 'NEXT',
-          value: patternLength ? String(patternIndex + 1) + ' / ' + patternLength : '—',
+          externalValue: patternLength
+            ? String(patternIndex + 1) + ' / ' + patternLength
+            : '—',
         },
       },
     ],
   }
+}
+
+/** 估算 SVG 文本宽度：等宽字体下 ASCII 约 0.6em，中文按 1em。 */
+function textWidth(text: string, fontSize: number): number {
+  let width = 0
+  for (const char of text) {
+    width += (char.codePointAt(0) ?? 0) > 0x2e7f ? fontSize : fontSize * 0.6
+  }
+  return width
+}
+
+function fitText(text: string, maxWidth: number, fontSize: number): string {
+  if (textWidth(text, fontSize) <= maxWidth) return text
+  let clipped = text
+  while (clipped.length > 1 && textWidth(clipped + '…', fontSize) > maxWidth) {
+    clipped = clipped.slice(0, -1)
+  }
+  return clipped + '…'
 }
 
 function renderInstructionGraphic(
@@ -1035,22 +1106,59 @@ function renderInstructionGraphic(
   address: string,
 ): ReactNode {
   const m = context.metrics
-  const spec = instructionSpec(output, context.runtime)
-  const boxX = m.boxLaneLeft
-  const boxRight = size.width - m.boxLaneRight
-  const boxWidth = boxRight - boxX
+  const spec = instructionSpec(output, context.runtime, context.tags, { address, symbol })
   const boxTop = 34
   const headingH = 34
   const symbolX = size.width / 2
   const rowYs = [centerY + 4, centerY + 30, centerY + 56]
   const boxBottom = rowYs[spec.rows.length - 1] + 18
   const boxHeight = boxBottom - boxTop
-  const leftValueX = boxX + 48
-  const rightValueX = boxRight - 42
+  const hasHeader = INSTANCE_HEADER_KINDS.has(output.kind)
+
+  const extFont = 10.5
+  const noteFont = 9
+  const leftExternal = Math.max(
+    0,
+    ...spec.rows.map((row) => (row.left?.externalValue
+      ? textWidth(row.left.externalValue, extFont)
+      : 0)),
+  )
+  const rightExternal = Math.max(
+    0,
+    ...spec.rows.map((row) => Math.max(
+      row.right?.externalValue ? textWidth(row.right.externalValue, extFont) : 0,
+      row.right?.externalNote ? textWidth(row.right.externalNote, noteFont) : 0,
+    )),
+  )
+  const leftNeed = Math.max(52, leftExternal + 24)
+  const rightNeed = Math.max(52, rightExternal + 24)
+  const internalNeed = Math.max(
+    132,
+    ...spec.rows.map((row) => (
+      (row.left ? textWidth(row.left.label, 11) + 12 : 0)
+      + (row.right ? textWidth(row.right.label, 11) + 12 : 0)
+      + 28
+    )),
+  )
+  const available = Math.max(112, size.width - internalNeed)
+  const needTotal = leftNeed + rightNeed
+  const laneScale = needTotal > available ? available / needTotal : 1
+  const laneLeft = Math.max(36, leftNeed * laneScale)
+  const laneRight = Math.max(36, rightNeed * laneScale)
+  const boxX = laneLeft
+  const boxRight = Math.max(boxX + 116, size.width - laneRight)
+  const boxWidth = boxRight - boxX
+  const titleX = (boxX + boxRight) / 2
+  const leftClip = Math.max(18, laneLeft - 24)
+  // 参数名可以越过输出组本身，但必须停在右侧母线之前。桌面端预留的
+  // 出线区和母线边距足以完整显示 "ShiftByte" 这类符号名，避免把博途
+  // 的符号名硬截成省略号；窄屏仍保留紧凑裁切。
+  const rightRailRoom = Math.max(0, m.outputToRail - 8) + Math.max(0, m.railRight - 6)
+  const rightClip = Math.max(18, size.width - boxRight - 24 + rightRailRoom)
 
   return (
     <g className="ll-instruction-graphic" data-instruction={output.kind}>
-      {address ? (
+      {hasHeader && address ? (
         <>
           <text className="ll-output-address" x={symbolX} y="14" textAnchor="middle">
             {shorten(address, m.addressChars)}
@@ -1059,11 +1167,11 @@ function renderInstructionGraphic(
             {shorten(symbol, m.boxChars)}
           </text>
         </>
-      ) : (
+      ) : hasHeader ? (
         <text className="ll-output-name" x={symbolX} y="15" textAnchor="middle">
           {shorten(symbol, m.boxChars)}
         </text>
-      )}
+      ) : null}
 
       <path
         className={'ll-wire' + (powered ? ' is-on' : '')}
@@ -1076,7 +1184,7 @@ function renderInstructionGraphic(
         y={boxTop}
         width={boxWidth}
         height={boxHeight}
-        rx="2"
+        rx="0"
       />
       <rect
         className="ll-box-heading"
@@ -1084,24 +1192,26 @@ function renderInstructionGraphic(
         y={boxTop}
         width={boxWidth}
         height={headingH}
-        rx="2"
+        rx="0"
       />
       <text
         className="ll-box-title"
-        x={symbolX}
+        x={titleX}
         y={boxTop + 14}
         textAnchor="middle"
       >
         {spec.title}
       </text>
-      <text
-        className="ll-box-subtitle"
-        x={symbolX}
-        y={boxTop + 27}
-        textAnchor="middle"
-      >
-        {spec.subtitle}
-      </text>
+      {spec.subtitle && (
+        <text
+          className="ll-box-subtitle"
+          x={titleX}
+          y={boxTop + 27}
+          textAnchor="middle"
+        >
+          {spec.subtitle}
+        </text>
+      )}
 
       {spec.rows.map((row, index) => {
         const y = rowYs[index]
@@ -1114,24 +1224,28 @@ function renderInstructionGraphic(
                 data-pin-side="left"
                 data-external={row.left.externalValue ? 'true' : undefined}
               >
-                <text className="ll-pin-label" x={boxX + 12} y={y}>{row.left.label}</text>
-                {row.left.value && (
-                  <text className="ll-box-operand" x={leftValueX} y={y}>{row.left.value}</text>
-                )}
+                <text
+                  className={'ll-pin-label' + (row.left.muted ? ' is-muted' : '')}
+                  x={boxX + 10}
+                  y={y}
+                >
+                  {fitText(row.left.label, boxWidth / 2 - 18, 11)}
+                </text>
                 {row.left.externalValue && (
                   <>
                     <path
                       className="ll-pin-terminal"
-                      d={'M ' + (boxX - 12) + ' ' + pinLineY + ' H ' + boxX}
+                      d={'M ' + (boxX - 14) + ' ' + pinLineY + ' H ' + boxX}
                     />
                     <text
-                      className="ll-box-external-value"
+                      className={'ll-box-external-value'
+                        + (/^%/.test(row.left.externalValue) ? ' is-address' : '')}
                       data-pin-value={row.left.label}
-                      x={boxX - 18}
+                      x={boxX - 20}
                       y={y}
                       textAnchor="end"
                     >
-                      {row.left.externalValue}
+                      {fitText(row.left.externalValue, leftClip, extFont)}
                     </text>
                   </>
                 )}
@@ -1147,38 +1261,40 @@ function renderInstructionGraphic(
                   : undefined}
               >
                 <text
-                  className="ll-pin-label"
-                  x={boxRight - 12}
+                  className={'ll-pin-label' + (row.right.muted ? ' is-muted' : '')}
+                  x={boxRight - 10}
                   y={y}
                   textAnchor="end"
                 >
-                  {row.right.label}
+                  {fitText(row.right.label, boxWidth / 2 - 18, 11)}
                 </text>
-                {row.right.value && (
-                  <text
-                    className="ll-box-operand"
-                    x={rightValueX}
-                    y={y}
-                    textAnchor="end"
-                  >
-                    {row.right.value}
-                  </text>
-                )}
                 {row.right.externalValue && (
                   <>
                     <path
                       className="ll-pin-terminal"
-                      d={'M ' + boxRight + ' ' + pinLineY + ' H ' + (boxRight + 12)}
+                      d={'M ' + boxRight + ' ' + pinLineY + ' H ' + (boxRight + 14)}
                     />
                     <text
-                      className="ll-box-external-value"
+                      className={'ll-box-external-value'
+                        + (/^%/.test(row.right.externalValue) ? ' is-address' : '')}
                       data-pin-value={row.right.label}
-                      x={boxRight + 18}
+                      x={boxRight + 20}
                       y={y}
                       textAnchor="start"
                     >
-                      {row.right.externalValue}
+                      {fitText(row.right.externalValue, rightClip, extFont)}
                     </text>
+                    {row.right.externalNote && (
+                      <text
+                        className="ll-box-external-note"
+                        data-pin-note={row.right.label}
+                        x={boxRight + 20}
+                        y={y + 13.5}
+                        textAnchor="start"
+                      >
+                        {fitText(row.right.externalNote, rightClip, noteFont)}
+                      </text>
+                    )}
                   </>
                 )}
               </g>
@@ -2306,6 +2422,8 @@ function renderParallel(
   context: DrawContext,
   path: number[],
   incomingPower: boolean,
+  /** 外层并联的汇合列（本节点坐标系）。 */
+  mergeColumn?: number,
 ): ReactNode {
   const m = context.metrics
   const size = measureNode(node, m)
@@ -2318,7 +2436,10 @@ function renderParallel(
   const splitX = m.parallelGutter / 2
   const isOpen = node.open === true
   const contentW = size.width - (isOpen ? m.openMergeW : 0)
-  const collectX = contentW - m.parallelGutter / 2
+  const ownCollectX = contentW - m.parallelGutter / 2
+  // 博途把嵌套并联的所有支路都画到同一根右侧汇合竖线上；只有未闭合的
+  // 草稿分组保留自己的暂存列，等待用户把它接到主线的某个插入点。
+  const collectX = !isOpen && mergeColumn !== undefined ? mergeColumn : ownCollectX
   let branchY = 0
   const placements = branchSizes.map((branch) => {
     const y = branchY
@@ -2356,6 +2477,7 @@ function renderParallel(
         : '并联分支，' + node.branches.length + ' 条支路，点击编辑'}
       aria-keyshortcuts="ArrowLeft ArrowRight"
       data-node-id={node.id}
+      data-merge-inherited={mergeColumn !== undefined ? 'true' : undefined}
       onClick={(event) => {
         event.stopPropagation()
         selectAndEdit(context, selection, event.currentTarget)
@@ -2487,7 +2609,7 @@ function renderParallel(
           className={'ll-wire' + (outputPower ? ' is-on' : '')}
           data-parallel-join
           d={'M ' + collectX + ' ' + firstCenter + ' V ' + lastCenter
-            + ' M ' + collectX + ' ' + entryY + ' H ' + size.width}
+            + ' M ' + collectX + ' ' + entryY + ' H ' + Math.max(size.width, collectX)}
         />
       )}
       {node.branches.map((branch, index) => {
@@ -2497,7 +2619,13 @@ function renderParallel(
             key={node.id + '-branch-' + index}
             transform={'translate(' + m.parallelGutter + ', ' + placement.y + ')'}
           >
-            {renderChain(branch, context, [...path, index], incomingPower)}
+            {renderChain(
+              branch,
+              context,
+              [...path, index],
+              incomingPower,
+              isOpen ? undefined : collectX - m.parallelGutter,
+            )}
           </g>
         )
       })}
