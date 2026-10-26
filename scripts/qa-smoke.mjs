@@ -834,40 +834,51 @@ check(
 )
 
 // 博途式并联：每条支路有自己的水平线，末端进入同一根汇合竖线。
-// 嵌套在最外层支路末端的并联，必须把汇合竖线并到外层的同一列。
+// 嵌套在最外层支路首尾的并联，必须与外层共用同一根左侧分叉竖线和右侧汇合竖线。
 const parallelGeometry = await evaluate(`(() => {
   const groups = [...document.querySelectorAll('.ll-parallel')]
   return groups.map((group) => {
+    const findDirect = (owner, selector) => [...owner.querySelectorAll(selector)]
+      .find((path) => path.closest('.ll-parallel') === owner)
+    // 取路径首点（M x ...）的真实屏幕坐标。不要用包围盒中心：
+    // 分叉/汇合路径同时包含水平线和竖线，包围盒中心并不等于竖线位置。
+    const pathStartX = (path) => {
+      if (!path) return null
+      const point = path.getPointAtLength(0)
+      const matrix = path.getScreenCTM()
+      return matrix ? new DOMPoint(point.x, point.y).matrixTransform(matrix).x : null
+    }
+    const left = [...group.querySelectorAll('[data-parallel-branch-side="left"]')]
+      .filter((path) => path.closest('.ll-parallel') === group)
+    const splitXs = left.map(pathStartX).filter((value) => value !== null)
     const right = [...group.querySelectorAll('[data-parallel-branch-side="right"]')]
       .filter((path) => path.closest('.ll-parallel') === group)
       .map((path) => {
         const box = path.getBoundingClientRect()
         return { x: box.x, y: box.y, end: box.right }
       })
-    const findJoin = (owner) => [...owner.querySelectorAll('[data-parallel-join]')]
-      .find((path) => path.closest('.ll-parallel') === owner)
-    // 取路径首点（M collectX ...）的真实屏幕坐标。不要用包围盒中心：
-    // 汇合路径同时包含水平出线和竖直汇合线，包围盒中心并不等于竖线位置。
-    const joinStartX = (path) => {
-      if (!path) return null
-      const point = path.getPointAtLength(0)
-      const matrix = path.getScreenCTM()
-      return matrix ? new DOMPoint(point.x, point.y).matrixTransform(matrix).x : null
-    }
-    const join = findJoin(group)
+    const split = left[0] ?? null
+    const join = findDirect(group, '[data-parallel-join]')
     const parent = group.parentElement?.closest('.ll-parallel')
-    const parentJoin = parent ? findJoin(parent) : null
-    const joinX = joinStartX(join)
+    const parentSplit = parent ? findDirect(parent, '[data-parallel-branch-side="left"]') : null
+    const parentJoin = parent ? findDirect(parent, '[data-parallel-join]') : null
+    const joinX = pathStartX(join)
     return {
       branches: right.length,
       ys: right.map((item) => Math.round(item.y * 10) / 10),
       spans: right.map((item) => Math.round((item.end - item.x) * 10) / 10),
+      splitX: pathStartX(split),
+      splitXSpread: splitXs.length
+        ? Math.round((Math.max(...splitXs) - Math.min(...splitXs)) * 10) / 10
+        : null,
+      splitInherited: group.getAttribute('data-split-inherited') === 'true',
+      parentSplitX: pathStartX(parentSplit),
       joinX: joinX === null ? null : Math.round(joinX * 10) / 10,
       joinXGap: join && right.length
         ? Math.max(...right.map((item) => Math.abs(joinX - item.end)))
         : null,
-      inherited: group.getAttribute('data-merge-inherited') === 'true',
-      parentJoinX: parentJoin ? Math.round(joinStartX(parentJoin) * 10) / 10 : null,
+      mergeInherited: group.getAttribute('data-merge-inherited') === 'true',
+      parentJoinX: parentJoin ? Math.round(pathStartX(parentJoin) * 10) / 10 : null,
     }
   })
 })()`)
@@ -877,14 +888,25 @@ check(
   parallelLayers.length >= 2
     && parallelLayers.every((group) => new Set(group.ys).size === group.branches)
     && parallelLayers.every((group) => group.spans.every((span) => span > 4))
+    && parallelLayers.every((group) => group.splitXSpread !== null && group.splitXSpread < 1)
     && parallelLayers.every((group) => group.joinXGap < 1),
   parallelGeometry,
 )
 check(
-  'desktop/nested-parallel-shares-outer-merge-column',
-  parallelLayers.some((group) => group.inherited)
+  'desktop/nested-parallel-shares-outer-left-split-column',
+  parallelLayers.some((group) => group.splitInherited)
     && parallelLayers
-      .filter((group) => group.inherited)
+      .filter((group) => group.splitInherited)
+      .every((group) => group.parentSplitX !== null
+        && group.splitX !== null
+        && Math.abs(group.splitX - group.parentSplitX) <= 1.5),
+  parallelGeometry,
+)
+check(
+  'desktop/nested-parallel-shares-outer-merge-column',
+  parallelLayers.some((group) => group.mergeInherited)
+    && parallelLayers
+      .filter((group) => group.mergeInherited)
       .every((group) => group.parentJoinX !== null
         && Math.abs(group.joinX - group.parentJoinX) <= 1.5),
   parallelGeometry,

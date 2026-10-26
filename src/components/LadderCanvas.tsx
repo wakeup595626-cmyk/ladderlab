@@ -828,10 +828,11 @@ function renderNode(
   path: number[],
   incomingPower: boolean,
   mergeColumn?: number,
+  splitColumn?: number,
 ): ReactNode {
   return node.type === 'contact'
     ? renderContact(node, context, path, incomingPower)
-    : renderParallel(node, context, path, incomingPower, mergeColumn)
+    : renderParallel(node, context, path, incomingPower, mergeColumn, splitColumn)
 }
 
 function renderChain(
@@ -841,6 +842,8 @@ function renderChain(
   incomingPower: boolean,
   /** 外层并联的汇合列（当前链坐标系）。末端的并联直接并到这一列。 */
   mergeColumn?: number,
+  /** 外层并联的分叉列（当前链坐标系）。链首的并联直接从这里分出。 */
+  splitColumn?: number,
 ): ReactNode {
   const m = context.metrics
   const size = measureChain(chain, m)
@@ -870,6 +873,9 @@ function renderChain(
     const inheritedMerge = index === chain.length - 1 && node.type === 'parallel'
       ? mergeColumn
       : undefined
+    const inheritedSplit = index === 0 && node.type === 'parallel'
+      ? splitColumn
+      : undefined
     parts.push(
       <g
         key={node.id}
@@ -881,6 +887,7 @@ function renderChain(
           [...chainPath, index],
           currentPower,
           inheritedMerge === undefined ? undefined : inheritedMerge - cursorX,
+          inheritedSplit === undefined ? undefined : inheritedSplit - cursorX,
         )}
       </g>,
     )
@@ -2424,6 +2431,8 @@ function renderParallel(
   incomingPower: boolean,
   /** 外层并联的汇合列（本节点坐标系）。 */
   mergeColumn?: number,
+  /** 外层并联的分叉列（本节点坐标系）。 */
+  splitColumn?: number,
 ): ReactNode {
   const m = context.metrics
   const size = measureNode(node, m)
@@ -2433,8 +2442,11 @@ function renderParallel(
   const grouped = selected && (context.selection?.paths?.length ?? 0) > 1
   const sourceKey = 'node:' + context.rungId + ':' + path.join('.')
   const source = context.dragSource === sourceKey
-  const splitX = m.parallelGutter / 2
   const isOpen = node.open === true
+  const ownSplitX = m.parallelGutter / 2
+  // 嵌套在支路链首的并联也从外层同一根左侧分叉竖线起笔，避免阶梯式起点。
+  // 未闭合的草稿支路仍保留自己的暂存坐标。
+  const splitX = !isOpen && splitColumn !== undefined ? splitColumn : ownSplitX
   const contentW = size.width - (isOpen ? m.openMergeW : 0)
   const ownCollectX = contentW - m.parallelGutter / 2
   // 博途把嵌套并联的所有支路都画到同一根右侧汇合竖线上；只有未闭合的
@@ -2477,6 +2489,7 @@ function renderParallel(
         : '并联分支，' + node.branches.length + ' 条支路，点击编辑'}
       aria-keyshortcuts="ArrowLeft ArrowRight"
       data-node-id={node.id}
+      data-split-inherited={splitColumn !== undefined ? 'true' : undefined}
       data-merge-inherited={mergeColumn !== undefined ? 'true' : undefined}
       onClick={(event) => {
         event.stopPropagation()
@@ -2625,6 +2638,7 @@ function renderParallel(
               [...path, index],
               incomingPower,
               isOpen ? undefined : collectX - m.parallelGutter,
+              isOpen ? undefined : splitX - m.parallelGutter,
             )}
           </g>
         )
