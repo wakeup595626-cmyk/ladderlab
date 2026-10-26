@@ -2,12 +2,14 @@ import { describe, expect, it } from 'vitest'
 import {
   cancelOpenBranchAt,
   canDeleteTag,
+  changeContactKind,
   cloneNodesForPaste,
   closeOpenBranchAt,
   collectNodesAtPaths,
   deleteTag,
   deleteNodesByIds,
   duplicateRung,
+  ensureAddressTag,
   hasOpenBranch,
   insertContactAt,
   insertNodeAt,
@@ -359,6 +361,59 @@ describe('programOps 变量依赖与程序段复制', () => {
     const coilCopy = duplicateRung(coilSource, 'coil').rungs[1]
     expect(coilCopy.output.tag).toBe('Coil')
     expect(coilCopy.output.id).not.toBe(coilSource.rungs[0].output.id)
+  })
+})
+
+describe('programOps 地址输入与触点切换', () => {
+  it('输入省略百分号或小写的地址时统一成 TIA 写法并在同地址复用变量', () => {
+    const source = program([rung('r1', [contact('c', 'Start')])])
+    const first = ensureAddressTag(source, 'm100.0', 'BOOL')
+    if ('error' in first) throw new Error(first.error)
+
+    expect(first.tag.address).toBe('%M100.0')
+    expect(first.program.tags.at(-1)).toEqual(first.tag)
+
+    const reused = ensureAddressTag(first.program, '%M100.0', 'BOOL')
+    if ('error' in reused) throw new Error(reused.error)
+    expect(reused.program).toBe(first.program)
+    expect(reused.tag.id).toBe(first.tag.id)
+  })
+
+  it('拒绝非法位地址，并在整数地址已存在时复用原变量', () => {
+    const intTag: TagDef = { ...tag('Count', 'INT'), address: '%MW10' }
+    const source = program([rung('r1', [contact('c', 'Start')])], [tag('Start'), intTag])
+
+    expect(ensureAddressTag(source, 'M4.8', 'BOOL')).toEqual({
+      error: '位地址要写成 M4.0、I0.0 或 %M100.0（位号 0～7）。',
+    })
+    const reused = ensureAddressTag(source, 'mw10', 'INT')
+    if ('error' in reused) throw new Error(reused.error)
+    expect(reused.program).toBe(source)
+    expect(reused.tag).toBe(intTag)
+  })
+
+  it('常开、常闭和边沿之间切换时保留原操作数', () => {
+    const source = program([rung('r1', [contact('c', 'Start')])])
+
+    const nc = changeContactKind(source, 'r1', [0], 'NC')
+    const rising = changeContactKind(nc, 'r1', [0], 'P')
+    expect(rungOf(nc, 'r1').nodes[0]).toMatchObject({ kind: 'NC', tag: 'Start' })
+    expect(rungOf(rising, 'r1').nodes[0]).toMatchObject({ kind: 'P', tag: 'Start' })
+  })
+
+  it('切到比较触点时保留 INT 变量，切回 BOOL 触点时改用 BOOL 变量', () => {
+    const count = tag('Count', 'INT')
+    const start = tag('Start')
+    const compared: ContactNode = { ...contact('c', 'Count', 'CMP'), compare: { op: '>=', value: 3 } }
+    const source = program([rung('r1', [compared])], [start, count])
+
+    const boolContact = changeContactKind(source, 'r1', [0], 'NO')
+    expect(rungOf(boolContact, 'r1').nodes[0]).toMatchObject({ kind: 'NO', tag: 'Start' })
+
+    const intNode = contact('c', 'Count')
+    const intSource = program([rung('r1', [intNode])], [start, count])
+    const comparison = changeContactKind(intSource, 'r1', [0], 'CMP')
+    expect(rungOf(comparison, 'r1').nodes[0]).toMatchObject({ kind: 'CMP', tag: 'Count' })
   })
 })
 

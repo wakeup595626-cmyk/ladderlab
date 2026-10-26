@@ -160,6 +160,7 @@ function runtimeSignature(program: Program): string {
 interface QuickEditState {
   selection: Selection
   anchor: DOMRect | null
+  autoFocus?: boolean
 }
 
 /** 拖放后重新定位同一个节点，避免依赖插入下标在清洗分支时发生变化。 */
@@ -883,10 +884,12 @@ export default function App() {
       return
     }
     commit(next)
-    setSelection({ rungId: slot.rungId, path: findNodePath(next, slot.rungId, made.node.id) })
-    setQuickEdit(null)
+    const selectionForNode = { rungId: slot.rungId, path: findNodePath(next, slot.rungId, made.node.id) }
+    setSelection(selectionForNode)
+    // 博途放下元件后可以直接输入操作数；这里把焦点送到新元件的操作数字段。
+    setQuickEdit({ selection: selectionForNode, anchor: null, autoFocus: true })
     setMobilePanel('none')
-    notify(instructionLabel('contact', kind) + '已插入，点名称即可改变量')
+    notify(instructionLabel('contact', kind) + '已插入，可直接输入变量或 M4.0 地址')
   }, [commit, notify, program])
 
   // 段头工具栏没有拖放落点时，按博途的习惯接到已选元件后面；
@@ -907,10 +910,11 @@ export default function App() {
       return
     }
     commit(next)
-    setSelection({ rungId, path: findNodePath(next, rungId, made.node.id) })
-    setQuickEdit(null)
+    const selectionForNode = { rungId, path: findNodePath(next, rungId, made.node.id) }
+    setSelection(selectionForNode)
+    setQuickEdit({ selection: selectionForNode, anchor: null, autoFocus: true })
     setMobilePanel('none')
-    notify(`${instructionLabel('contact', kind)}已插入`)
+    notify(`${instructionLabel('contact', kind)}已插入，可直接输入变量或地址`)
   }, [commit, notify, program, selection])
 
   // 博途式「打开分支」：在元件之后的插入点向下分叉，后续元件留在主线，
@@ -1959,6 +1963,7 @@ export default function App() {
           runtime={runtime}
           selection={quickEdit.selection}
           anchor={quickEdit.anchor}
+          autoFocus={quickEdit.autoFocus}
           onProgram={commit}
           onClose={() => setQuickEdit(null)}
           onNotify={notify}

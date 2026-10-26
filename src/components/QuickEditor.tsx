@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { supportsContact, supportsOutput } from '../engine/profiles'
+import { looksLikeAddress, normalizeBitAddress, normalizeByteAddress } from '../engine/references'
 import { FIELD_LIMITS } from '../lib/limits'
 import type {
   ContactKind,
@@ -9,6 +10,8 @@ import type {
   Program,
   Runtime,
   Selection,
+  TagDef,
+  TagKind,
 } from '../engine/types'
 import {
   addTag,
@@ -16,6 +19,7 @@ import {
   changeContactKind,
   changeOutputKind,
   deleteBranch,
+  ensureAddressTag,
   getNodeAtPath,
   moveNodeBy,
   updateContact,
@@ -30,6 +34,7 @@ interface QuickEditorProps {
   runtime: Runtime
   selection: Selection
   anchor: DOMRect | null
+  autoFocus?: boolean
   onProgram: (program: Program) => void
   onClose: () => void
   onNotify: (message: string) => void
@@ -84,6 +89,15 @@ function ensureNamedTag(program: Program, name: string, kind: 'BOOL' | 'INT'): P
   return added ? updateTag(next, added.id, { name: trimmed }) : program
 }
 
+function tagForReference(program: Program, reference: string): TagDef | undefined {
+  const base = reference.split('.')[0]
+  return program.tags.find((tag) => tag.name === base)
+}
+
+function normalizeAddressFor(input: string, kind: TagKind): string | null {
+  return kind === 'BOOL' ? normalizeBitAddress(input) : normalizeByteAddress(input)
+}
+
 function focusField(event: React.KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) {
   if (event.key === 'Enter' && !event.shiftKey) {
     event.preventDefault()
@@ -98,6 +112,7 @@ function TagField({
   listId,
   onCommit,
   hint,
+  primary = false,
 }: {
   label: string
   value: string
@@ -105,12 +120,14 @@ function TagField({
   listId: string
   onCommit: (value: string) => void
   hint?: string
+  primary?: boolean
 }) {
   return (
     <label className="qe-field">
       <span>{label}</span>
       <input
         className="qe-input mono"
+        data-primary={primary ? 'true' : undefined}
         key={`${listId}-${value}`}
         defaultValue={value}
         maxLength={FIELD_LIMITS.tagName}
@@ -127,6 +144,62 @@ function TagField({
         {options.map((option) => <option value={option} key={option} />)}
       </datalist>
       {hint && <small>{hint}</small>}
+    </label>
+  )
+}
+
+/** 地址属于变量本身：改一次，所有引用同一个变量的触点和线圈都会跟着变。 */
+function AddressField({
+  value,
+  kind,
+  onCommit,
+  hint,
+}: {
+  value: string
+  kind: TagKind
+  onCommit: (address: string) => void
+  hint?: string
+}) {
+  const [draft, setDraft] = useState(value)
+  const [error, setError] = useState('')
+
+  const commit = () => {
+    const address = normalizeAddressFor(draft, kind)
+    if (!address) {
+      setError(kind === 'BOOL'
+        ? '位地址要写成 M4.0 或 %M100.0，位号 0～7。'
+        : '整数地址要写成 MW10、MD10 或 %MW100。')
+      return
+    }
+    setError('')
+    onCommit(address)
+  }
+
+  return (
+    <label className={'qe-field' + (error ? ' has-error' : '')}>
+      <span>地址</span>
+      <input
+        className="qe-input mono"
+        value={draft}
+        maxLength={12}
+        spellCheck={false}
+        autoComplete="off"
+        aria-invalid={error ? true : undefined}
+        onChange={(event) => {
+          setDraft(event.target.value)
+          if (error) setError('')
+        }}
+        onBlur={commit}
+        onKeyDown={(event) => {
+          if (event.key !== 'Enter') return
+          event.preventDefault()
+          commit()
+          event.currentTarget.select()
+        }}
+      />
+      {error
+        ? <small className="qe-field-error" role="alert">{error}</small>
+        : <small>{hint ?? '可输入 M4.0、I0.0、Q0.0；百分号可省略'}</small>}
     </label>
   )
 }
@@ -181,6 +254,7 @@ export default function QuickEditor({
   runtime,
   selection,
   anchor,
+  autoFocus = false,
   onProgram,
   onClose,
   onNotify,
@@ -190,6 +264,7 @@ export default function QuickEditor({
   const [position, setPosition] = useState({ left: 16, top: 16 })
   const rung = program.rungs.find((item) => item.id === selection.rungId)
   const node: LadderNode | null = selection.path ? getNodeAtPath(program, selection.rungId, selection.path) : null
+  const boundTag = node?.type === 'contact' ? tagForReference(program, node.tag) : null
   const [mobile, setMobile] = useState(
     () => typeof window !== 'undefined' && window.matchMedia(MOBILE_QUERY).matches,
   )
@@ -198,10 +273,25 @@ export default function QuickEditor({
   const focusedOnceRef = useRef(false)
 
   useEffect(() => {
-    if (mobile || focusedOnceRef.current) return
+    if (mobile || (focusedOnceRef.current && !autoFocus)) return
     focusedOnceRef.current = true
-    panelRef.current?.focus({ preventScroll: true })
-  }, [mobile, panelRef])
+    const timer = window.setTimeout(() => {
+      const panel = panelRef.current
+      if (!panel) return
+      // 刚插入元件时让用户马上输入操作数；普通点选仍只聚焦面板，
+      // 避免键盘用户一打开属性框就意外进入编辑模式。
+      const primary = autoFocus
+        ? panel.querySelector<HTMLInputElement>('[data-primary="true"]')
+        : null
+      if (primary) {
+        primary.focus({ preventScroll: true })
+        primary.select()
+        return
+      }
+      panel.focus({ preventScroll: true })
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [autoFocus, mobile, panelRef])
 
   useEffect(() => {
     const media = window.matchMedia(MOBILE_QUERY)
@@ -292,6 +382,24 @@ export default function QuickEditor({
 
   const commitTag = (value: string) => {
     if (node?.type !== 'contact') return
+    const tagKind: TagKind = node.kind === 'CMP' ? 'INT' : 'BOOL'
+    const address = normalizeAddressFor(value, tagKind)
+    if (address) {
+      const result = ensureAddressTag(program, address, tagKind)
+      if ('error' in result) {
+        onNotify(result.error)
+        return
+      }
+      onProgram(updateContact(result.program, rung.id, node.id, { tag: result.tag.name }))
+      onNotify(`已绑定 ${address}，符号名 ${result.tag.name}`)
+      return
+    }
+    if (looksLikeAddress(value)) {
+      onNotify(tagKind === 'BOOL'
+        ? '位地址要写成 M4.0、I0.0 或 %M100.0（位号 0～7）。'
+        : '整数地址要写成 MW10、MD10 或 %MW100。')
+      return
+    }
     const exists = (node.kind === 'CMP' ? refs.intRefs : refs.boolRefs).includes(value)
     let next = program
     if (value && !exists) next = ensureNamedTag(next, value, node.kind === 'CMP' ? 'INT' : 'BOOL')
@@ -305,11 +413,36 @@ export default function QuickEditor({
       return
     }
     const output = rung.output
-    if (hasInstance(output.kind) || value.includes('.')) {
+    if (hasInstance(output.kind)) {
+      if (looksLikeAddress(value)) {
+        onNotify('定时器或计数器这里要填实例名，例如 T1，不能填地址。')
+        return
+      }
       onProgram(updateOutput(program, rung.id, { tag: value }))
       return
     }
     const kind = isInteger(output.kind) ? 'INT' : 'BOOL'
+    const address = normalizeAddressFor(value, kind)
+    if (address) {
+      const result = ensureAddressTag(program, address, kind)
+      if ('error' in result) {
+        onNotify(result.error)
+        return
+      }
+      onProgram(updateOutput(result.program, rung.id, { tag: result.tag.name }))
+      onNotify(`已绑定 ${address}，符号名 ${result.tag.name}`)
+      return
+    }
+    if (looksLikeAddress(value)) {
+      onNotify(kind === 'BOOL'
+        ? '位地址要写成 M4.0、I0.0 或 %M100.0（位号 0～7）。'
+        : '整数地址要写成 MW10、MD10 或 %MW100。')
+      return
+    }
+    if (value.includes('.')) {
+      onProgram(updateOutput(program, rung.id, { tag: value }))
+      return
+    }
     const exists = program.tags.some((tag) => tag.name === value && tag.kind === kind)
     const next = ensureNamedTag(program, value, kind)
     onProgram(updateOutput(next, rung.id, { tag: value }))
@@ -317,6 +450,7 @@ export default function QuickEditor({
   }
 
   const output = rung.output
+  const outputTag = hasInstance(output.kind) ? null : tagForReference(program, output.tag)
   const outputOptions = hasInstance(output.kind) ? refs.boolRefs : isInteger(output.kind) ? refs.intRefs : refs.boolRefs
 
   // 拖拽换位之外再给一条键盘/点击路径：QuickEditor 里的两个按钮，
@@ -394,8 +528,29 @@ export default function QuickEditor({
               options={node.kind === 'CMP' ? refs.intRefs : refs.boolRefs}
               listId={`qe-contact-${node.id}`}
               onCommit={commitTag}
-              hint={node.kind === 'CMP' ? '可输入 INT 变量或计数器 C1.CV' : '可输入变量名、T1.Q，或直接新建变量'}
+              primary
+              hint={node.kind === 'CMP'
+                ? '可输入 INT 变量、C1.CV，或 MW100 这样的地址'
+                : '可输入变量名、T1.Q，或直接输入 M100.0 这样的地址'}
             />
+
+            {boundTag && (
+              <AddressField
+                key={`${boundTag.id}-${boundTag.address}`}
+                value={boundTag.address}
+                kind={boundTag.kind}
+                onCommit={(address) => {
+                  const duplicate = program.tags.find((tag) => (
+                    tag.id !== boundTag.id && tag.address.trim().toUpperCase() === address
+                  ))
+                  onProgram(updateTag(program, boundTag.id, { address }))
+                  onNotify(duplicate
+                    ? `地址已改为 ${address}，与“${duplicate.name}”重复`
+                    : `地址已改为 ${address}，所有引用同步更新`)
+                }}
+                hint={`符号名“${boundTag.name}”，改地址会同步所有引用`}
+              />
+            )}
 
             {node.kind === 'CMP' && (
               <div className="qe-row">
@@ -554,8 +709,28 @@ export default function QuickEditor({
               options={outputOptions}
               listId={`qe-output-${output.id}`}
               onCommit={commitOutputTag}
-              hint={hasInstance(output.kind) ? `在触点中输入 ${output.tag || 'T1'}.Q 读取状态` : undefined}
+              hint={hasInstance(output.kind)
+                ? `在触点中输入 ${output.tag || 'T1'}.Q 读取状态`
+                : '可输入变量名或地址，例如 M5.0、Q0.0'}
             />
+
+            {outputTag && (
+              <AddressField
+                key={`${outputTag.id}-${outputTag.address}`}
+                value={outputTag.address}
+                kind={outputTag.kind}
+                onCommit={(address) => {
+                  const duplicate = program.tags.find((tag) => (
+                    tag.id !== outputTag.id && tag.address.trim().toUpperCase() === address
+                  ))
+                  onProgram(updateTag(program, outputTag.id, { address }))
+                  onNotify(duplicate
+                    ? `地址已改为 ${address}，与“${duplicate.name}”重复`
+                    : `地址已改为 ${address}，所有引用同步更新`)
+                }}
+                hint={`符号名“${outputTag.name}”，改地址会同步所有引用`}
+              />
+            )}
 
             {isTimer(output.kind) && (
               <>

@@ -57,6 +57,30 @@ export function parseByteAddress(address: string): ByteAddress | null {
   }
 }
 
+/**
+ * 用户在输入框里通常不会写百分号，也会混用大小写；
+ * 这里统一成 TIA 显示的 %M4.0 形式，格式不符才拒绝。
+ */
+export function normalizeBitAddress(input: string): string | null {
+  const text = input.trim().toUpperCase().replace(/\s+/g, '')
+  if (!text) return null
+  const address = text.startsWith('%') ? text : `%${text}`
+  return parseBitAddress(address) ? address : null
+}
+
+/** 整数变量地址：%MB6 / %MW10 / %MD20，同样允许省略百分号。 */
+export function normalizeByteAddress(input: string): string | null {
+  const text = input.trim().toUpperCase().replace(/\s+/g, '')
+  if (!text) return null
+  const address = text.startsWith('%') ? text : `%${text}`
+  return parseByteAddress(address) ? address : null
+}
+
+/** 判断输入是否在尝试写地址（而不是符号名），用于给出“格式不对”的精准提示。 */
+export function looksLikeAddress(input: string): boolean {
+  return /^%?[MIQ](?:[BWD]?\d)/i.test(input.trim())
+}
+
 export function byteAddressLength(width: ByteAddress['width']): number {
   if (width === 'W') return 2
   if (width === 'D') return 4

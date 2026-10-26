@@ -12,7 +12,14 @@ import type {
 } from '../engine/types'
 import { uid } from '../lib/uid'
 import { withinFieldLimit } from '../lib/limits'
-import { byteAddressLength, normalizeReference, parseBitAddress, parseByteAddress } from '../engine/references'
+import {
+  byteAddressLength,
+  normalizeBitAddress,
+  normalizeByteAddress,
+  normalizeReference,
+  parseBitAddress,
+  parseByteAddress,
+} from '../engine/references'
 
 export interface InsertSlot {
   /** 偶数长度：[] 为根链，[i, b] 为第 i 个并联节点的第 b 支路，依此类推。 */
@@ -154,6 +161,42 @@ export function updateTag(
     }),
   }
   return renaming ? rewriteRefs(next, current.name, nextName) : next
+}
+
+export interface AddressTagResult {
+  program: Program
+  tag: TagDef
+}
+
+/**
+ * 在操作数框里直接输入 M4.0 / %M100.0 时使用：
+ * 同地址变量已经存在就复用，否则顺手建一个，避免学生先跑去变量表登记。
+ */
+export function ensureAddressTag(
+  program: Program,
+  input: string,
+  kind: TagKind,
+): AddressTagResult | { error: string } {
+  const address = kind === 'BOOL' ? normalizeBitAddress(input) : normalizeByteAddress(input)
+  if (!address) {
+    return {
+      error: kind === 'BOOL'
+        ? '位地址要写成 M4.0、I0.0 或 %M100.0（位号 0～7）。'
+        : '整数地址要写成 MW10、MD10 或 %MW100。',
+    }
+  }
+  const existing = program.tags.find((tag) => tag.address.trim().toUpperCase() === address)
+  if (existing) {
+    if (existing.kind !== kind) {
+      return { error: `${address} 已被 ${existing.kind} 变量“${existing.name}”占用。` }
+    }
+    return { program, tag: existing }
+  }
+  const added = addTag(program, kind)
+  const created = added.tags.at(-1)
+  if (!created) return { error: '无法新建变量。' }
+  const next = updateTag(added, created.id, { address })
+  return { program: next, tag: next.tags.find((tag) => tag.id === created.id) ?? created }
 }
 
 export function deleteTag(program: Program, tagId: string): Program {
@@ -543,6 +586,12 @@ export function moveRung(program: Program, rungId: string, delta: -1 | 1): Progr
 
 function ensureTag(program: Program, kind: TagKind): Program {
   return program.tags.some((tag) => tag.kind === kind) ? program : addTag(program, kind)
+}
+
+/** 找到触点当前引用的变量（T1.Q 这类实例位自然找不到，返回 undefined）。 */
+function tagForReference(program: Program, reference: string): TagDef | undefined {
+  const base = normalizeReference(reference).split('.')[0]
+  return program.tags.find((tag) => normalizeReference(tag.name) === base)
 }
 
 /** 已经出现在程序里的变量名，用来避免新元件默认复用同一个变量。 */
@@ -1034,20 +1083,39 @@ export function changeOutputKind(program: Program, rungId: string, kind: OutputK
 export function changeContactKind(program: Program, rungId: string, path: number[], kind: ContactKind): Program {
   const node = getNodeAtPath(program, rungId, path)
   if (!node || node.type !== 'contact') return program
-  if (kind === 'CMP') {
-    const next = ensureTag(program, 'INT')
-    const intTag = next.tags.find((tag) => tag.kind === 'INT')
-    return withRung(next, rungId, (rung) => ({
+  const currentTag = tagForReference(program, node.tag)
+  const boolKind = kind === 'NO' || kind === 'NC' || kind === 'P' || kind === 'N'
+  // 常开/常闭/边沿只是同一条 BOOL 触点的不同表现，换类型时必须保留操作数。
+  // node.kind !== 'CMP' 也覆盖 T1.Q 这类变量的实例位引用。
+  if (boolKind && node.kind !== 'CMP') {
+    return withRung(program, rungId, (rung) => ({
       ...rung,
-      nodes: replaceContact(rung.nodes, node.id, { kind, tag: intTag?.name ?? '', compareOp: '>=', compareValue: 1 }),
+      nodes: replaceContact(rung.nodes, node.id, { kind, tag: node.tag }),
+    }))
+  }
+  if (kind === 'CMP') {
+    if (currentTag?.kind === 'INT') {
+      return withRung(program, rungId, (rung) => ({
+        ...rung,
+        nodes: replaceContact(rung.nodes, node.id, { kind, tag: node.tag }),
+      }))
+    }
+    const made = tagForNewContact(program, 'INT')
+    return withRung(made.program, rungId, (rung) => ({
+      ...rung,
+      nodes: replaceContact(rung.nodes, node.id, {
+        kind,
+        tag: made.tag?.name ?? '',
+        compareOp: '>=',
+        compareValue: 1,
+      }),
     }))
   }
   if (kind === 'NO' || kind === 'NC' || kind === 'P' || kind === 'N') {
-    const next = ensureTag(program, 'BOOL')
-    const boolTag = next.tags.find((tag) => tag.kind === 'BOOL')
-    return withRung(next, rungId, (rung) => ({
+    const made = tagForNewContact(program, 'BOOL')
+    return withRung(made.program, rungId, (rung) => ({
       ...rung,
-      nodes: replaceContact(rung.nodes, node.id, { kind, tag: boolTag?.name ?? '' }),
+      nodes: replaceContact(rung.nodes, node.id, { kind, tag: made.tag?.name ?? '' }),
     }))
   }
   return program

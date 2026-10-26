@@ -341,6 +341,36 @@ const kindApplied = await evaluate(`(() => {
   return active?.textContent?.trim() ?? null
 })()`)
 check('desktop/contact-kind-edits', kindSwitch && kindApplied === '常闭', kindApplied)
+
+// 地址和符号名分开：直接改地址应立刻同步到画布，并且画布保留带引号的符号名。
+const addressStarted = await evaluate(`(() => {
+  const field = [...document.querySelectorAll('.qe-field')]
+    .find((item) => item.querySelector(':scope > span')?.textContent?.trim() === '地址')
+  const input = field?.querySelector('input')
+  if (!input) return false
+  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
+  setter?.call(input, 'M100.0')
+  input.dispatchEvent(new Event('input', { bubbles: true }))
+  input.focus()
+  return input.value === 'M100.0'
+})()`)
+await sleep(100)
+await pressKey('Enter', 'Enter', 13)
+await sleep(380)
+const addressEdit = await evaluate(`({
+  addresses: [...document.querySelectorAll('.ll-node-address, .ll-output-address')]
+    .map((item) => item.textContent?.trim()),
+  names: [...document.querySelectorAll('.ll-node-name, .ll-output-name')]
+    .map((item) => item.textContent?.trim()),
+  field: document.querySelector('.qe-field .qe-input')?.value ?? null,
+})`)
+check(
+  'desktop/address-edits-and-symbol-persists',
+  addressStarted
+    && addressEdit.addresses.includes('%M100.0')
+    && addressEdit.names.some((name) => /^"[^"]+"$/.test(name)),
+  addressEdit,
+)
 await screenshot('docs/qa/desktop-quick-editor.png')
 
 // 反方向也必须是单层：就近参数框开着时点「变量表」，参数框要收起，
@@ -421,12 +451,14 @@ const slotInsert = await evaluate(`({
   selected: document.querySelectorAll('.ll-node.is-selected').length,
   menuOpen: !!document.querySelector('.ll-slot-menu'),
   toast: document.querySelector('.toast-message')?.textContent?.trim() ?? null,
+  primaryFocused: document.activeElement?.matches('.qe-panel .qe-input[data-primary="true"]') === true,
 })`)
 check(
   'desktop/slot-menu-inserts-contact',
   afterInsert === beforeInsert + 1
     && slotInsert.selected === 1
     && !slotInsert.menuOpen
+    && slotInsert.primaryFocused
     && String(slotInsert.toast ?? '').includes('常闭触点已插入'),
   { beforeInsert, afterInsert, ...slotInsert },
 )
@@ -447,6 +479,33 @@ await evaluate(`document.querySelector('.wb-history-actions [aria-label="重做�
 await sleep(450)
 const afterRedo = await evaluate(`document.querySelectorAll('.ll-node[data-node-id]').length`)
 check('desktop/history-works', afterUndo === beforeInsert && afterRedo === afterInsert, { afterUndo, afterRedo })
+
+// 操作数输入框也能直接接收绝对地址：不必先去变量表建变量。
+await evaluate(`document.querySelector('.ll-node[data-node-id]')
+  ?.dispatchEvent(new MouseEvent('click', { bubbles: true }))`)
+await sleep(320)
+const operandStarted = await evaluate(`(() => {
+  const input = document.querySelector('.qe-panel .qe-input[data-primary="true"]')
+  if (!input) return false
+  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
+  setter?.call(input, 'M4.0')
+  input.dispatchEvent(new Event('input', { bubbles: true }))
+  input.focus()
+  return input.value === 'M4.0'
+})()`)
+await sleep(100)
+await pressKey('Enter', 'Enter', 13)
+await sleep(380)
+const operandAddress = await evaluate(`({
+  address: [...document.querySelectorAll('.ll-node-address, .ll-output-address')]
+    .map((item) => item.textContent?.trim()),
+  toast: document.querySelector('.toast-message')?.textContent?.trim() ?? null,
+})`)
+check(
+  'desktop/operand-accepts-absolute-address',
+  operandStarted && operandAddress.address.includes('%M4.0'),
+  operandAddress,
+)
 
 // 插入位菜单要能被 Esc 收起：触屏上误点开菜单后，不能只靠再点一次 + 才关得掉。
 await reload(true)

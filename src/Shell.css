@@ -18,6 +18,8 @@
   --accent: #0f6b7a;
   --accent-ink: #0a4c58;
   --accent-wash: #e3eef0;
+  /* TIA's cyan operand annotations stay distinct from the green power flow. */
+  --address-ink: #007f8f;
   --positive: #157347;
   --positive-wash: #e8f3ec;
   --negative: #b3261e;
@@ -1159,12 +1161,12 @@ body[data-drag-kind] {
 
 .wb-shell .ll-node-name,
 .wb-shell .ll-output-name {
-  font-size: 13px;
+  font-size: 10px;
 }
 
 .wb-shell .ll-node-address,
 .wb-shell .ll-output-address {
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .wb-shell .ll-add-rung {
@@ -3040,11 +3042,12 @@ body[data-drag-kind] {
   border-radius: 2px;
 }
 
-/* Addressing is reference data: a step up from micro-copy, still subordinate
-   to the symbolic names that engineers scan first. */
+/* Absolute addresses are the operand students enter directly, so they lead;
+   the quoted symbolic name stays available as secondary context. */
 .wb-shell .ll-node-address,
 .wb-shell .ll-output-address {
   font-size: 12px;
+  font-weight: 700;
   letter-spacing: 0;
 }
 

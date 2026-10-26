@@ -368,15 +368,12 @@ function tagDetails(tags: TagDef[], reference: string) {
   const base = reference.split('.')[0]
   const bitSuffix = reference.length > base.length ? reference.slice(base.length) : ''
   return {
+    bound: Boolean(tag),
     name: tag?.name || base || '未绑定变量',
     address: tag ? tag.address + bitSuffix : (reference || '—'),
     comment: tag?.comment || '未填写注释',
     kind: tag?.kind ?? '—',
   }
-}
-
-function visibleAddress(name: string, address: string): string | null {
-  return address.replace(/^%/, '') === name ? null : address
 }
 
 function formatTime(value: number): string {
@@ -629,7 +626,8 @@ function renderContact(
   const grouped = selected && (context.selection?.paths?.length ?? 0) > 1
   const powered = context.runtime.nodePower[node.id] === true
   const details = tagDetails(context.tags, node.tag)
-  const address = visibleAddress(details.name, details.address)
+  const address = details.bound ? details.address : ''
+  const symbol = details.bound ? `"${details.name}"` : details.name
   const centerX = size.width / 2
   const selection = { rungId: context.rungId, path }
   const sourceKey = 'node:' + context.rungId + ':' + path.join('.')
@@ -774,14 +772,19 @@ function renderContact(
         </g>
       )}
 
-      <text className="ll-node-name" x={centerX} y="15" textAnchor="middle">
-        {shorten(details.name, m.nameChars)}
-      </text>
       {address && (
-        <text className="ll-node-address" x={centerX} y="29" textAnchor="middle">
+        <text className="ll-node-address" x={centerX} y="14" textAnchor="middle">
           {shorten(address, m.addressChars)}
         </text>
       )}
+      <text
+        className="ll-node-name"
+        x={centerX}
+        y={address ? 28 : 15}
+        textAnchor="middle"
+      >
+        {shorten(symbol, m.nameChars)}
+      </text>
       {renderNodeGrip(size.width, size.height)}
       <rect
         className="ll-selection-box"
@@ -878,7 +881,8 @@ function renderOutput(
   const powered = context.runtime.outputPower[output.id] === true
   const q = readOutputQ(output, context.runtime)
   const details = tagDetails(context.tags, output.tag)
-  const address = visibleAddress(details.name, details.address)
+  const address = details.bound ? details.address : ''
+  const symbol = details.bound ? `"${details.name}"` : details.name
   const isCoil = output.kind === 'COIL' || output.kind === 'SET' || output.kind === 'RESET'
   const isTimer = output.kind === 'TON' || output.kind === 'TOF' || output.kind === 'TONR'
   const centerY = isCoil ? m.coilLineY : m.boxLineY
@@ -958,24 +962,42 @@ function renderOutput(
           >
             {output.kind === 'SET' ? 'S' : output.kind === 'RESET' ? 'R' : ''}
           </text>
-          <text className="ll-output-name" x={symbolX} y="14" textAnchor="middle">
-            {shorten(details.name, m.nameChars)}
-          </text>
           {address && (
-            <text className="ll-output-address" x={symbolX} y="28" textAnchor="middle">
+            <text className="ll-output-address" x={symbolX} y="14" textAnchor="middle">
               {shorten(address, m.addressChars)}
             </text>
           )}
+          <text
+            className="ll-output-name"
+            x={symbolX}
+            y={address ? 28 : 15}
+            textAnchor="middle"
+          >
+            {shorten(symbol, m.nameChars)}
+          </text>
         </g>
       ) : (
         <g>
-          <text className="ll-output-name" x={symbolX} y="14" textAnchor="middle">
-            {shorten(isTimer || output.kind === 'CTU' ? output.tag : details.name, m.boxChars)}
-          </text>
-          {!isTimer && output.kind !== 'CTU' && address && (
-            <text className="ll-output-address" x={symbolX} y="27" textAnchor="middle">
-              {shorten(address, m.boxChars)}
+          {isTimer || output.kind === 'CTU' ? (
+            <text className="ll-output-name" x={symbolX} y="15" textAnchor="middle">
+              {shorten(output.tag, m.boxChars)}
             </text>
+          ) : (
+            <>
+              {address && (
+                <text className="ll-output-address" x={symbolX} y="14" textAnchor="middle">
+                  {shorten(address, m.boxChars)}
+                </text>
+              )}
+              <text
+                className="ll-output-name"
+                x={symbolX}
+                y={address ? 28 : 15}
+                textAnchor="middle"
+              >
+                {shorten(symbol, m.boxChars)}
+              </text>
+            </>
           )}
           <path
             className={'ll-wire' + (powered ? ' is-on' : '')}
@@ -1952,7 +1974,8 @@ export default function LadderCanvas({
     const slot = menuSlot(slotMenu)
     setLastKind(kind)
     closeSlotMenu(false)
-    setPendingFocus({ ...slot, chain: [...slot.chain], index: slot.index + 1 })
+    // 新元件会立即进入操作数编辑；焦点交给参数框，不能再抢回下一个 +。
+    setPendingFocus(null)
     onInsertAt?.(slot, kind)
   }
 
