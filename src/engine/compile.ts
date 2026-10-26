@@ -42,7 +42,7 @@ interface Drive {
 interface DriveWriter extends Drive {
   /** 同一个输出可能同时写多个字段；同一写入者不得对自己报冲突。 */
   writer: string
-  /** 该梯级的串联条件，用于排除“复位/启动”这类互斥分支的误报。 */
+  /** 该程序段的串联条件，用于排除“复位/启动”这类互斥分支的误报。 */
   guard: Guard
 }
 
@@ -55,7 +55,7 @@ interface GuardTerm {
 interface Guard {
   /**
    * 串联条件按并联支路展开成若干“同时成立”的组合。
-   * 只有任意两组组合都互斥时，两条梯级才算互斥，避免把
+   * 只有任意两组组合都互斥时，两个程序段才算互斥，避免把
    * 「SD 松开才入库」和「SD 保持才循环」误判成同时通电。
    */
   terms: GuardTerm[]
@@ -139,15 +139,41 @@ function compareDisjoint(
   left: { op: string; value: number },
   right: { op: string; value: number },
 ): boolean {
-  const opposite = (a: string, b: string) => (left.op === a && right.op === b) || (left.op === b && right.op === a)
-  if (left.value !== right.value) {
-    return (left.op === '==' && right.op === '==') || opposite('==', '<>')
+  // 等值判断单独处理：== 5 与 <> 6 可以同时成立，== 5 与 == 5 也可以
+  // （同一条件写两处输出正是需要提醒的写冲突），只有真正覆盖不到同一个整数时才互斥。
+  if (left.op === '==') return equalityDisjoint(left, right)
+  if (right.op === '==') return equalityDisjoint(right, left)
+
+  const below = (op: string) => op === '<' || op === '<='
+  const above = (op: string) => op === '>' || op === '>='
+  if (below(left.op) && above(right.op)) return boundDisjoint(left, right)
+  if (above(left.op) && below(right.op)) return boundDisjoint(right, left)
+  return false
+}
+
+function equalityDisjoint(
+  equality: { op: string; value: number },
+  other: { op: string; value: number },
+): boolean {
+  switch (other.op) {
+    case '==': return equality.value !== other.value
+    case '<>': return equality.value === other.value
+    case '<': return equality.value >= other.value
+    case '<=': return equality.value > other.value
+    case '>': return equality.value <= other.value
+    case '>=': return equality.value < other.value
+    default: return false
   }
-  return opposite('==', '<>')
-    || opposite('<', '>=')
-    || opposite('<=', '>')
-    || opposite('>', '<=')
-    || opposite('>=', '<')
+}
+
+/** below 是上界（< / <=），above 是下界（> / >=）；按整数区间判断两者是否完全不重叠。 */
+function boundDisjoint(
+  below: { op: string; value: number },
+  above: { op: string; value: number },
+): boolean {
+  const lowest = above.op === '>' ? above.value + 1 : above.value
+  const highest = below.op === '<' ? below.value - 1 : below.value
+  return lowest > highest
 }
 
 function termExclusive(left: GuardTerm, right: GuardTerm): boolean {
@@ -165,7 +191,7 @@ function termExclusive(left: GuardTerm, right: GuardTerm): boolean {
   return false
 }
 
-/** 两个梯级的串联条件如果出现相反极性或互相排斥的比较，就永远不会同时通电。 */
+/** 两个程序段的串联条件如果出现相反极性或互相排斥的比较，就永远不会同时通电。 */
 function obviouslyExclusive(left: Guard, right: Guard): boolean {
   return left.terms.every((a) => right.terms.every((b) => termExclusive(a, b)))
 }
@@ -635,7 +661,7 @@ export function compile(program: Program): CompileResult {
   }
 
   for (const rung of program.rungs) {
-    // 无条件梯级是合法的常通能流，MOVE、TON 和 RESET 都可能需要每扫描执行。
+    // 无条件的程序段是合法的常通能流，MOVE、TON 和 RESET 都可能需要每扫描执行。
     walkChain(rung.nodes, (node) => {
       if (node.type === 'contact') checkContact(ctx, rung.id, node)
     })

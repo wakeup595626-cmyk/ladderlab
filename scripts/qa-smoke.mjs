@@ -256,6 +256,7 @@ await sleep(500)
 const twoSegments = await evaluate(`({
   labels: [...document.querySelectorAll('.ll-rung-index')].map((item) => item.textContent?.trim()),
   rungs: document.querySelectorAll('.ll-rung').length,
+  ids: [...document.querySelectorAll('.ll-rung')].map((item) => item.getAttribute('data-rung-id')),
 })`)
 check('desktop/segment-numbering-new', twoSegments.rungs === 2 && twoSegments.labels.join('|') === '程序段 1|程序段 2', twoSegments)
 await screenshot('docs/qa/desktop-segments.png')
@@ -273,16 +274,23 @@ await sleep(500)
 const reordered = await evaluate(`({
   labels: [...document.querySelectorAll('.ll-rung-index')].map((item) => item.textContent?.trim()),
   firstTitle: document.querySelector('.ll-rung-name')?.value ?? null,
+  ids: [...document.querySelectorAll('.ll-rung')].map((item) => item.getAttribute('data-rung-id')),
 })`)
-check('desktop/segment-numbering-reorder', moveClicked && reordered.labels.join('|') === '程序段 1|程序段 2' && reordered.firstTitle === '新的程序段', reordered)
+check(
+  'desktop/segment-numbering-reorder',
+  moveClicked
+    && reordered.labels.join('|') === '程序段 1|程序段 2'
+    && reordered.ids.join(',') === [twoSegments.ids[1], twoSegments.ids[0]].join(','),
+  reordered,
+)
 
 // Ctrl+Z / Ctrl+Y 与博途一致，且在输入框之外直接生效。
 await pressKey('z', 'KeyZ', 90, 2)
-const keyboardUndo = await evaluate(`document.querySelector('.ll-rung-name')?.value ?? null`)
-check('desktop/ctrl-z-undo', keyboardUndo === firstTitle, { keyboardUndo, firstTitle })
+const keyboardUndo = await evaluate(`[...document.querySelectorAll('.ll-rung')].map((item) => item.getAttribute('data-rung-id'))`)
+check('desktop/ctrl-z-undo', keyboardUndo.join(',') === twoSegments.ids.join(','), { keyboardUndo, firstTitle })
 await pressKey('y', 'KeyY', 89, 2)
-const keyboardRedo = await evaluate(`document.querySelector('.ll-rung-name')?.value ?? null`)
-check('desktop/ctrl-y-redo', keyboardRedo === '新的程序段', keyboardRedo)
+const keyboardRedo = await evaluate(`[...document.querySelectorAll('.ll-rung')].map((item) => item.getAttribute('data-rung-id'))`)
+check('desktop/ctrl-y-redo', keyboardRedo.join(',') === reordered.ids.join(','), keyboardRedo)
 
 // 收尾：撤回上移、撤回新增，让后续截图回到单程序段。
 await pressKey('z', 'KeyZ', 90, 2)

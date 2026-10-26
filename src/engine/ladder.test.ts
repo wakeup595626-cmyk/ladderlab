@@ -124,7 +124,7 @@ describe('编译诊断', () => {
     expect(compile(source).errors[0].message).toContain('PT 必须大于 0')
   })
 
-  it('允许无条件 MOVE 和定时器梯级', () => {
+  it('允许无条件 MOVE 和定时器程序段', () => {
     const source = program(
       'v14',
       [tag('Source', 'INT', 1), tag('Target', 'INT', 0)],

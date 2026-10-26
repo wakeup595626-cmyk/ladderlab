@@ -9,6 +9,7 @@ import type {
   Runtime,
   Selection,
 } from '../engine/types'
+import { FIELD_LIMITS } from '../lib/limits'
 import {
   addTag,
   changeContactKind,
@@ -275,6 +276,7 @@ function TagsPanel({
                   key={`${tag.id}-name-${tag.name}`}
                   className="table-input mono tag-name-input"
                   defaultValue={tag.name}
+                  maxLength={FIELD_LIMITS.tagName}
                   aria-label="变量名称"
                   onBlur={(event) => {
                     const name = event.target.value.trim()
@@ -297,6 +299,7 @@ function TagsPanel({
                 key={`${tag.id}-comment-${tag.comment}`}
                 className="table-input comment-input"
                 defaultValue={tag.comment}
+                maxLength={FIELD_LIMITS.tagComment}
                 placeholder="添加注释"
                 aria-label="变量注释"
                 onBlur={(event) => onProgram(updateTag(program, tag.id, { comment: event.target.value }))}
@@ -413,6 +416,7 @@ function TagsPanel({
                       key={`${tag.id}-monitor-name-${tag.name}`}
                       className="table-input mono"
                       defaultValue={tag.name}
+                      maxLength={FIELD_LIMITS.tagName}
                       onBlur={(event) => {
                         const name = event.target.value.trim()
                         if (name && name !== tag.name) onProgram(updateTag(program, tag.id, { name }))
@@ -457,6 +461,7 @@ function TagsPanel({
                       key={`${tag.id}-monitor-comment-${tag.comment}`}
                       className="table-input"
                       defaultValue={tag.comment}
+                      maxLength={FIELD_LIMITS.tagComment}
                       placeholder="可选"
                       onBlur={(event) => onProgram(updateTag(program, tag.id, { comment: event.target.value }))}
                     />

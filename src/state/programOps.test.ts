@@ -52,7 +52,7 @@ function program(rungs: Rung[], tags: TagDef[] = [tag('Start'), tag('Coil')]): P
 
 function rungOf(source: Program, id: string): Rung {
   const found = source.rungs.find((item) => item.id === id)
-  if (!found) throw new Error('测试梯级不存在：' + id)
+  if (!found) throw new Error('测试程序段不存在：' + id)
   return found
 }
 
@@ -115,7 +115,7 @@ describe('programOps 拖放操作', () => {
     expect(moveNode(source, 'r1', [0], { chain: [], index: 0 })).toBe(source)
   })
 
-  it('moveNode 跨支路移动后保留节点 id，梯级重排也保留内部 id', () => {
+  it('moveNode 跨支路移动后保留节点 id，程序段重排也保留内部 id', () => {
     const a = contact('a', 'A')
     const anchor = contact('anchor', 'Anchor')
     const b = contact('b', 'B')
@@ -251,7 +251,7 @@ describe('programOps 拖放操作', () => {
   })
 })
 
-describe('programOps 变量依赖与梯级复制', () => {
+describe('programOps 变量依赖与程序段复制', () => {
   it('改名时同步重写位别名的 bitOf 并保持新名大小写', () => {
     const byte = tag('Byte', 'INT', 0)
     const alias = { ...tag('Bit0'), id: 'alias-bit0', address: '%M0.0', bitOf: ' Byte ' }
@@ -294,7 +294,7 @@ describe('programOps 变量依赖与梯级复制', () => {
     expect(tagUsage(source, 'Missing')).toBe(0)
   })
 
-  it('复制定时器和计数器梯级清空输出绑定，复制线圈保持原输出', () => {
+  it('复制定时器和计数器程序段清空输出绑定，复制线圈保持原输出', () => {
     const source = program(
       [
         {
@@ -339,13 +339,13 @@ describe('programOps 变量依赖与梯级复制', () => {
     expect(timerCopy.output.tag).toBe('T2')
     expect(timerCopy.output.qTag).toBeUndefined()
     expect(timerCopy.output.valueTag).toBeUndefined()
-    expect(timerCopy.output.resetTag).toBeUndefined()
+    expect(timerCopy.output.resetTag).toBe('Reset')
 
     const counterCopy = duplicateRung(source, 'counter').rungs[2]
     expect(counterCopy.output.tag).toBe('C2')
     expect(counterCopy.output.qTag).toBeUndefined()
     expect(counterCopy.output.valueTag).toBeUndefined()
-    expect(counterCopy.output.resetTag).toBeUndefined()
+    expect(counterCopy.output.resetTag).toBe('Reset')
 
     const coilSource = program([rung('coil', [contact('c1', 'Start')])], [tag('Start'), tag('Coil')])
     const coilCopy = duplicateRung(coilSource, 'coil').rungs[1]

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { PROFILES } from '../engine/profiles'
 import type { ProfileId } from '../engine/types'
+import { FIELD_LIMITS } from '../lib/limits'
 import {
   FolderIcon,
   HelpIcon,
@@ -165,6 +166,7 @@ export default function WorkspaceTopBar({
           title="撤销上一步 (Ctrl+Z)"
         >
           <UndoIcon size={17} />
+          <span className="wb-history-label">撤销</span>
         </button>
         <button
           type="button"
@@ -176,6 +178,7 @@ export default function WorkspaceTopBar({
           title="重做下一步 (Ctrl+Y 或 Ctrl+Shift+Z)"
         >
           <RedoIcon size={17} />
+          <span className="wb-history-label">重做</span>
         </button>
       </div>
 
@@ -184,6 +187,7 @@ export default function WorkspaceTopBar({
         <input
           id="project-name"
           value={nameDraft}
+          maxLength={FIELD_LIMITS.programName}
           onChange={(event) => setNameDraft(event.target.value)}
           onFocus={() => { nameEditingRef.current = true }}
           onBlur={commitName}
@@ -198,6 +202,7 @@ export default function WorkspaceTopBar({
             }
           }}
           spellCheck={false}
+          title={nameDraft || '工程名称'}
           aria-label="工程名称，输入后按回车保存"
         />
       </label>

@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { supportsContact, supportsOutput } from '../engine/profiles'
+import { FIELD_LIMITS } from '../lib/limits'
 import type {
   ContactKind,
   LadderNode,
@@ -112,6 +113,7 @@ function TagField({
         className="qe-input mono"
         key={`${listId}-${value}`}
         defaultValue={value}
+        maxLength={FIELD_LIMITS.tagName}
         list={listId}
         spellCheck={false}
         autoComplete="off"

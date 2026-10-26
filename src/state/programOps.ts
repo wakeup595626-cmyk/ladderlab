@@ -445,7 +445,8 @@ export function duplicateRung(program: Program, rungId: string): Program {
       tag: ['TON', 'TOF', 'TONR'].includes(source.output.kind)
         ? nextInstanceName(program, 'T')
         : source.output.kind === 'CTU' ? nextInstanceName(program, 'C') : source.output.tag,
-      ...(clearsOutputs ? { qTag: undefined, valueTag: undefined, resetTag: undefined } : {}),
+      // resetTag 是 TONR / CTU 的运行输入，复制后应保留；只解除真正的输出绑定。
+      ...(clearsOutputs ? { qTag: undefined, valueTag: undefined } : {}),
       ...(source.output.pattern ? { pattern: [...source.output.pattern] } : {}),
     },
   }

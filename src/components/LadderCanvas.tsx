@@ -14,6 +14,7 @@ import type {
   TagDef,
 } from '../engine/types'
 import type { DragPayload, DropTarget } from '../lib/dragTypes'
+import { FIELD_LIMITS } from '../lib/limits'
 import {
   GripIcon,
   MoreIcon,
@@ -1113,6 +1114,7 @@ function RungSection({
         powered ? 'is-powered' : '',
         rungSelected ? 'is-selected' : '',
       ].filter(Boolean).join(' ')}
+      data-rung-id={rung.id}
       aria-label={segmentLabel + '：' + (rung.label || '未命名')}
     >
       <header
@@ -1147,8 +1149,8 @@ function RungSection({
             value={titleValue}
             readOnly={!onRenameRung}
             placeholder={onRenameRung ? '添加标题（可选）' : ''}
-            aria-label={'给' + segmentLabel + '添加标题'}
-            maxLength={120}
+            aria-label={'给 ' + segmentLabel + ' 添加标题'}
+            maxLength={FIELD_LIMITS.rungLabel}
             data-no-rung-drag
             onChange={(event) => setTitleDraft(event.target.value)}
             onBlur={commitTitle}

@@ -3129,10 +3129,11 @@ body[data-drag-kind] * {
     display: none;
   }
 
-  /* 手机端参数面板贴底，提示条移到顶部，避免盖住删除等关键按钮 */
+  /* 手机端提示条停在底部导航上方。顶部那一条正好是「Main [OB1] / 变量表」，
+     提示条压上去会挡住它自己让你去点的按钮；贴着导航则是常见的 snackbar 位置。 */
   .toast {
-    top: 56px;
-    bottom: auto;
+    top: auto;
+    bottom: calc(68px + env(safe-area-inset-bottom, 0px));
   }
 
   .library-list {

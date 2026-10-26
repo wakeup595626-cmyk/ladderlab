@@ -6,6 +6,7 @@ import { parseBitAddress, parseByteAddress } from './references'
 import { blankProgram } from './samples'
 import { createRuntime, step, writeRuntimeValue } from './simulate'
 import type {
+  CompareOp,
   ContactKind,
   LadderNode,
   OutputElement,
@@ -102,7 +103,7 @@ describe('引用与地址边界', () => {
 })
 
 describe('状态 ID 与配置校验', () => {
-  it('拒绝重复的变量、梯级和输出 ID', () => {
+  it('拒绝重复的变量、程序段和输出 ID', () => {
     const duplicateTags = program(
       [tag('A', 'BOOL', false, '', 'same'), tag('B', 'BOOL', false, '', 'same')],
       [rung('r1', [], output('COIL', 'A'))],
@@ -334,6 +335,33 @@ describe('输出驱动与定时器边界', () => {
     const driveWarnings = compile(source).warnings.filter((item) => item.message.includes('多处输出驱动'))
     expect(driveWarnings).toHaveLength(2)
   })
+
+  it('比较条件只在整数区间完全不重叠时才判定互斥', () => {
+    const tags = [tag('Pulse'), tag('Count', 'INT', 0), tag('Lamp')]
+    const cmp = (id: string, op: CompareOp, value: number): LadderNode => ({
+      type: 'contact', id, kind: 'CMP', tag: 'Count', compare: { op, value },
+    })
+    const drive = (id: string, node: LadderNode) => rung(
+      id,
+      [contact(`${id}-pulse`, 'NO', 'Pulse'), node],
+      output('COIL', 'Lamp', { id: `out-${id}` }),
+    )
+    const messages = (left: LadderNode, right: LadderNode) => compile(program(tags, [
+      drive('left', left),
+      drive('right', right),
+    ])).warnings.map((item) => item.message).join('\n')
+
+    // 同一个条件写两处输出必须继续告警，不能被“看似互斥”吞掉。
+    expect(messages(cmp('a', '==', 5), cmp('b', '==', 5))).toMatch(/驱动/)
+    expect(messages(cmp('a', '==', 5), cmp('b', '<>', 6))).toMatch(/驱动/)
+    expect(messages(cmp('a', '<=', 5), cmp('b', '>=', 5))).toMatch(/驱动/)
+
+    expect(messages(cmp('a', '==', 5), cmp('b', '==', 6))).toBe('')
+    expect(messages(cmp('a', '==', 5), cmp('b', '<>', 5))).toBe('')
+    expect(messages(cmp('a', '<', 5), cmp('b', '>', 5))).toBe('')
+    expect(messages(cmp('a', '<', 5), cmp('b', '>=', 5))).toBe('')
+    expect(messages(cmp('a', '<=', 5), cmp('b', '>', 5))).toBe('')
+  })
 })
 
 describe('16 位仿真语义', () => {
@@ -428,7 +456,7 @@ describe('工程导入边界', () => {
     expect(parsed.rungs[0].output.tag).toBe(first.output.tag)
   })
 
-  it('拒绝重复变量、梯级、输出和边沿触点 ID', () => {
+  it('拒绝重复变量、程序段、输出和边沿触点 ID', () => {
     const source = blankProgram()
     const first = source.rungs[0]
     const expectError = (value: unknown, message: string) => {
@@ -505,7 +533,7 @@ describe('工程导入边界', () => {
     }))).toThrow('最多支持 1024')
   })
 
-  it('拒绝超过 5 MB 的工程文本和超长工程名、变量名、注释、梯级名', () => {
+  it('拒绝超过 5 MB 的工程文本和超长工程名、变量名、注释、程序段名', () => {
     expect(() => parseProgramText(' '.repeat(MAX_IMPORT_BYTES + 1))).toThrow('超过 5 MB')
 
     const source = blankProgram()

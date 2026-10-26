@@ -25,6 +25,7 @@ import type {
   ContactKind,
   OutputKind,
   Program,
+  Rung,
   Runtime,
   Selection,
 } from './engine/types'
@@ -349,6 +350,19 @@ export default function App() {
       if (next === previous.present) return previous
       const past = [...previous.past, previous.present].slice(-HISTORY_LIMIT)
       return { past, present: next, future: [] }
+    })
+  }, [])
+
+  // Toast 上的「撤销」只能把这一段插回当前工程，不能回滚成删除那一刻的整份快照，
+  // 否则用户在删除后继续做的编辑会被悄悄丢掉。
+  const restoreRung = useCallback((rung: Rung, index: number) => {
+    setHistory((previous) => {
+      if (previous.present.rungs.some((item) => item.id === rung.id)) return previous
+      const rungs = [...previous.present.rungs]
+      const at = Math.max(0, Math.min(index, rungs.length))
+      rungs.splice(at, 0, rung)
+      const past = [...previous.past, previous.present].slice(-HISTORY_LIMIT)
+      return { past, present: { ...previous.present, rungs }, future: [] }
     })
   }, [])
 
@@ -797,8 +811,9 @@ export default function App() {
       action: {
         label: '撤销',
         run: () => {
-          commit(program)
-          if (removed) setSelection({ rungId: removed.id, path: null })
+          if (!removed) return
+          restoreRung(removed, index)
+          setSelection({ rungId: removed.id, path: null })
         },
       },
     })
@@ -983,7 +998,7 @@ export default function App() {
     notify('恢复副本已下载')
   }
 
-  const restoreBackup = (backup: RecoveryBackup) => {
+  const restoreBackup = async (backup: RecoveryBackup) => {
     const raw = readRecoveryBackup(backup.key)
     if (raw === null) {
       notify('这份恢复副本已经不在本机存储里了')
@@ -997,6 +1012,18 @@ export default function App() {
       notify(`这份恢复副本无法解析：${error instanceof Error ? error.message : '未知错误'}`)
       return
     }
+    const accepted = await confirm({
+      title: '载入这份恢复副本？',
+      description: '当前工程会被替换，替换前会先在本机存一份恢复副本。',
+      confirmLabel: '载入',
+    })
+    if (!accepted) return
+    // 覆盖之前先留底，失败就不动当前工程，避免两边都丢。
+    if (!archiveProgramVersion(program)) {
+      notify('没能保存当前工程的恢复副本，已取消载入；请先导出工程 JSON', { tone: 'error' })
+      return
+    }
+    setBackups(listRecoveryBackups())
     commit(restored)
     setSelection(restored.rungs[0] ? { rungId: restored.rungs[0].id, path: null } : null)
     notify(corruptProject

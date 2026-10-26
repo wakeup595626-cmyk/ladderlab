@@ -154,6 +154,28 @@ body[data-drag-kind] {
 .wb-history-actions .wb-history-button {
   width: 34px;
   height: 34px;
+  color: var(--text);
+}
+
+.wb-history-label {
+  display: none;
+}
+
+/* 宽屏把「撤销 / 重做」直接写出来，和博途的快速访问工具栏一样一眼可见；
+   手机上收成图标加小字，命中区域仍保持 40px 高。 */
+@media (min-width: 1181px) {
+  .wb-history-actions .wb-history-button {
+    width: auto;
+    padding: 0 10px;
+    gap: 5px;
+  }
+
+  .wb-history-label {
+    display: inline;
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1;
+  }
 }
 
 .wb-project-button {
@@ -1311,8 +1333,17 @@ body[data-drag-kind] {
   }
 
   .wb-history-actions .wb-history-button {
-    width: 38px;
+    width: auto;
     height: 40px;
+    padding: 0 6px;
+    gap: 3px;
+  }
+
+  .wb-history-label {
+    display: inline;
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1;
   }
 
   .wb-project-name {
@@ -1511,6 +1542,21 @@ body[data-drag-kind] {
   .wb-about-list > div {
     grid-template-columns: 46px minmax(0, 1fr);
     gap: 10px;
+  }
+}
+
+@media (max-width: 400px) {
+  /* 360 这类最窄的手机：运行按钮只留图标，把宽度让给工程名，
+     避免「未命名项目」被挤成「未命…」。图标加底色仍然表达运行/暂停。 */
+  .wb-shell .wb-run-toggle {
+    width: 44px;
+    min-width: 44px;
+    padding: 0;
+    justify-content: center;
+  }
+
+  .wb-shell .wb-run-toggle span {
+    display: none;
   }
 }
 
