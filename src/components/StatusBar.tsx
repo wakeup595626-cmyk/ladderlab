@@ -2,6 +2,7 @@ import type { CompileResult } from '../engine/types'
 
 interface StatusBarProps {
   running: boolean
+  simTime: number
   compileResult: CompileResult
   lastSavedAt: number | null
   savePending: boolean
@@ -18,6 +19,7 @@ const savedTimeFormatter = new Intl.DateTimeFormat('zh-CN', {
 
 export default function StatusBar({
   running,
+  simTime,
   compileResult,
   lastSavedAt,
   savePending,
@@ -45,10 +47,15 @@ export default function StatusBar({
 
   return (
     <footer className="status-bar wb-statusbar">
-      <span className={running ? 'run-state online' : 'run-state'}>
+      <span className={running ? 'run-state online' : 'run-state'} role="status" aria-live="polite">
         <i />
-        {running ? '正在扫描' : '仿真暂停'}
+        {running ? '仿真运行中' : '仿真暂停'}
       </span>
+      {running && (
+        <span className="run-clock" aria-hidden="true">
+          已扫描 {(simTime / 1000).toFixed(1)} s
+        </span>
+      )}
       {compileResult.errors.length > 0 && (
         <span className="status-error">{compileResult.errors.length} 个错误</span>
       )}

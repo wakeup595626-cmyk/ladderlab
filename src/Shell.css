@@ -287,6 +287,31 @@ body[data-drag-kind] {
   color: var(--faint);
 }
 
+.wb-shell .wb-run-toggle.is-blocked {
+  border-color: color-mix(in srgb, var(--negative) 46%, var(--border));
+  background: var(--negative-wash);
+  color: var(--negative);
+}
+
+.wb-shell .wb-run-toggle.is-blocked:hover:not(:disabled) {
+  border-color: var(--negative);
+  background: color-mix(in srgb, var(--negative) 14%, var(--surface));
+}
+
+.run-error-count {
+  display: inline-grid;
+  min-width: 16px;
+  height: 16px;
+  place-items: center;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--negative);
+  color: #fff;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
 .wb-shell .wb-more .icon-button {
   width: 36px;
   height: 36px;
@@ -444,6 +469,35 @@ body[data-drag-kind] {
 .wb-doc-state.is-live i {
   border-color: var(--positive);
   background: var(--positive);
+}
+
+.wb-doc-errors {
+  display: inline-flex;
+  height: 30px;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  border: 1px solid color-mix(in srgb, var(--negative) 36%, var(--border));
+  border-radius: 999px;
+  background: var(--negative-wash);
+  color: var(--negative);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.wb-doc-errors::before {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  content: '';
+}
+
+.wb-doc-errors:hover {
+  border-color: var(--negative);
+  background: color-mix(in srgb, var(--negative) 13%, var(--surface));
 }
 
 .wb-doc-errors.is-error {
@@ -1406,6 +1460,9 @@ body[data-drag-kind] {
 
 @media (max-width: 1180px) {
   .wb-context-layer {
+    /* 底部抽屉只压住内容区，顶栏（撤销 / 重做 / 运行）始终可点。
+       否则手机上面板一开，运行按钮看着在、点下去却先被遮罩吃掉。 */
+    top: 56px;
     align-items: flex-end;
   }
 
@@ -1796,6 +1853,10 @@ body[data-drag-kind] {
 
   .wb-shell .wb-run-toggle span {
     display: none;
+  }
+
+  .wb-shell .wb-run-toggle .run-error-count {
+    display: inline-grid;
   }
 }
 
@@ -3599,8 +3660,9 @@ body[data-drag-kind] {
 
   /* A notification must never sit on top of the fields in a bottom sheet. */
   .app-shell[data-sheet='open'] .toast {
-    /* 移到顶部也不能压住顶栏的撤销/重做与运行按钮，落在 56px 顶栏下方。 */
-    top: calc(64px + env(safe-area-inset-top, 0px));
+    /* 抽屉打开时提示条改走上侧，但要落在顶栏 + 文档栏下面，
+       不能挡住「Main [OB1]」和错误徽标。 */
+    top: calc(118px + env(safe-area-inset-top, 0px));
     bottom: auto;
     z-index: 140;
   }

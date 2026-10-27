@@ -2063,6 +2063,11 @@
   background: var(--positive);
 }
 
+.run-clock {
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+}
+
 .status-error {
   color: var(--negative);
   font-weight: 600;
@@ -2869,6 +2874,9 @@
   display: flex;
   align-items: center;
   gap: 10px;
+  /* left:50% 只留出半屏可用宽度，带按钮的提示会被挤成一条竖排字。
+     先按内容取宽，再用 max-width 兜底换行。 */
+  width: max-content;
   max-width: min(440px, calc(100vw - 32px));
   padding: 8px 13px;
   border: 1px solid var(--frame-ink);
@@ -3214,7 +3222,9 @@ body[data-drag-kind] * {
      提示条压上去会挡住它自己让你去点的按钮；贴着导航则是常见的 snackbar 位置。 */
   .toast {
     top: auto;
-    bottom: calc(68px + env(safe-area-inset-bottom, 0px));
+    /* 底部导航 56px + 状态栏 30px + 12px 间距：提示条不能压住
+       「仿真运行中 / 已扫描」这行运行证据。 */
+    bottom: calc(98px + env(safe-area-inset-bottom, 0px));
   }
 
   .library-list {
@@ -3277,6 +3287,8 @@ body[data-drag-kind] * {
   }
 
   .qe-scrim {
+    /* 与底部属性抽屉一致：遮罩从顶栏下方开始，运行按钮始终点得到。 */
+    top: 56px;
     z-index: 80;
     background: color-mix(in srgb, var(--frame-ink) 32%, transparent);
   }

@@ -454,15 +454,23 @@ export default function WorkspaceTopBar({
 
         <button
           type="button"
-          className={`run-toggle wb-run-toggle${running ? ' is-running' : ''}`}
+          className={`run-toggle wb-run-toggle${running ? ' is-running' : ''}${errorCount > 0 ? ' is-blocked' : ''}`}
           onClick={onRunToggle}
-          disabled={errorCount > 0}
-          aria-pressed={running}
-          aria-label={running ? '暂停仿真' : '运行仿真'}
-          title={errorCount > 0 ? `存在 ${errorCount} 个错误，请先查看诊断` : running ? '暂停连续扫描' : '开始连续扫描'}
+          aria-pressed={running && errorCount === 0}
+          aria-label={errorCount > 0
+            ? `有 ${errorCount} 个错误，暂时无法运行；点击查看诊断`
+            : running ? '暂停仿真' : '运行仿真'}
+          title={errorCount > 0
+            ? `有 ${errorCount} 个错误，点击打开诊断`
+            : running ? '暂停连续扫描' : '开始连续扫描'}
         >
           {running ? <PauseIcon size={17} /> : <PlayIcon size={17} />}
-          <span>{running ? '暂停' : '运行'}</span>
+          {errorCount > 0 && (
+            <span className="run-error-count" aria-hidden="true">
+              {errorCount > 9 ? '9+' : errorCount}
+            </span>
+          )}
+          <span>{errorCount > 0 ? '无法运行' : running ? '暂停' : '运行'}</span>
         </button>
 
         <div className="overflow wb-more" ref={menuRef}>

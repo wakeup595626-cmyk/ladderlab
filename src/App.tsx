@@ -488,6 +488,13 @@ export default function App() {
     }, duration)
   }, [stopToastTimer])
 
+  /** 停止或报错时把「仿真已开始」那条提示一起收掉，避免界面互相打脸。 */
+  const clearRunToast = useCallback(() => {
+    setToast((current) => (
+      current && current.message.startsWith('仿真已开始') ? null : current
+    ))
+  }, [])
+
   const setActiveProject = useCallback((id: string | null) => {
     setActiveSavedProjectId(id)
     writeActiveSavedProjectId(id)
@@ -1077,6 +1084,15 @@ export default function App() {
   }, [program])
 
   useEffect(() => {
+    // 扫描循环遇到编译错误会停下；状态栏和按钮也必须同步变成暂停，
+    // 否则定时器 PT 改成 0 这类不含拓扑变化的错误会出现“明明停了却显示正在扫描”。
+    if (compileResult.errors.length === 0 || !running) return
+    // oxlint-disable-next-line react/set-state-in-effect
+    setRunning(false)
+    clearRunToast()
+  }, [clearRunToast, compileResult.errors.length, running])
+
+  useEffect(() => {
     if (!running || compileResult.errors.length > 0) return
     let frameId = 0
     let previousTime = window.performance.now()
@@ -1245,28 +1261,6 @@ export default function App() {
     revealFavoriteInsertTarget(insertTarget.rungId)
   }, [insertTarget, revealFavoriteInsertTarget])
 
-  const runToggle = () => {
-    if (compileResult.errors.length > 0) {
-      notify('请先在诊断面板修复错误')
-      return
-    }
-    setRunning((value) => !value)
-  }
-
-  const stepOnce = () => {
-    if (compileResult.errors.length > 0) {
-      notify('工程存在错误，无法扫描')
-      return
-    }
-    setRuntime((previous) => step(program, previous, speed))
-  }
-
-  const resetSimulation = () => {
-    setRunning(false)
-    setRuntime(createRuntime(program))
-    notify('仿真已复位，变量恢复初值')
-  }
-
   const openInspector = (tab: InspectorTab) => {
     setInspectorTab(tab)
     if (window.matchMedia('(max-width: 1024px)').matches) {
@@ -1279,6 +1273,47 @@ export default function App() {
       setQuickEdit(null)
       setInspectorOpen(true)
     }
+  }
+
+  const runToggle = () => {
+    const errorCount = compileResult.errors.length
+    if (errorCount > 0) {
+      // 有错误时按钮仍然可以点：直接把诊断打开，比灰色按钮和悬停提示更容易理解。
+      // 诊断面板本身已经把错误逐条列出来了，不再叠一条会挡住文档栏的提示。
+      openInspector('diagnostics')
+      return
+    }
+    if (running) {
+      setRunning(false)
+      clearRunToast()
+      return
+    }
+    if (!window.matchMedia('(min-width: 1025px)').matches) {
+      // 手机/平板上先把底部抽屉收起来：运行按钮就在顶栏，按下之后应立刻看到
+      // 梯形图和底部状态栏，而不是继续盯着一块盖住半屏的参数面板。
+      setMobilePanel('none')
+      setInspectorOpen(false)
+      setQuickEdit(null)
+    }
+    setRunning(true)
+    notify('仿真已开始，正在连续扫描；切换输入后线圈才会得电', {
+      action: { label: '打开变量表', run: () => openInspector('tags') },
+    })
+  }
+
+  const stepOnce = () => {
+    if (compileResult.errors.length > 0) {
+      notify('工程存在错误，无法扫描', { tone: 'error', sticky: false })
+      openInspector('diagnostics')
+      return
+    }
+    setRuntime((previous) => step(program, previous, speed))
+  }
+
+  const resetSimulation = () => {
+    setRunning(false)
+    setRuntime(createRuntime(program))
+    notify('仿真已复位，变量恢复初值')
   }
 
   const insert = useCallback((kind: ContactKind, slot?: { rungId: string; chain: number[]; index: number }) => {
@@ -2324,7 +2359,9 @@ export default function App() {
           {compileResult.errors.length > 0 && (
             <button
               type="button"
-              className="wb-doc-errors"
+              className="wb-doc-errors is-error"
+              title="打开诊断并修复错误"
+              aria-label={`有 ${compileResult.errors.length} 个错误，打开诊断`}
               onClick={() => openInspector('diagnostics')}
             >
               {compileResult.errors.length} 个错误
@@ -2629,6 +2666,7 @@ export default function App() {
 
       <StatusBar
         running={running}
+        simTime={runtime.simTime}
         compileResult={compileResult}
         lastSavedAt={lastSavedAt}
         savePending={savePending}

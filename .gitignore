@@ -33,6 +33,7 @@ test-results
 playwright-report
 .taste-skill/
 docs/qa/
+qa-shots/
 docs/guide-demo.png
 docs/guide-desktop.png
 docs/guide-mobile.png
