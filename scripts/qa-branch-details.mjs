@@ -1,5 +1,5 @@
 /**
- * 本轮交互回归：并联支路继续分支、空白取消选中、边沿标记间距、右侧母线。
+ * 本轮交互回归：并联支路继续分支、全界面任意留白取消选中、全宽画布、边沿标记间距、右侧母线。
  * 先启动 preview（4173）与带 CDP 的浏览器（9222），再运行本脚本。
  */
 import { mkdir, writeFile } from 'node:fs/promises'
@@ -280,6 +280,64 @@ check('selection/blank-clears-wire', wireBeforeBlank === 1 && wireAfterBlank ===
   wireBeforeBlank,
   wireAfterBlank,
 })
+
+// 图纸之外、甚至程序区之外的界面留白也必须清除选中。
+await evaluate(`document.querySelector('.ll-node.ll-contact[data-node-id]')
+  ?.dispatchEvent(new MouseEvent('click', { bubbles: true }))`)
+await sleep(320)
+const beforeGutterClear = await evaluate(`({
+  selected: document.querySelectorAll('.ll-node.is-selected').length,
+  editor: !!document.querySelector('.qe-panel'),
+})`)
+await evaluate(`document.querySelector('.wb-documentbar')
+  ?.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0 }))`)
+await sleep(240)
+const afterHeaderClear = await evaluate(`({
+  selected: document.querySelectorAll('.ll-node.is-selected').length,
+  wires: document.querySelectorAll('.ll-slot.is-wire-selected').length,
+  editor: !!document.querySelector('.qe-panel'),
+})`)
+check('selection/any-blank-clears-node', beforeGutterClear.selected >= 1
+  && beforeGutterClear.editor && afterHeaderClear.selected === 0
+  && afterHeaderClear.wires === 0 && !afterHeaderClear.editor, {
+  beforeGutterClear,
+  afterHeaderClear,
+})
+
+// 程序区四周的留白也不能保留整块画布的选中状态。
+await evaluate(`document.querySelector('.ll-node.ll-contact[data-node-id]')
+  ?.dispatchEvent(new MouseEvent('click', { bubbles: true }))`)
+await sleep(320)
+await evaluate(`document.querySelector('.wb-program-pane')
+  ?.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0 }))`)
+await sleep(240)
+const paneGeometry = await evaluate(`(() => {
+  const pane = document.querySelector('.wb-program-pane')
+  const sheet = document.querySelector('.ll-program-sheet')
+  if (!pane || !sheet) return { present: false }
+  const paneRect = pane.getBoundingClientRect()
+  const sheetRect = sheet.getBoundingClientRect()
+  const style = getComputedStyle(pane)
+  return {
+    present: true,
+    selected: document.querySelectorAll('.ll-node.is-selected').length,
+    wires: document.querySelectorAll('.ll-slot.is-wire-selected').length,
+    editor: !!document.querySelector('.qe-panel'),
+    paneWidth: Math.round(paneRect.width),
+    sheetWidth: Math.round(sheetRect.width),
+    leftGap: Math.round(sheetRect.left - paneRect.left),
+    rightGap: Math.round(paneRect.right - sheetRect.right),
+    paddingLeft: style.paddingLeft,
+    paddingRight: style.paddingRight,
+  }
+})()`)
+check('selection/program-gutter-clears-node', paneGeometry.selected === 0
+  && paneGeometry.wires === 0 && !paneGeometry.editor, {
+  paneGeometry,
+})
+check('layout/program-fills-available-width', paneGeometry.present
+  && paneGeometry.sheetWidth >= paneGeometry.paneWidth - 20
+  && paneGeometry.leftGap <= 2 && paneGeometry.rightGap <= 18, paneGeometry)
 
 // P/N 标记位于两根触点竖线之间、变量名下方，不能贴字。
 await evaluate(`document.querySelector('.ll-node.ll-contact[data-node-id]')

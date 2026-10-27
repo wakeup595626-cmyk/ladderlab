@@ -1493,6 +1493,23 @@ export default function App() {
   /** 手机端一次只允许一层底部面板；提示条需要知道它是否被面板占住了底部。 */
   const sheetOpen = Boolean(quickEdit) || mobilePanel !== 'none'
 
+  /** 点界面任意非交互留白都取消元件选中；图纸内部仍由画布处理。 */
+  const clearSelectionOnBlankPointerDown = (event: {
+    button: number
+    target: EventTarget | null
+  }) => {
+    if (event.button !== 0 || !selection || !(event.target instanceof Element)) return
+    if (event.target.closest(
+      '.ll-canvas, .qe-panel, .wb-context-panel, dialog, '
+      + 'button, input, textarea, select, label, a, summary, '
+      + '[contenteditable="true"], [role="button"], [role="menu"], '
+      + '[role="menuitem"], [role="dialog"], [role="alertdialog"], '
+      + '[role="listbox"], [role="complementary"]',
+    )) return
+    setSelection(null)
+    setQuickEdit(null)
+  }
+
   // 停靠的变量表是页面的一部分，不抢焦点；但按 Esc 也应该能收起，
   // 并把焦点交还给打开它的按钮。手机端的变量面板是对话框，由它自己处理 Esc。
   useEffect(() => {
@@ -1532,6 +1549,7 @@ export default function App() {
       data-mobile-panel={mobilePanel}
       data-sheet={sheetOpen ? 'open' : 'closed'}
       data-inspector={inspectorVisible ? 'open' : 'closed'}
+      onPointerDown={clearSelectionOnBlankPointerDown}
     >
       <WorkspaceTopBar
         projectName={program.name}
@@ -1915,6 +1933,8 @@ export default function App() {
             onClick={() => {
               setInspectorOpen(false)
               setMobilePanel('none')
+              setSelection(null)
+              setQuickEdit(null)
             }}
             aria-label="关闭属性面板"
           />
