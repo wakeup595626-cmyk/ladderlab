@@ -29,7 +29,7 @@ import ProgramImageExporter, { type ProgramImageMode } from './components/Progra
 import QuickEditor from './components/QuickEditor'
 import StatusBar from './components/StatusBar'
 import WorkspaceTopBar from './components/WorkspaceTopBar'
-import { instructionLabel } from './components/instructionCatalog'
+import { instructionLabel, type InstructionFamily } from './components/instructionCatalog'
 import { compile } from './engine/compile'
 import { normalizeReference } from './engine/references'
 import { blankProgram, buildSample } from './engine/samples'
@@ -74,6 +74,13 @@ import {
   readProgramSheetWidth,
 } from './lib/programSheetLayout'
 import { useDragController } from './lib/useDragController'
+import {
+  favoriteInstructionId,
+  MAX_FAVORITE_INSTRUCTIONS,
+  readFavoriteInstructions,
+  toggleFavoriteInstruction,
+  writeFavoriteInstructions,
+} from './lib/instructionFavorites'
 import {
   archiveRecoveryCopy,
   isRecoveryBackupIntact,
@@ -306,6 +313,11 @@ export default function App() {
   // 复制的是“快照”而不是选区引用：复制后再改原元件，粘贴出来的仍是复制时的样子。
   const [clipboard, setClipboard] = useState<DocumentClipboard | null>(null)
   const [mobilePanel, setMobilePanel] = useState<MobilePanel>('none')
+  // 收藏指令只影响顶部工具条，和工程存档分开保存。
+  const [favoriteInstructions, setFavoriteInstructions] = useState<string[]>(() =>
+    readFavoriteInstructions(),
+  )
+  const persistedFavoritesRef = useRef<string[]>(favoriteInstructions)
   const [inspectorOpen, setInspectorOpen] = useState(false)
   const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth)
   const [inspectorWidth, setInspectorWidth] = useState(() => {
@@ -532,6 +544,19 @@ export default function App() {
       // 隐私模式下只关闭本次提示。
     }
   }, [])
+
+  /** 顶部指令条和“全部指令”抽屉共用同一个收藏开关。 */
+  const toggleInstructionFavorite = useCallback((
+    family: InstructionFamily,
+    kind: ContactKind | OutputKind,
+  ) => {
+    const isFavorite = favoriteInstructions.includes(favoriteInstructionId(family, kind))
+    if (!isFavorite && favoriteInstructions.length >= MAX_FAVORITE_INSTRUCTIONS) {
+      notify(`最多收藏 ${MAX_FAVORITE_INSTRUCTIONS} 条指令，先取消一条再收藏`)
+      return
+    }
+    setFavoriteInstructions((current) => toggleFavoriteInstruction(current, family, kind))
+  }, [favoriteInstructions, notify])
 
   const commit = useCallback((next: Program) => {
     setHistory((previous) => {
@@ -1928,6 +1953,14 @@ export default function App() {
     return () => window.clearTimeout(timer)
   }, [programSheetWidth])
 
+  // 首次打开不写盘：只有用户真的收藏或取消收藏后才落库，
+  // 这样默认五项仍然来自读取逻辑，而不是被悄悄写成固定值。
+  useEffect(() => {
+    if (persistedFavoritesRef.current === favoriteInstructions) return
+    persistedFavoritesRef.current = favoriteInstructions
+    writeFavoriteInstructions(favoriteInstructions)
+  }, [favoriteInstructions])
+
   useEffect(() => {
     const pane = editorRef.current
     if (!pane) return
@@ -2188,6 +2221,8 @@ export default function App() {
 
       <InstructionBar
         profile={program.profile}
+        favoriteIds={favoriteInstructions}
+        onToggleFavorite={toggleInstructionFavorite}
         onInsertContact={insert}
         onChangeOutput={changeOutput}
         onStartDrag={drag.start}
@@ -2552,6 +2587,8 @@ export default function App() {
         <InstructionDrawer
           program={program}
           activeRungId={activeRungId}
+          favoriteIds={favoriteInstructions}
+          onToggleFavorite={toggleInstructionFavorite}
           onInsertContact={insert}
           onChangeOutput={changeOutput}
           onStartDrag={drag.start}

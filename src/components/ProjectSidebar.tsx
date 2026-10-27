@@ -3,7 +3,8 @@ import { COURSE_LABS } from '../engine/courseLabs'
 import { getProfile } from '../engine/profiles'
 import type { ContactKind, OutputKind, ProfileId, Program } from '../engine/types'
 import type { DragPayload } from '../lib/dragTypes'
-import { INSTRUCTIONS, isInstructionAllowed } from './instructionCatalog'
+import { favoriteInstructionId } from '../lib/instructionFavorites'
+import { INSTRUCTIONS, isInstructionAllowed, type InstructionFamily } from './instructionCatalog'
 import {
   BookIcon,
   CloseIcon,
@@ -14,6 +15,8 @@ import {
   LadderIcon,
   PlusIcon,
   SearchIcon,
+  StarFilledIcon,
+  StarIcon,
   TagIcon,
 } from './Icons'
 
@@ -22,6 +25,9 @@ export interface ProjectSidebarProps {
   profile: ProfileId
   activeRungId: string | null
   variant?: 'full' | 'instructions'
+  /** 已收藏指令的 id，用于星标的选中状态。 */
+  favoriteIds: readonly string[]
+  onToggleFavorite: (family: InstructionFamily, kind: ContactKind | OutputKind) => void
   onInsertContact: (kind: ContactKind) => void
   onChangeOutput: (kind: OutputKind) => void
   onStartDrag: (event: React.PointerEvent<HTMLElement>, payload: DragPayload, label: string) => void
@@ -39,6 +45,8 @@ export default function ProjectSidebar({
   profile,
   activeRungId,
   variant = 'full',
+  favoriteIds,
+  onToggleFavorite,
   onInsertContact,
   onChangeOutput,
   onStartDrag,
@@ -154,46 +162,72 @@ export default function ProjectSidebar({
           />
         </label>
 
+        {variant === 'instructions' && (
+          <p className="instruction-favorite-hint">点右侧星标收藏，顶部“收藏指令”栏随取随用。</p>
+        )}
+
         {instructionGroups.map(({ group, entries }) => (
           <section className="instruction-group" key={group} aria-labelledby={`instruction-group-${group}`}>
             <h3 className="instruction-group-head" id={`instruction-group-${group}`}>{group}</h3>
             {entries.map((entry) => {
               const allowed = isInstructionAllowed(profile, entry)
+              const id = favoriteInstructionId(entry.family, entry.kind)
+              const isFavorite = favoriteIds.includes(id)
               const title = allowed
                 ? `${entry.detail} 点击使用，拖动放置`
                 : `${entry.label}在 ${activeProfile.shortName} 指令集中不可用`
 
               return (
-                <button
-                  type="button"
-                  className="instruction-row"
-                  data-drag-handle
-                  key={`${entry.family}-${entry.kind}`}
-                  disabled={!allowed}
-                  aria-label={`${entry.label}：${entry.detail}`}
-                  title={title}
-                  onClick={() => {
-                    if (!allowed) return
-                    if (entry.family === 'contact') onInsertContact(entry.kind as ContactKind)
-                    else onChangeOutput(entry.kind as OutputKind)
-                  }}
-                  onPointerDown={(event) => {
-                    if (!allowed) return
-                    const payload: DragPayload = entry.family === 'contact'
-                      ? { type: 'contact', contactKind: entry.kind as ContactKind }
-                      : { type: 'output', outputKind: entry.kind as OutputKind }
-                    onStartDrag(event, payload, entry.label)
-                  }}
-                >
-                  <span className="instruction-grip" data-drag-handle title="拖动" aria-hidden="true">
-                    <GripIcon size={16} />
-                  </span>
-                  <span className="instruction-symbol mono">{entry.symbol}</span>
-                  <span className="instruction-copy">
-                    <strong>{entry.label}</strong>
-                    <small>{entry.hint}</small>
-                  </span>
-                </button>
+                <div className="instruction-row-wrap" key={`${entry.family}-${entry.kind}`}>
+                  <button
+                    type="button"
+                    className="instruction-row"
+                    data-drag-handle
+                    disabled={!allowed}
+                    aria-label={`${entry.label}：${entry.detail}`}
+                    title={title}
+                    onClick={() => {
+                      if (!allowed) return
+                      if (entry.family === 'contact') onInsertContact(entry.kind as ContactKind)
+                      else onChangeOutput(entry.kind as OutputKind)
+                    }}
+                    onPointerDown={(event) => {
+                      if (!allowed) return
+                      const payload: DragPayload = entry.family === 'contact'
+                        ? { type: 'contact', contactKind: entry.kind as ContactKind }
+                        : { type: 'output', outputKind: entry.kind as OutputKind }
+                      onStartDrag(event, payload, entry.label)
+                    }}
+                  >
+                    <span className="instruction-grip" data-drag-handle title="拖动" aria-hidden="true">
+                      <GripIcon size={16} />
+                    </span>
+                    <span className="instruction-symbol mono">{entry.symbol}</span>
+                    <span className="instruction-copy">
+                      <strong>{entry.label}</strong>
+                      <small>{entry.hint}</small>
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    className="instruction-star"
+                    aria-pressed={isFavorite}
+                    title={isFavorite ? '取消收藏' : '收藏'}
+                    aria-label={`${isFavorite ? '取消收藏' : '收藏'}：${entry.label}`}
+                    onPointerDown={(event) => {
+                      // 星标在拖动按钮旁边，绝不能把按下事件交给拖放内核。
+                      event.stopPropagation()
+                    }}
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      onToggleFavorite(entry.family, entry.kind)
+                    }}
+                  >
+                    {isFavorite
+                      ? <StarFilledIcon size={15} />
+                      : <StarIcon size={15} />}
+                  </button>
+                </div>
               )
             })}
           </section>

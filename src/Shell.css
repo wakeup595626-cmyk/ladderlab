@@ -1461,8 +1461,8 @@ body[data-drag-kind] {
 }
 
 /* Keep the common instructions legible when the variable sheet takes 400px.
-   Less frequent instructions stay available from the always-visible “all”
-   entry instead of leaving a half-clipped button at the right edge. */
+   Favorites that no longer fit stay reachable through the scroll caret and the
+   always-visible “all” entry. */
 @media (min-width: 1025px) and (max-width: 1180px) {
   .wb-shell[data-inspector='open'] .wb-instruction-intro {
     display: none;
@@ -1480,9 +1480,6 @@ body[data-drag-kind] {
     min-width: 36px;
   }
 
-  .wb-shell[data-inspector='open'] .wb-instruction-list .wb-instruction-button:nth-child(n + 4) {
-    display: none;
-  }
 }
 
 @media (min-width: 1181px) and (max-width: 1359px) {
@@ -1498,9 +1495,6 @@ body[data-drag-kind] {
     min-width: 38px;
   }
 
-  .wb-shell[data-inspector='open'] .wb-instruction-list .wb-instruction-button:nth-child(5) {
-    display: none;
-  }
 }
 
 @media (max-width: 900px) {
@@ -2149,6 +2143,16 @@ body[data-drag-kind] {
   .wb-shell .instruction-row {
     min-height: 44px;
   }
+
+  .wb-shell .wb-instruction-star {
+    width: 30px;
+  }
+
+  .wb-shell .project-sidebar .instruction-star {
+    width: 38px;
+    height: 38px;
+    opacity: 1;
+  }
 }
 
 /* Drag handles must claim the gesture themselves: the node grip's hit rect is
@@ -2462,6 +2466,77 @@ body[data-drag-kind] {
   border-right: 1px solid var(--control);
 }
 
+/* 一条收藏 = 插入按钮 + 取消收藏星标，两者并排但各自独立可点。 */
+.wb-instruction-card {
+  display: flex;
+  height: 100%;
+  flex: 0 0 auto;
+  align-items: stretch;
+  border-right: 1px solid var(--rule);
+}
+
+.wb-instruction-card .wb-instruction-button {
+  height: 100%;
+  border-right: 0;
+  padding-right: 7px;
+}
+
+.wb-instruction-star {
+  display: grid;
+  width: 25px;
+  height: 100%;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  opacity: 0.78;
+  cursor: pointer;
+}
+
+.wb-instruction-star:hover {
+  background: var(--active);
+  color: var(--accent-ink);
+  opacity: 1;
+}
+
+.wb-instruction-star:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.wb-instruction-empty {
+  display: flex;
+  height: 100%;
+  align-items: center;
+  gap: 10px;
+  padding: 0 12px;
+  color: var(--faint);
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+
+.wb-instruction-empty-action {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent-ink);
+  font-size: 12.5px;
+  font-weight: 500;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.wb-instruction-empty-action:hover {
+  color: var(--accent);
+}
+
+.wb-instruction-empty-action:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 2px;
+}
+
 .wb-instruction-button {
   height: 100%;
   gap: 7px;
@@ -2511,7 +2586,7 @@ body[data-drag-kind] {
   background: var(--active);
 }
 
-.wb-instruction-list .wb-instruction-button:last-child {
+.wb-instruction-list .wb-instruction-card:last-child {
   border-right: 0;
 }
 
@@ -3969,3 +4044,51 @@ body[data-drag-kind] {
     animation: ll-pop-in var(--dur-quick) var(--ease-out);
   }
 }
+
+/* ------------------------------------------------ 收藏指令条横向溢出提示 */
+
+/* 收藏上限是 8 条，窄屏或打开变量面板时一屏放不下；
+   卡片保持原尺寸，交给列表横向滚动，右侧箭头说明“后面还有”。 */
+
+.wb-instruction-list {
+  scroll-snap-type: x proximity;
+}
+
+.wb-instruction-card {
+  scroll-snap-align: start;
+}
+
+.wb-instruction-scroll {
+  display: grid;
+  width: 26px;
+  height: 100%;
+  flex: 0 0 auto;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-left: 1px solid var(--rule);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.wb-instruction-scroll:hover {
+  background: var(--rule);
+  color: var(--text);
+}
+
+.wb-instruction-scroll:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.wb-instruction-scroll .is-flipped {
+  transform: rotate(180deg);
+}
+
+@media (pointer: coarse) {
+  .wb-instruction-scroll {
+    width: 34px;
+  }
+}
+

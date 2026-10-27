@@ -528,6 +528,19 @@
   letter-spacing: 0.04em;
 }
 
+.instruction-favorite-hint {
+  margin: 4px 0 0;
+  padding: 0 6px;
+  color: var(--faint);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.instruction-row-wrap {
+  display: flex;
+  align-items: center;
+}
+
 .instruction-row {
   display: grid;
   width: 100%;
@@ -554,6 +567,46 @@
 .instruction-row:disabled {
   cursor: not-allowed;
   opacity: 0.38;
+}
+
+.instruction-row-wrap .instruction-row {
+  width: auto;
+  flex: 1 1 auto;
+}
+
+/* 星标单独占一列，避免和“拖入/点击插入”的主按钮抢同一个点击目标。 */
+.instruction-star {
+  display: grid;
+  width: 26px;
+  height: 32px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--faint);
+  opacity: 0.45;
+  cursor: pointer;
+}
+
+.instruction-row-wrap:hover .instruction-star,
+.instruction-star:focus-visible,
+.instruction-star[aria-pressed='true'] {
+  opacity: 1;
+}
+
+.instruction-star[aria-pressed='true'] {
+  color: var(--accent);
+}
+
+.instruction-star:hover {
+  background: var(--active);
+  color: var(--accent-ink);
+}
+
+.instruction-star:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
 }
 
 .instruction-grip {

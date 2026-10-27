@@ -2,10 +2,13 @@ import type { ContactKind, OutputKind, Program } from '../engine/types'
 import type { DragPayload } from '../lib/dragTypes'
 import { useModalFocus } from '../lib/useModalFocus'
 import ProjectSidebar from './ProjectSidebar'
+import type { InstructionFamily } from './instructionCatalog'
 
 interface InstructionDrawerProps {
   program: Program
   activeRungId: string | null
+  favoriteIds: readonly string[]
+  onToggleFavorite: (family: InstructionFamily, kind: ContactKind | OutputKind) => void
   onInsertContact: (kind: ContactKind) => void
   onChangeOutput: (kind: OutputKind) => void
   onStartDrag: (event: React.PointerEvent<HTMLElement>, payload: DragPayload, label: string) => void
@@ -20,6 +23,8 @@ interface InstructionDrawerProps {
 export default function InstructionDrawer({
   program,
   activeRungId,
+  favoriteIds,
+  onToggleFavorite,
   onInsertContact,
   onChangeOutput,
   onStartDrag,
@@ -51,6 +56,8 @@ export default function InstructionDrawer({
         profile={program.profile}
         activeRungId={activeRungId}
         variant="instructions"
+        favoriteIds={favoriteIds}
+        onToggleFavorite={onToggleFavorite}
         onInsertContact={onInsertContact}
         onChangeOutput={onChangeOutput}
         onStartDrag={onStartDrag}

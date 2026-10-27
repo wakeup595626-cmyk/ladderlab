@@ -286,6 +286,27 @@ export function GripIcon(props: IconProps) {
   )
 }
 
+/** 未收藏：空心五角星。 */
+export function StarIcon(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <path d="M12 3.4l2.66 5.39 5.95.87-4.3 4.19 1.01 5.92L12 16.98l-5.32 2.79 1.01-5.92-4.3-4.19 5.95-.87Z" />
+    </IconBase>
+  )
+}
+
+/** 已收藏：实心五角星，保持同样的描边宽度让轮廓和空心版本一致。 */
+export function StarFilledIcon(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <path
+        d="M12 3.4l2.66 5.39 5.95.87-4.3 4.19 1.01 5.92L12 16.98l-5.32 2.79 1.01-5.92-4.3-4.19 5.95-.87Z"
+        fill="currentColor"
+      />
+    </IconBase>
+  )
+}
+
 export function MenuIcon(props: IconProps) {
   return (
     <IconBase {...props}>
