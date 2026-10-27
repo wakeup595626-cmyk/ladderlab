@@ -1,0 +1,33 @@
+{
+  "schema": 1,
+  "name": "复杂程序 · 多段导出验收",
+  "profile": "v21",
+  "tags": [
+    { "id": "tag_start", "name": "Start", "address": "%I0.0", "kind": "BOOL", "initial": false, "comment": "启动按钮" },
+    { "id": "tag_timer_done", "name": "TimerDone", "address": "%M10.0", "kind": "BOOL", "initial": false, "comment": "定时完成" },
+    { "id": "tag_elapsed", "name": "Elapsed", "address": "%MW12", "kind": "INT", "initial": 0, "comment": "定时已用时间" },
+    { "id": "tag_source", "name": "SourceValue", "address": "%MW14", "kind": "INT", "initial": 42, "comment": "整数源值" },
+    { "id": "tag_target", "name": "TargetValue", "address": "%MW16", "kind": "INT", "initial": 0, "comment": "整数目标值" },
+    { "id": "tag_lamp", "name": "Lamp", "address": "%Q0.0", "kind": "BOOL", "initial": false, "comment": "完成指示灯" }
+  ],
+  "rungs": [
+    {
+      "id": "r1",
+      "label": "启动后计时 2 秒",
+      "nodes": [{ "type": "contact", "id": "c1", "kind": "NO", "tag": "Start" }],
+      "output": { "id": "o1", "kind": "TON", "tag": "T1", "pt": 2000, "qTag": "TimerDone", "valueTag": "Elapsed" }
+    },
+    {
+      "id": "r2",
+      "label": "完成后传送整数",
+      "nodes": [{ "type": "contact", "id": "c2", "kind": "NO", "tag": "TimerDone" }],
+      "output": { "id": "o2", "kind": "MOVE", "tag": "TargetValue", "sourceTag": "SourceValue" }
+    },
+    {
+      "id": "r3",
+      "label": "完成指示灯",
+      "nodes": [{ "type": "contact", "id": "c3", "kind": "NO", "tag": "TimerDone" }],
+      "output": { "id": "o3", "kind": "COIL", "tag": "Lamp" }
+    }
+  ]
+}

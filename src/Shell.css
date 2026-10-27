@@ -257,6 +257,9 @@ body[data-drag-kind] {
   top: calc(56px + 6px);
   right: 12px;
   width: 252px;
+  max-height: calc(100dvh - 74px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
   gap: 0;
   padding: 3px;
   border-color: var(--control);
@@ -916,6 +919,10 @@ body[data-drag-kind] {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 6px;
+}
+
+.wb-project-actions.is-images {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .wb-project-actions button {
@@ -3545,5 +3552,188 @@ body[data-drag-kind] {
   .wb-program-resizer-grip,
   .wb-program-resizer-tip {
     transition: none;
+  }
+}
+
+/* ------------------------------------------------ top-right file actions */
+
+.wb-file-controls {
+  position: relative;
+  display: flex;
+  height: 100%;
+  align-items: stretch;
+  border-right: 1px solid var(--border);
+}
+
+.wb-file-actions-desktop {
+  display: flex;
+  height: 100%;
+  align-items: stretch;
+}
+
+.wb-file-button {
+  display: inline-flex;
+  height: 100%;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 0 9px;
+  border: 0;
+  border-left: 1px solid var(--rule);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.wb-file-button:first-child {
+  border-left: 0;
+}
+
+.wb-file-button:hover {
+  background: var(--active);
+}
+
+.wb-file-button:focus-visible,
+.wb-file-compact:focus-visible {
+  position: relative;
+  z-index: 1;
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.wb-file-button svg {
+  flex: 0 0 auto;
+  color: var(--muted);
+}
+
+.wb-file-button.wb-export-trigger {
+  color: var(--accent-ink);
+  font-weight: 600;
+}
+
+.wb-file-button.wb-export-trigger svg {
+  color: var(--accent);
+}
+
+.wb-file-button.wb-export-trigger[aria-expanded='true'] {
+  background: var(--accent-wash);
+}
+
+.wb-file-compact {
+  display: none;
+  height: 100%;
+  align-items: center;
+  gap: 5px;
+  padding: 0 9px;
+  border: 0;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.wb-file-compact:hover,
+.wb-file-compact[aria-expanded='true'] {
+  background: var(--active);
+}
+
+.wb-file-compact svg:first-child {
+  color: var(--accent);
+}
+
+.wb-file-menu.topbar-menu {
+  position: fixed;
+  top: calc(56px + 8px);
+  right: 12px;
+  z-index: 90;
+  width: min(304px, calc(100vw - 24px));
+  max-height: calc(100dvh - 72px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  gap: 0;
+  padding: 4px;
+  border-color: var(--control);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  box-shadow: var(--shadow-overlay);
+}
+
+.wb-file-menu .wb-menu-group > button {
+  min-height: 48px;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+}
+
+.wb-file-menu .wb-menu-group > button > svg {
+  flex: 0 0 auto;
+  color: var(--accent);
+}
+
+.wb-menu-item-copy {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+  line-height: 1.25;
+}
+
+.wb-menu-item-copy strong {
+  color: var(--text);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.wb-menu-item-copy small {
+  color: var(--faint);
+  font-size: 10.75px;
+  font-weight: 400;
+}
+
+.wb-shell .wb-topbar:has(.wb-more-menu),
+.wb-shell .wb-topbar:has(.wb-file-menu) {
+  z-index: 89;
+}
+
+@media (max-width: 860px) {
+  .wb-project-button,
+  .wb-file-actions-desktop {
+    display: none;
+  }
+
+  .wb-file-controls {
+    border-right: 0;
+  }
+
+  .wb-file-compact {
+    display: inline-flex;
+    min-width: 66px;
+    justify-content: center;
+    border-right: 1px solid var(--border);
+  }
+}
+
+@media (max-width: 720px) {
+  .wb-file-compact {
+    height: 40px;
+    padding-inline: 9px;
+  }
+}
+
+@media (max-width: 400px) {
+  .wb-file-compact {
+    min-width: 58px;
+    padding-inline: 7px;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .wb-file-menu.topbar-menu {
+    transform-origin: top right;
+    animation: ll-pop-in var(--dur-quick) var(--ease-out);
   }
 }

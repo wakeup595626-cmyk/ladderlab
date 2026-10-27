@@ -23,6 +23,8 @@ import LadderCanvas, { type SlotRef } from './components/LadderCanvas'
 import LibraryDialog from './components/LibraryDialog'
 import { useMediaQuery } from './lib/useMediaQuery'
 import ProjectDrawer from './components/ProjectDrawer'
+import ProjectImportDialog from './components/ProjectImportDialog'
+import ProgramImageExporter, { type ProgramImageMode } from './components/ProgramImageExporter'
 import QuickEditor from './components/QuickEditor'
 import StatusBar from './components/StatusBar'
 import WorkspaceTopBar from './components/WorkspaceTopBar'
@@ -41,7 +43,7 @@ import type {
   Selection,
 } from './engine/types'
 import type { DragPayload, DropTarget } from './lib/dragTypes'
-import { downloadText, MAX_IMPORT_BYTES, parseProgramText, serializeProgram } from './lib/io'
+import { downloadDataUrl, downloadText, parseProgramText, serializeProgram } from './lib/io'
 import {
   clampInspectorWidth,
   INSPECTOR_DEFAULT_WIDTH,
@@ -315,6 +317,12 @@ export default function App() {
   const [libraryOpen, setLibraryOpen] = useState(false)
   const [guideOpen, setGuideOpen] = useState(false)
   const [aboutOpen, setAboutOpen] = useState(false)
+  const [importOpen, setImportOpen] = useState(false)
+  const [imageExportRequest, setImageExportRequest] = useState<{
+    id: number
+    program: Program
+    mode: ProgramImageMode
+  } | null>(null)
   const [coachDismissed, setCoachDismissed] = useState(() => {
     try {
       return Boolean(window.localStorage.getItem(COACH_KEY))
@@ -322,7 +330,6 @@ export default function App() {
       return false
     }
   })
-  const fileInputRef = useRef<HTMLInputElement>(null)
   const editorRef = useRef<HTMLElement>(null)
   const tagsButtonRef = useRef<HTMLButtonElement>(null)
   const inspectorResizePointerRef = useRef<number | null>(null)
@@ -1629,24 +1636,23 @@ export default function App() {
     notify('工程 JSON 已导出')
   }
 
-  const importProject = async (file: File | undefined) => {
-    if (!file) return
-    try {
-      if (file.size > MAX_IMPORT_BYTES) {
-        throw new Error(`工程文件超过 ${MAX_IMPORT_BYTES / (1024 * 1024)} MB 上限，请精简后再导入`)
-      }
-      const text = await file.text()
-      const imported = parseProgramText(text)
-      commit(imported)
-      setSelection(imported.rungs[0] ? { rungId: imported.rungs[0].id, path: null } : null)
-      notify(corruptProject
-        ? `已导入「${imported.name}」；现在可点「接受当前工程并恢复自动保存」`
-        : `已导入「${imported.name}」`)
-    } catch (error) {
-      notify(error instanceof Error ? error.message : '工程文件无法读取')
-    } finally {
-      if (fileInputRef.current) fileInputRef.current.value = ''
-    }
+  const applyImportedProject = (imported: Program) => {
+    commit(imported)
+    setSelection(imported.rungs[0] ? { rungId: imported.rungs[0].id, path: null } : null)
+    setImportOpen(false)
+    setMobilePanel('none')
+    notify(corruptProject
+      ? `已导入「${imported.name}」；现在可点「接受当前工程并恢复自动保存」`
+      : `已导入「${imported.name}」`)
+  }
+
+  const startImageExport = (mode: ProgramImageMode) => {
+    setImageExportRequest({
+      id: Date.now(),
+      program,
+      mode,
+    })
+    notify(mode === 'complete' ? '正在生成完整程序 PNG…' : '正在生成纯梯形图 PNG…')
   }
 
   // 先按变量类型判断能不能写，再看写入是否真的产生了新状态。
@@ -1943,6 +1949,10 @@ export default function App() {
         onUndo={undo}
         onRedo={redo}
         onOpenProject={() => setMobilePanel('project')}
+        onNewProject={() => void newProject()}
+        onImportProject={() => setImportOpen(true)}
+        onExportProject={exportProject}
+        onExportImage={startImageExport}
         onGuide={() => setGuideOpen(true)}
         onAbout={() => setAboutOpen(true)}
       />
@@ -2071,7 +2081,7 @@ export default function App() {
                     <span>
                       {hasRecoveryCandidate
                         ? '当前工程已准备好；接受后会写入本机存储并恢复自动保存。'
-                        : '请先通过「更多」菜单导入备份，或直接在下方工作区重建工程，再接受当前工程。'}
+                        : '请先通过右上角「导入」恢复备份，或直接在下方工作区重建工程，再接受当前工程。'}
                     </span>
                     <span className="recovery-detail">{corruptProject.message}</span>
                   </div>
@@ -2325,11 +2335,15 @@ export default function App() {
         }}
         onImport={() => {
           setMobilePanel('none')
-          fileInputRef.current?.click()
+          setImportOpen(true)
         }}
         onExport={() => {
           setMobilePanel('none')
           exportProject()
+        }}
+        onExportImage={(mode) => {
+          setMobilePanel('none')
+          startImageExport(mode)
         }}
         onGuide={() => {
           setMobilePanel('none')
@@ -2433,12 +2447,10 @@ export default function App() {
         </div>
       )}
 
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept=".json,application/json"
-        hidden
-        onChange={(event) => void importProject(event.target.files?.[0])}
+      <ProjectImportDialog
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        onImport={applyImportedProject}
       />
 
       <LibraryDialog
@@ -2450,6 +2462,27 @@ export default function App() {
       <Guide open={guideOpen} onClose={closeGuide} onStartDemo={startDemo} />
 
       <AboutDialog open={aboutOpen} onClose={() => setAboutOpen(false)} />
+
+      {imageExportRequest && (
+        <ProgramImageExporter
+          key={imageExportRequest.id}
+          program={imageExportRequest.program}
+          mode={imageExportRequest.mode}
+          onComplete={(dataUrl) => {
+            const suffix = imageExportRequest.mode === 'complete' ? '完整程序' : '纯梯形图'
+            downloadDataUrl(
+              `${safeFileName(imageExportRequest.program.name)}-${suffix}-${downloadTimestamp()}.png`,
+              dataUrl,
+            )
+            setImageExportRequest(null)
+            notify(`已导出${suffix} PNG`)
+          }}
+          onError={(message) => {
+            setImageExportRequest(null)
+            notify(message, { tone: 'error' })
+          }}
+        />
+      )}
 
       {confirmDialog}
 

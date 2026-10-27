@@ -10,7 +10,9 @@ const APP_URL = process.env.LADDERLAB_URL ?? 'http://127.0.0.1:4173/'
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms))
 
 const targets = await (await fetch(`${CDP_HTTP}/json`)).json()
-const target = targets.find((item) => item.type === 'page')
+const target = targets.find((item) => item.type === 'page' && item.url === APP_URL)
+  ?? targets.find((item) => item.type === 'page' && item.url.startsWith('http://127.0.0.1:'))
+  ?? targets.find((item) => item.type === 'page')
 if (!target) throw new Error(`没有可调试页面：${CDP_HTTP}`)
 
 const socket = new WebSocket(target.webSocketDebuggerUrl)

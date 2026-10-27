@@ -4,15 +4,20 @@ import { PROFILES } from '../engine/profiles'
 import type { ProfileId } from '../engine/types'
 import { FIELD_LIMITS } from '../lib/limits'
 import {
+  ChevronDownIcon,
   FolderIcon,
   HelpIcon,
+  ImageIcon,
+  ImportIcon,
   InfoIcon,
   LadderIcon,
   MoreIcon,
   PauseIcon,
   PlayIcon,
+  PlusIcon,
   RedoIcon,
   ResetIcon,
+  ExportIcon,
   StepIcon,
   UndoIcon,
 } from './Icons'
@@ -34,6 +39,10 @@ export interface WorkspaceTopBarProps {
   onUndo: () => void
   onRedo: () => void
   onOpenProject: () => void
+  onImportProject: () => void
+  onExportProject: () => void
+  onExportImage: (mode: 'complete' | 'plain') => void
+  onNewProject: () => void
   onGuide: () => void
   onAbout: () => void
 }
@@ -55,12 +64,21 @@ export default function WorkspaceTopBar({
   onUndo,
   onRedo,
   onOpenProject,
+  onImportProject,
+  onExportProject,
+  onExportImage,
+  onNewProject,
   onGuide,
   onAbout,
 }: WorkspaceTopBarProps) {
   const [menuOpen, setMenuOpen] = useState(false)
+  const [fileMenuOpen, setFileMenuOpen] = useState(false)
+  const [fileMenuKind, setFileMenuKind] = useState<'export' | 'file'>('export')
   const menuRef = useRef<HTMLDivElement>(null)
   const menuButtonRef = useRef<HTMLButtonElement>(null)
+  const fileMenuRef = useRef<HTMLDivElement>(null)
+  const exportButtonRef = useRef<HTMLButtonElement>(null)
+  const compactFileButtonRef = useRef<HTMLButtonElement>(null)
   const [nameDraft, setNameDraft] = useState(projectName)
   const nameEditingRef = useRef(false)
   const nameCancelRef = useRef(false)
@@ -88,6 +106,9 @@ export default function WorkspaceTopBar({
 
   const menuItems = () => Array.from(
     menuRef.current?.querySelectorAll<HTMLButtonElement>('[role^="menuitem"]:not([disabled])') ?? [],
+  )
+  const fileMenuItems = () => Array.from(
+    fileMenuRef.current?.querySelectorAll<HTMLButtonElement>('[role^="menuitem"]:not([disabled])') ?? [],
   )
 
   useEffect(() => {
@@ -122,9 +143,55 @@ export default function WorkspaceTopBar({
     }
   }, [menuOpen])
 
+  useEffect(() => {
+    if (!fileMenuOpen) return
+
+    const focusTimer = window.setTimeout(() => fileMenuItems()[0]?.focus(), 0)
+    const returnFocus = () => {
+      if (fileMenuKind === 'file') compactFileButtonRef.current?.focus()
+      else exportButtonRef.current?.focus()
+    }
+    const handlePointerDown = (event: PointerEvent) => {
+      if (fileMenuRef.current && event.target instanceof Node && fileMenuRef.current.contains(event.target)) return
+      setFileMenuOpen(false)
+    }
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Tab') {
+        setFileMenuOpen(false)
+        return
+      }
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      event.stopPropagation()
+      setFileMenuOpen(false)
+      returnFocus()
+    }
+
+    document.addEventListener('pointerdown', handlePointerDown)
+    document.addEventListener('keydown', handleKeyDown)
+    return () => {
+      window.clearTimeout(focusTimer)
+      document.removeEventListener('pointerdown', handlePointerDown)
+      document.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [fileMenuKind, fileMenuOpen])
+
   const handleMenuKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
     if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return
     const items = menuItems()
+    if (items.length === 0) return
+    event.preventDefault()
+    const index = items.indexOf(document.activeElement as HTMLButtonElement)
+    let next = 0
+    if (event.key === 'ArrowDown') next = index < 0 ? 0 : (index + 1) % items.length
+    else if (event.key === 'ArrowUp') next = index < 0 ? items.length - 1 : (index - 1 + items.length) % items.length
+    else if (event.key === 'End') next = items.length - 1
+    items[next]?.focus()
+  }
+
+  const handleFileMenuKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return
+    const items = fileMenuItems()
     if (items.length === 0) return
     event.preventDefault()
     const index = items.indexOf(document.activeElement as HTMLButtonElement)
@@ -139,6 +206,13 @@ export default function WorkspaceTopBar({
     setMenuOpen(false)
     // 菜单项即将卸载，先把焦点交还触发器，弹层关闭后才能回到原处。
     menuButtonRef.current?.focus()
+    action()
+  }
+
+  const chooseFileMenuAction = (action: () => void) => {
+    setFileMenuOpen(false)
+    if (fileMenuKind === 'file') compactFileButtonRef.current?.focus()
+    else exportButtonRef.current?.focus()
     action()
   }
 
@@ -219,6 +293,155 @@ export default function WorkspaceTopBar({
           <span>项目</span>
         </button>
 
+        <div className="wb-file-controls" ref={fileMenuRef}>
+          <div className="wb-file-actions-desktop" role="group" aria-label="工程文件">
+            <button
+              type="button"
+              className="wb-file-button"
+              onClick={() => {
+                setFileMenuOpen(false)
+                onNewProject()
+              }}
+              aria-label="新建空白工程"
+              title="新建空白工程"
+            >
+              <PlusIcon size={16} />
+              <span>新建</span>
+            </button>
+            <button
+              type="button"
+              className="wb-file-button"
+              onClick={() => {
+                setFileMenuOpen(false)
+                onImportProject()
+              }}
+              aria-label="导入工程文件"
+              title="导入工程文件"
+            >
+              <ImportIcon size={16} />
+              <span>导入</span>
+            </button>
+            <button
+              type="button"
+              className="wb-file-button wb-export-trigger"
+              ref={exportButtonRef}
+              onClick={() => {
+                setMenuOpen(false)
+                setFileMenuKind('export')
+                setFileMenuOpen((open) => !open)
+              }}
+              aria-label="导出工程或 PNG 图片"
+              aria-expanded={fileMenuOpen && fileMenuKind === 'export'}
+              aria-controls="topbar-export-menu"
+              aria-haspopup="menu"
+              title="导出工程 JSON 或 PNG 图片"
+            >
+              <ExportIcon size={16} />
+              <span>导出</span>
+              <ChevronDownIcon size={13} />
+            </button>
+          </div>
+
+          <button
+            type="button"
+            className="wb-file-compact"
+            ref={compactFileButtonRef}
+            onClick={() => {
+              setMenuOpen(false)
+              setFileMenuKind('file')
+              setFileMenuOpen((open) => !open)
+            }}
+            aria-label="文件：新建、导入或导出"
+            aria-expanded={fileMenuOpen && fileMenuKind === 'file'}
+            aria-controls="topbar-file-menu"
+            aria-haspopup="menu"
+            title="新建、导入或导出"
+          >
+            <FolderIcon size={17} />
+            <span>文件</span>
+            <ChevronDownIcon size={12} />
+          </button>
+
+          {fileMenuOpen && fileMenuKind === 'export' && (
+            <div
+              className="topbar-menu wb-file-menu wb-export-menu"
+              id="topbar-export-menu"
+              role="menu"
+              aria-label="导出"
+              onKeyDown={handleFileMenuKeyDown}
+            >
+              <div className="wb-menu-group" role="group" aria-label="工程备份">
+                <span className="wb-menu-label">工程备份</span>
+                <button type="button" role="menuitem" onClick={() => chooseFileMenuAction(onExportProject)}>
+                  <ExportIcon size={16} />
+                  <span className="wb-menu-item-copy">
+                    <strong>工程文件</strong>
+                    <small>.ladderlab.json · 可导入其他 LadderLab</small>
+                  </span>
+                </button>
+              </div>
+              <div className="wb-menu-group" role="group" aria-label="PNG 图片">
+                <span className="wb-menu-label">PNG 图片 · 纯白背景</span>
+                <button type="button" role="menuitem" onClick={() => chooseFileMenuAction(() => onExportImage('complete'))}>
+                  <ImageIcon size={16} />
+                  <span className="wb-menu-item-copy">
+                    <strong>完整程序 PNG</strong>
+                    <small>含工程名与程序段标题</small>
+                  </span>
+                </button>
+                <button type="button" role="menuitem" onClick={() => chooseFileMenuAction(() => onExportImage('plain'))}>
+                  <ImageIcon size={16} />
+                  <span className="wb-menu-item-copy">
+                    <strong>纯梯形图 PNG</strong>
+                    <small>只保留梯形图，适合插入报告</small>
+                  </span>
+                </button>
+              </div>
+            </div>
+          )}
+
+          {fileMenuOpen && fileMenuKind === 'file' && (
+            <div
+              className="topbar-menu wb-file-menu wb-file-compact-menu"
+              id="topbar-file-menu"
+              role="menu"
+              aria-label="文件操作"
+              onKeyDown={handleFileMenuKeyDown}
+            >
+              <div className="wb-menu-group" role="group" aria-label="工程">
+                <span className="wb-menu-label">工程</span>
+                <button type="button" role="menuitem" onClick={() => chooseFileMenuAction(onOpenProject)}>
+                  <FolderIcon size={16} />
+                  <span>项目、变量表与实验库</span>
+                </button>
+                <button type="button" role="menuitem" onClick={() => chooseFileMenuAction(onNewProject)}>
+                  <PlusIcon size={16} />
+                  <span>新建空白工程</span>
+                </button>
+                <button type="button" role="menuitem" onClick={() => chooseFileMenuAction(onImportProject)}>
+                  <ImportIcon size={16} />
+                  <span>导入工程文件</span>
+                </button>
+                <button type="button" role="menuitem" onClick={() => chooseFileMenuAction(onExportProject)}>
+                  <ExportIcon size={16} />
+                  <span>导出工程 JSON</span>
+                </button>
+              </div>
+              <div className="wb-menu-group" role="group" aria-label="PNG 图片">
+                <span className="wb-menu-label">PNG 图片 · 纯白背景</span>
+                <button type="button" role="menuitem" onClick={() => chooseFileMenuAction(() => onExportImage('complete'))}>
+                  <ImageIcon size={16} />
+                  <span>完整程序 PNG</span>
+                </button>
+                <button type="button" role="menuitem" onClick={() => chooseFileMenuAction(() => onExportImage('plain'))}>
+                  <ImageIcon size={16} />
+                  <span>纯梯形图 PNG</span>
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
         <button
           type="button"
           className={`run-toggle wb-run-toggle${running ? ' is-running' : ''}`}
@@ -237,7 +460,10 @@ export default function WorkspaceTopBar({
             type="button"
             className="icon-button"
             ref={menuButtonRef}
-            onClick={() => setMenuOpen((open) => !open)}
+            onClick={() => {
+              setFileMenuOpen(false)
+              setMenuOpen((open) => !open)
+            }}
             aria-label="更多操作"
             title="更多操作"
             aria-expanded={menuOpen}

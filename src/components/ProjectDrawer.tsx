@@ -7,6 +7,7 @@ import {
   BookIcon,
   CloseIcon,
   ExportIcon,
+  ImageIcon,
   ImportIcon,
   InfoIcon,
   LadderIcon,
@@ -24,6 +25,7 @@ interface ProjectDrawerProps {
   onNew: () => void
   onImport: () => void
   onExport: () => void
+  onExportImage: (mode: 'complete' | 'plain') => void
   onGuide: () => void
   onAbout: () => void
 }
@@ -38,6 +40,7 @@ export default function ProjectDrawer({
   onNew,
   onImport,
   onExport,
+  onExportImage,
   onGuide,
   onAbout,
 }: ProjectDrawerProps) {
@@ -106,8 +109,22 @@ export default function ProjectDrawer({
           <h3 id="project-files-title">工程文件</h3>
           <div className="wb-project-actions">
             <button type="button" onClick={onNew}><PlusIcon size={17} /><span>新建</span></button>
-            <button type="button" onClick={onImport}><ImportIcon size={17} /><span>导入 JSON</span></button>
-            <button type="button" onClick={onExport}><ExportIcon size={17} /><span>导出 JSON</span></button>
+            <button type="button" onClick={onImport}><ImportIcon size={17} /><span>导入工程</span></button>
+            <button type="button" onClick={onExport}><ExportIcon size={17} /><span>导出工程</span></button>
+          </div>
+        </section>
+
+        <section className="wb-drawer-section" aria-labelledby="project-images-title">
+          <h3 id="project-images-title">导出图片</h3>
+          <div className="wb-project-actions is-images">
+            <button type="button" onClick={() => onExportImage('complete')}>
+              <ImageIcon size={17} />
+              <span>完整程序 PNG</span>
+            </button>
+            <button type="button" onClick={() => onExportImage('plain')}>
+              <ImageIcon size={17} />
+              <span>纯梯形图 PNG</span>
+            </button>
           </div>
         </section>
 

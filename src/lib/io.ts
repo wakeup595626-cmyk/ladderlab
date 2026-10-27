@@ -236,3 +236,12 @@ export function downloadText(filename: string, content: string) {
   anchor.remove()
   window.setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
+
+export function downloadDataUrl(filename: string, dataUrl: string) {
+  const anchor = document.createElement('a')
+  anchor.href = dataUrl
+  anchor.download = filename
+  document.body.appendChild(anchor)
+  anchor.click()
+  anchor.remove()
+}

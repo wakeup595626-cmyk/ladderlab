@@ -1,0 +1,45 @@
+.program-export-stage {
+  position: fixed;
+  top: 0;
+  left: -20000px;
+  z-index: -1;
+  width: max-content;
+  background: #fff;
+  color: #17191c;
+  pointer-events: none;
+}
+
+.program-export-document {
+  box-sizing: border-box;
+  padding: 32px 40px 40px;
+  background: #fff;
+  font-family: var(--sans);
+}
+
+.program-export-document .ll-canvas {
+  width: 100%;
+  max-width: none;
+  gap: 0;
+}
+
+.program-export-document .ll-program-sheet {
+  width: 100%;
+  max-width: none;
+  overflow: visible;
+  border: 0;
+  border-radius: 0;
+  background: #fff;
+}
+
+.program-export-document .ll-rung,
+.program-export-document .ll-svg-scroll,
+.program-export-document .ll-diagram {
+  background: #fff;
+}
+
+.program-export-document .ll-svg-scroll {
+  width: 100%;
+  max-width: none;
+  overflow: visible;
+  scrollbar-width: none;
+}

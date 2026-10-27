@@ -82,6 +82,16 @@ export function ExportIcon(props: IconProps) {
   )
 }
 
+export function ImageIcon(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <rect x="3.5" y="4.5" width="17" height="15" rx="2" />
+      <circle cx="8.5" cy="9.5" r="1.5" />
+      <path d="m5.5 17 4.7-4.7 3.1 3.1 2.1-2.1 3.1 3.7" />
+    </IconBase>
+  )
+}
+
 export function UndoIcon(props: IconProps) {
   return (
     <IconBase {...props}>
