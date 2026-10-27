@@ -44,8 +44,50 @@
   z-index: 2;
 }
 
-.ll-rung + .ll-rung {
+.ll-rung ~ .ll-rung {
   border-top: 1px solid var(--border);
+}
+
+/* 整段拖动时在两段之间浮现插入线；不拖动时不占交互面积。 */
+.ll-rung-dropzone {
+  position: relative;
+  z-index: 4;
+  height: 10px;
+  margin-block: -5px;
+  pointer-events: none;
+}
+
+.ll-canvas.is-rung-dragging .ll-rung-dropzone {
+  pointer-events: auto;
+}
+
+.ll-rung-dropzone i {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  left: 8px;
+  height: 2px;
+  border-radius: 999px;
+  background: var(--accent);
+  opacity: 0;
+  transform: translateY(-50%);
+}
+
+.ll-rung-dropzone.is-visible i {
+  opacity: 0.34;
+}
+
+.ll-rung-dropzone.is-active i {
+  height: 3px;
+  opacity: 1;
+}
+
+.ll-rung-dropzone.is-noop {
+  pointer-events: none;
+}
+
+.ll-rung-dropzone.is-noop i {
+  opacity: 0;
 }
 
 .ll-rung-header {
@@ -60,6 +102,24 @@
   transition:
     background-color var(--dur-press) var(--ease-out),
     outline-color var(--dur-press) var(--ease-out);
+  cursor: grab;
+}
+
+.ll-rung-header:active {
+  cursor: grabbing;
+}
+
+.ll-rung.is-whole-selected > .ll-rung-header {
+  background: var(--accent-wash);
+}
+
+.ll-rung.is-whole-selected > .ll-rung-header .ll-rung-marker {
+  height: 24px;
+}
+
+.ll-rung-header:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
 }
 
 .ll-rung-header.is-drop-target {
@@ -375,11 +435,13 @@
   top: calc(100% + 4px);
   right: 0;
   display: grid;
-  width: 144px;
+  width: 184px;
+  max-width: calc(100vw - 16px);
   padding: 4px;
   border: 1px solid var(--control);
   border-radius: var(--radius-control);
   background: var(--surface);
+  box-shadow: 0 12px 26px rgba(21, 24, 22, 0.14);
 }
 
 .ll-rung-menu-panel button,
@@ -394,10 +456,26 @@
 }
 
 .ll-rung-menu-panel button {
+  display: flex;
   min-height: 36px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
   padding: 6px 10px;
   border: 0;
   text-align: left;
+}
+
+.ll-rung-menu-panel kbd {
+  flex: 0 0 auto;
+  color: var(--faint);
+  font: 500 10px/1 var(--sans);
+}
+
+.ll-rung-menu-sep {
+  height: 1px;
+  margin: 3px 5px;
+  background: var(--border);
 }
 
 .ll-rung-menu-panel button:hover:not(:disabled),

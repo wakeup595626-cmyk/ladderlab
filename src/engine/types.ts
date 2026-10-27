@@ -124,6 +124,8 @@ export interface Runtime {
 export interface Selection {
   rungId: string
   path: number[] | null
+  /** 整个程序段被选中（点段标题）；与选中输出时的 path:null 区分。 */
+  wholeRung?: boolean
   /** 选中线路时记录所属链路径与插入位；此时 path 仍为 null，表示没有选中元件。 */
   wire?: { chain: number[]; index: number } | null
   /** Ctrl/Shift 多选的全部元件路径；path 仍指向主选中对象。 */

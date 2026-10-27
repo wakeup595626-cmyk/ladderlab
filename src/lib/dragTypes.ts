@@ -13,6 +13,8 @@ export type DropTarget =
   | { type: 'node'; rungId: string; path: number[] }
   | { type: 'output'; rungId: string }
   | { type: 'rung'; index: number }
+  /** 两段之间的插入线：boundary=0 表示最前，rungs.length 表示最后。 */
+  | { type: 'rung-boundary'; boundary: number }
 
 export function parseDropTarget(value: string | null): DropTarget | null {
   if (!value) return null
@@ -36,6 +38,11 @@ export function parseDropTarget(value: string | null): DropTarget | null {
       && parsed.path.every((part) => Number.isInteger(part) && part >= 0)
     ) return parsed
     if (parsed.type === 'rung' && Number.isInteger(parsed.index) && parsed.index >= 0) return parsed
+    if (
+      parsed.type === 'rung-boundary'
+      && Number.isInteger(parsed.boundary)
+      && parsed.boundary >= 0
+    ) return parsed
   } catch {
     return null
   }

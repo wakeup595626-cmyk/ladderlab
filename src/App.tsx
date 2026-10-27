@@ -87,14 +87,17 @@ import {
   insertContact,
   insertNodeAt,
   insertNodesAt,
+  insertRungCopies,
   makeContactNode,
   moveNode,
   moveNodeBy,
   moveRung,
   moveRungTo,
+  moveRungToBoundary,
   openBranchAtSlot,
   setProfile as setProgramProfile,
   setProjectName,
+  snapshotRung,
   updateRungLabel,
 } from './state/programOps'
 
@@ -114,6 +117,11 @@ interface ToastState {
 }
 
 type CorruptSavedProgram = Extract<LoadSavedProgramResult, { status: 'corrupt' }>
+
+/** 同一个剪贴板既能装元件，也能装整段程序，粘贴时按类型走不同分支。 */
+type DocumentClipboard =
+  | { kind: 'nodes'; nodes: LadderNode[] }
+  | { kind: 'rungs'; rungs: Rung[] }
 
 const HISTORY_LIMIT = 60
 const COACH_KEY = 'ladderlab.coach.v1'
@@ -281,7 +289,7 @@ export default function App() {
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>('properties')
   const [quickEdit, setQuickEdit] = useState<QuickEditState | null>(null)
   // 复制的是“快照”而不是选区引用：复制后再改原元件，粘贴出来的仍是复制时的样子。
-  const [clipboard, setClipboard] = useState<LadderNode[]>([])
+  const [clipboard, setClipboard] = useState<DocumentClipboard | null>(null)
   const [mobilePanel, setMobilePanel] = useState<MobilePanel>('none')
   const [inspectorOpen, setInspectorOpen] = useState(false)
   const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth)
@@ -539,9 +547,80 @@ export default function App() {
     })
   }, [])
 
+  /** 删除程序段并给出可撤销提示；剪切、Delete 和菜单删除共用同一条路径。 */
+  const deleteRungWithUndo = useCallback((rungId: string, message = '程序段已删除') => {
+    const index = program.rungs.findIndex((rung) => rung.id === rungId)
+    const removed = program.rungs[index]
+    const next = deleteRung(program, rungId)
+    if (next === program) return false
+    commit(next)
+    const fallback = next.rungs[Math.max(0, index - 1)] ?? next.rungs[0]
+    setSelection(fallback ? { rungId: fallback.id, path: null, wholeRung: true } : null)
+    notify(message, {
+      action: {
+        label: '撤销',
+        run: () => {
+          if (!removed) return
+          restoreRung(removed, index)
+          setSelection({ rungId: removed.id, path: null, wholeRung: true })
+        },
+      },
+    })
+    return true
+  }, [commit, notify, program, restoreRung])
+
+  /** 与博途一致：复制网络保留内容，粘贴时再生成新 ID 和定时器实例名。 */
+  const copyRungToClipboard = useCallback((rungId: string) => {
+    const index = program.rungs.findIndex((rung) => rung.id === rungId)
+    const rung = program.rungs[index]
+    if (!rung) {
+      notify('这段程序已经不存在')
+      return
+    }
+    setClipboard({ kind: 'rungs', rungs: [snapshotRung(rung)] })
+    notify('已复制程序段 ' + (index + 1) + '，选中目标段后按 Ctrl+V')
+  }, [notify, program])
+
+  const cutRungToClipboard = useCallback((rungId: string) => {
+    const index = program.rungs.findIndex((rung) => rung.id === rungId)
+    const rung = program.rungs[index]
+    if (!rung) {
+      notify('这段程序已经不存在')
+      return
+    }
+    setClipboard({ kind: 'rungs', rungs: [snapshotRung(rung)] })
+    deleteRungWithUndo(
+      rungId,
+      '已剪切程序段 ' + (index + 1) + '，选中目标段后按 Ctrl+V',
+    )
+  }, [deleteRungWithUndo, notify, program])
+
+  /** 默认粘到选中段之后；没有选中段时追加到末尾，和博途的“粘贴到当前网络后”。 */
+  const pasteRungClipboard = useCallback((afterRungId?: string) => {
+    if (clipboard?.kind !== 'rungs' || clipboard.rungs.length === 0) {
+      notify('剪贴板里没有程序段')
+      return
+    }
+    const index = afterRungId
+      ? program.rungs.findIndex((rung) => rung.id === afterRungId)
+      : -1
+    const boundary = index >= 0 ? index + 1 : program.rungs.length
+    const result = insertRungCopies(program, clipboard.rungs, boundary)
+    if (result.rungs.length === 0) {
+      notify('这里不能粘贴程序段')
+      return
+    }
+    commit(result.program)
+    const first = result.rungs[0]
+    if (first) setSelection({ rungId: first.id, path: null, wholeRung: true })
+    setQuickEdit(null)
+    setMobilePanel('none')
+    notify('已粘贴 ' + result.rungs.length + ' 个程序段（Ctrl+Z 撤销）')
+  }, [clipboard, commit, notify, program])
+
   const copySelection = useCallback(() => {
     if (!selection) {
-      notify('先选中要复制的元件')
+      notify('先选中要复制的元件或程序段')
       return
     }
     const paths = selection.paths?.length
@@ -550,7 +629,15 @@ export default function App() {
         ? [selection.path]
         : []
     if (paths.length === 0) {
-      notify('先选中要复制的元件')
+      if (selection.wire) {
+        notify('先点程序段标题选中整段，或点选要复制的元件')
+        return
+      }
+      if (selection.wholeRung) {
+        copyRungToClipboard(selection.rungId)
+        return
+      }
+      notify('先点程序段标题选中整段，或点选要复制的元件')
       return
     }
     const nodes = collectNodesAtPaths(program, selection.rungId, paths)
@@ -558,14 +645,72 @@ export default function App() {
       notify('选中的元件已经不存在')
       return
     }
-    setClipboard(cloneNodesForPaste(nodes))
+    setClipboard({ kind: 'nodes', nodes: cloneNodesForPaste(nodes) })
     notify('已复制 ' + nodes.length + ' 个元件，选中插入点后 Ctrl+V')
-  }, [notify, program, selection])
+  }, [copyRungToClipboard, notify, program, selection])
+
+  const cutSelection = useCallback(() => {
+    if (!selection) {
+      notify('先选中要剪切的元件或程序段')
+      return
+    }
+    const paths = selection.paths?.length
+      ? selection.paths
+      : selection.path
+        ? [selection.path]
+        : []
+    if (paths.length === 0) {
+      if (selection.wire) {
+        notify('先点程序段标题选中整段，或点选要剪切的元件')
+        return
+      }
+      if (selection.wholeRung) {
+        cutRungToClipboard(selection.rungId)
+        return
+      }
+      notify('先点程序段标题选中整段，或点选要剪切的元件')
+      return
+    }
+    const nodes = collectNodesAtPaths(program, selection.rungId, paths)
+    if (nodes.length === 0) {
+      notify('选中的元件已经不存在')
+      return
+    }
+    setClipboard({ kind: 'nodes', nodes: cloneNodesForPaste(nodes) })
+    if (paths.length > 1) {
+      const ids = new Set(nodes.map((node) => node.id))
+      const next = deleteNodesByIds(program, selection.rungId, ids)
+      if (next === program) return
+      commit(next)
+      setSelection({ rungId: selection.rungId, path: null })
+      notify('已剪切 ' + ids.size + ' 个元件，按 Ctrl+V 粘贴')
+      return
+    }
+    const next = deleteNode(program, selection.rungId, paths[0])
+    if (next === program) return
+    commit(next)
+    setSelection({ rungId: selection.rungId, path: null })
+    setQuickEdit(null)
+    notify('已剪切 1 个元件，按 Ctrl+V 粘贴')
+  }, [commit, cutRungToClipboard, notify, program, selection])
 
   /** slot 优先；没有指定时按博途习惯接在当前选中元件之后。 */
   const pasteAt = useCallback((slot?: SlotRef) => {
-    if (clipboard.length === 0) {
+    if (!clipboard) {
       notify('剪贴板还是空的，先选中元件按 Ctrl+C')
+      return
+    }
+    if (clipboard.kind === 'rungs') {
+      if (slot) {
+        notify('程序段请粘到段间插入线，或选中目标段后按 Ctrl+V')
+        return
+      }
+      pasteRungClipboard(selection?.rungId)
+      return
+    }
+    const nodes = clipboard.nodes
+    if (nodes.length === 0) {
+      notify('剪贴板还是空的')
       return
     }
     let target = slot ?? null
@@ -599,7 +744,7 @@ export default function App() {
     }
 
     // 每次粘贴都重新生成 ID，连续按 Ctrl+V 不会出现两份同 ID 的元件。
-    const result = insertNodesAt(program, target.rungId, target, cloneNodesForPaste(clipboard))
+    const result = insertNodesAt(program, target.rungId, target, cloneNodesForPaste(nodes))
     if (!result) {
       notify('这个位置不能粘贴')
       return
@@ -613,7 +758,7 @@ export default function App() {
     setQuickEdit(null)
     setMobilePanel('none')
     notify('已粘贴 ' + result.ids.length + ' 个元件（Ctrl+Z 撤销）')
-  }, [clipboard, commit, notify, program, selection])
+  }, [clipboard, commit, notify, pasteRungClipboard, program, selection])
 
   /** Ctrl 点选逐个加选，Shift 点选同一条线路上连续的一段。 */
   const extendSelection = useCallback((
@@ -850,18 +995,22 @@ export default function App() {
         event.preventDefault()
         redo()
       } else if (key === 'c' && !event.shiftKey) {
-        if (!selection?.path && !selection?.paths?.length) return
+        if (!selection) return
         event.preventDefault()
         copySelection()
+      } else if (key === 'x' && !event.shiftKey) {
+        if (!selection) return
+        event.preventDefault()
+        cutSelection()
       } else if (key === 'v' && !event.shiftKey) {
-        if (clipboard.length === 0) return
+        if (!clipboard) return
         event.preventDefault()
         pasteAt()
       }
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [clipboard.length, copySelection, pasteAt, redo, selection, undo])
+  }, [clipboard, copySelection, cutSelection, pasteAt, redo, selection, undo])
 
   const activeRung = selection
     ? program.rungs.find((rung) => rung.id === selection.rungId)
@@ -1046,6 +1195,12 @@ export default function App() {
       )) return
       if (document.querySelector('[role="dialog"][aria-modal="true"]')) return
       if (!selection) return
+      // 选中整段（标题栏）时 Delete 删除这一整段；选中元件时仍只删元件。
+      if (selection.wholeRung) {
+        event.preventDefault()
+        deleteRungWithUndo(selection.rungId)
+        return
+      }
       const multiPaths = selection.paths?.length ?? 0
       if (multiPaths > 1) {
         const ids = new Set<string>()
@@ -1069,7 +1224,7 @@ export default function App() {
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [commit, notify, program, removeNode, selection])
+  }, [commit, deleteRungWithUndo, notify, program, removeNode, selection])
 
   const changeOutput = (kind: OutputKind, targetRungId = activeRungId) => {
     if (!targetRungId) {
@@ -1088,13 +1243,28 @@ export default function App() {
 
   const handleDrop = useCallback((payload: DragPayload, target: DropTarget) => {
     if (mobilePanel === 'instructions') setMobilePanel('none')
+    if (target.type === 'rung-boundary') {
+      if (payload.type !== 'rung') {
+        notify('段间插入线只能放整个程序段')
+        return
+      }
+      const next = moveRungToBoundary(program, payload.rungId, target.boundary)
+      if (next === program) {
+        notify('程序段已经在这个位置')
+        return
+      }
+      commit(next)
+      setSelection({ rungId: payload.rungId, path: null, wholeRung: true })
+      notify('程序段顺序已调整（Ctrl+Z 撤销）')
+      return
+    }
     if (target.type === 'rung') {
       if (payload.type !== 'rung') {
         notify('网络号位置只能放整个程序段')
         return
       }
       commit(moveRungTo(program, payload.rungId, target.index))
-      setSelection({ rungId: payload.rungId, path: null })
+      setSelection({ rungId: payload.rungId, path: null, wholeRung: true })
       notify('程序段顺序已调整')
       return
     }
@@ -1221,32 +1391,16 @@ export default function App() {
   }
 
   const removeRung = (rungId: string) => {
-    const index = program.rungs.findIndex((rung) => rung.id === rungId)
-    const removed = program.rungs[index]
-    const next = deleteRung(program, rungId)
-    if (next === program) return
-    commit(next)
-    const fallback = next.rungs[Math.max(0, index - 1)] ?? next.rungs[0]
-    setSelection(fallback ? { rungId: fallback.id, path: null } : null)
-    notify('程序段已删除', {
-      action: {
-        label: '撤销',
-        run: () => {
-          if (!removed) return
-          restoreRung(removed, index)
-          setSelection({ rungId: removed.id, path: null })
-        },
-      },
-    })
+    deleteRungWithUndo(rungId)
   }
 
-  const copyRung = (rungId: string) => {
+  const duplicateRungAt = (rungId: string) => {
     const sourceIndex = program.rungs.findIndex((rung) => rung.id === rungId)
     const next = duplicateRung(program, rungId)
     const copy = sourceIndex >= 0 ? next.rungs[sourceIndex + 1] : undefined
     commit(next)
-    if (copy) setSelection({ rungId: copy.id, path: null })
-    notify('程序段已复制')
+    if (copy) setSelection({ rungId: copy.id, path: null, wholeRung: true })
+    notify('已创建程序段副本')
   }
 
   const loadSample = async (id: string) => {
@@ -2043,7 +2197,11 @@ export default function App() {
                 }}
                 onStartDrag={drag.start}
                 onRenameRung={(rungId, label) => commit(updateRungLabel(program, rungId, label))}
-                onDuplicateRung={copyRung}
+                onDuplicateRung={duplicateRungAt}
+                onCopyRung={copyRungToClipboard}
+                onCutRung={cutRungToClipboard}
+                onPasteRung={pasteRungClipboard}
+                rungClipboardCount={clipboard?.kind === 'rungs' ? clipboard.rungs.length : 0}
                 onDeleteRung={removeRung}
                 onMoveRung={(rungId, delta) => commit(moveRung(program, rungId, delta))}
                 onMoveNode={(rungId, path, delta) => commit(moveNodeBy(program, rungId, path, delta))}
@@ -2054,7 +2212,7 @@ export default function App() {
                 onOpenBranchAt={openBranchAt}
                 onMergeBranchAt={mergeBranch}
                 onPasteAt={(slot) => pasteAt(slot)}
-                clipboardCount={clipboard.length}
+                clipboardCount={clipboard?.kind === 'nodes' ? clipboard.nodes.length : 0}
                 onExtendSelect={extendSelection}
               />
 

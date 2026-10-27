@@ -16,6 +16,7 @@
     "qa": "node scripts/qa-smoke.mjs",
     "qa:branch": "node scripts/qa-branch-details.mjs",
     "qa:sheet": "node scripts/qa-program-sheet.mjs",
+    "qa:rungs": "node scripts/qa-rung-operations.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

@@ -612,7 +612,9 @@ export default function Inspector({
       ? `${CONTACT_NAMES[node.kind]} · ${node.tag || '未绑定'}`
       : `并联分支 · ${node.branches.length} 条支路`
     : rung
-      ? `程序段输出 · ${OUTPUT_NAMES[rung.output.kind]} · ${rung.output.tag || '未绑定'}`
+      ? selection?.wholeRung
+        ? `整段程序 · ${rung.label || '未命名'}`
+        : `程序段输出 · ${OUTPUT_NAMES[rung.output.kind]} · ${rung.output.tag || '未绑定'}`
       : '尚未选择元件'
 
   const context =
@@ -708,7 +710,8 @@ export default function Inspector({
             runtime={runtime}
             selectedRung={rung}
             selectedNode={node}
-            isOutput={Boolean(selection && selection.path === null)}
+            isOutput={Boolean(selection && selection.path === null && !selection.wholeRung)}
+            isWholeRung={Boolean(selection?.wholeRung)}
             profile={activeProfile.shortName}
             onProgram={onProgram}
             onSelect={onSelect}
@@ -742,6 +745,7 @@ interface PropertiesPanelProps {
   selectedRung: Program['rungs'][number] | undefined
   selectedNode: LadderNode | null
   isOutput: boolean
+  isWholeRung: boolean
   profile: string
   onProgram: (program: Program) => void
   onSelect: (selection: Selection | null) => void
@@ -754,6 +758,7 @@ function PropertiesPanel({
   selectedRung,
   selectedNode,
   isOutput,
+  isWholeRung,
   profile,
   onProgram,
   onSelect,
@@ -768,6 +773,22 @@ function PropertiesPanel({
         <div className="tip-card">
           <strong>当前档案：{profile}</strong>
           <span>档案只模拟指令集差异，不导入真实 TIA 工程。</span>
+        </div>
+      </div>
+    )
+  }
+
+  if (isWholeRung) {
+    return (
+      <div className="property-form">
+        <div className="property-heading">
+          <span className="property-type">程序段</span>
+          <h3>{rungCaption(program, selectedRung.id, selectedRung.label)}</h3>
+          <p>{selectedRung.nodes.length} 个触点组 · {OUTPUT_NAMES[selectedRung.output.kind]} 输出</p>
+        </div>
+        <div className="tip-card">
+          <strong>整段操作</strong>
+          <span>拖动段标题可调整顺序。Ctrl+C 复制、Ctrl+X 剪切、Ctrl+V 粘贴到当前段之后，Delete 删除；右上角菜单也提供同样的操作。</span>
         </div>
       </div>
     )

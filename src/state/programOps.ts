@@ -476,19 +476,20 @@ export function addRung(program: Program): Program {
   return { ...next, rungs: [...next.rungs, rung] }
 }
 
-export function duplicateRung(program: Program, rungId: string): Program {
-  const index = program.rungs.findIndex((rung) => rung.id === rungId)
-  if (index < 0) return program
+function cloneRungForProgram(program: Program, source: Rung, labelSuffix = ''): Rung {
   const cloneNode = (node: LadderNode): LadderNode =>
     node.type === 'contact'
-      ? { ...node, id: uid('c') }
+      ? {
+          ...node,
+          id: uid('c'),
+          ...(node.compare ? { compare: { ...node.compare } } : {}),
+        }
       : { ...node, id: uid('par'), branches: node.branches.map((branch) => branch.map(cloneNode)) }
-  const source = program.rungs[index]
   const clearsOutputs = ['TON', 'TOF', 'TONR', 'CTU'].includes(source.output.kind)
-  const copy: Rung = {
+  return {
     ...source,
     id: uid('r'),
-    label: source.label ? `${source.label} 副本` : '',
+    label: labelSuffix && source.label ? `${source.label}${labelSuffix}` : source.label,
     nodes: source.nodes.map(cloneNode),
     output: {
       ...source.output,
@@ -501,6 +502,55 @@ export function duplicateRung(program: Program, rungId: string): Program {
       ...(source.output.pattern ? { pattern: [...source.output.pattern] } : {}),
     },
   }
+}
+
+/** 剪贴板中的程序段快照：保留 ID，但与当前工程里的任何对象都不共享引用。 */
+export function snapshotRung(rung: Rung): Rung {
+  const cloneNode = (node: LadderNode): LadderNode =>
+    node.type === 'contact'
+      ? { ...node, ...(node.compare ? { compare: { ...node.compare } } : {}) }
+      : { ...node, branches: node.branches.map((branch) => branch.map(cloneNode)) }
+  return {
+    ...rung,
+    nodes: rung.nodes.map(cloneNode),
+    output: {
+      ...rung.output,
+      ...(rung.output.pattern ? { pattern: [...rung.output.pattern] } : {}),
+    },
+  }
+}
+
+/** 粘贴/复制用的程序段：重建整棵树和定时器/计数器实例，不沿用旧运行时状态。 */
+export function cloneRungForPaste(program: Program, source: Rung): Rung {
+  return cloneRungForProgram(program, source)
+}
+
+/** 在指定插入边界放入程序段副本；索引 0 表示最前，rungs.length 表示最后。 */
+export function insertRungCopies(
+  program: Program,
+  sources: Rung[],
+  boundary: number,
+): { program: Program; rungs: Rung[] } {
+  if (sources.length === 0 || !Number.isFinite(boundary)) return { program, rungs: [] }
+  let next = program
+  const at = Math.max(0, Math.min(program.rungs.length, Math.trunc(boundary)))
+  const copies: Rung[] = []
+  for (const source of sources) {
+    // 每插入一段都把新实例名放进工程再复制下一段，连续粘贴定时器不会撞名。
+    const copy = cloneRungForPaste(next, source)
+    const rungs = [...next.rungs]
+    rungs.splice(at + copies.length, 0, copy)
+    next = { ...next, rungs }
+    copies.push(copy)
+  }
+  return { program: next, rungs: copies }
+}
+
+export function duplicateRung(program: Program, rungId: string): Program {
+  const index = program.rungs.findIndex((rung) => rung.id === rungId)
+  if (index < 0) return program
+  const source = program.rungs[index]
+  const copy = cloneRungForProgram(program, source, ' 副本')
   const rungs = [...program.rungs]
   rungs.splice(index + 1, 0, copy)
   return { ...program, rungs }
@@ -571,6 +621,22 @@ export function moveRungTo(program: Program, rungId: string, targetIndex: number
   const rungs = [...program.rungs]
   const [rung] = rungs.splice(index, 1)
   rungs.splice(target, 0, rung)
+  return { ...program, rungs }
+}
+
+/**
+ * 按“段间插入线”移动：boundary=0 放到最前，boundary=rungs.length 放到最后。
+ * 与 moveRungTo 的“最终索引”语义分开，避免把拖动落点算错一位。
+ */
+export function moveRungToBoundary(program: Program, rungId: string, boundary: number): Program {
+  const sourceIndex = program.rungs.findIndex((rung) => rung.id === rungId)
+  if (sourceIndex < 0 || !Number.isFinite(boundary)) return program
+  const clamped = Math.max(0, Math.min(program.rungs.length, Math.trunc(boundary)))
+  if (clamped === sourceIndex || clamped === sourceIndex + 1) return program
+  const targetIndex = clamped > sourceIndex ? clamped - 1 : clamped
+  const rungs = [...program.rungs]
+  const [rung] = rungs.splice(sourceIndex, 1)
+  rungs.splice(targetIndex, 0, rung)
   return { ...program, rungs }
 }
 

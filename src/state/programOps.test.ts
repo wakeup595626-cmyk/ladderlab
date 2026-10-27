@@ -14,12 +14,15 @@ import {
   insertContactAt,
   insertNodeAt,
   insertNodesAt,
+  insertRungCopies,
   makeContactNode,
   moveNode,
   moveNodeBy,
   moveRungTo,
+  moveRungToBoundary,
   openBranchAtSlot,
   pickDefaultTag,
+  snapshotRung,
   tagsDependingOn,
   tagUsage,
   updateTag,
@@ -361,6 +364,75 @@ describe('programOps 变量依赖与程序段复制', () => {
     const coilCopy = duplicateRung(coilSource, 'coil').rungs[1]
     expect(coilCopy.output.tag).toBe('Coil')
     expect(coilCopy.output.id).not.toBe(coilSource.rungs[0].output.id)
+  })
+})
+
+describe('programOps 程序段移动与剪贴板', () => {
+  it('moveRungToBoundary 按段间插入线重排，自身前后边界保持原样', () => {
+    const source = program([rung('r1', []), rung('r2', []), rung('r3', [])])
+
+    expect(moveRungToBoundary(source, 'r1', 3).rungs.map((item) => item.id))
+      .toEqual(['r2', 'r3', 'r1'])
+    expect(moveRungToBoundary(source, 'r3', 0).rungs.map((item) => item.id))
+      .toEqual(['r3', 'r1', 'r2'])
+    expect(moveRungToBoundary(source, 'r2', 1)).toBe(source)
+    expect(moveRungToBoundary(source, 'r2', 2)).toBe(source)
+    expect(source.rungs.map((item) => item.id)).toEqual(['r1', 'r2', 'r3'])
+  })
+
+  it('snapshotRung 深拷贝节点、比较参数与 PATTERN', () => {
+    const source = program([
+      {
+        ...rung('r1', [
+          { ...contact('a', 'A'), compare: { op: '>', value: 3 } },
+          parallel('p', [contact('b', 'B')], [contact('c', 'C')]),
+        ]),
+        output: { id: 'o', kind: 'MOVE', tag: '', sourceTag: 'A', pattern: [1, 2, 3] },
+      },
+    ])
+
+    const snapshot = snapshotRung(source.rungs[0])
+    const sourceNode = source.rungs[0].nodes[0]
+    if (sourceNode.type !== 'contact' || !sourceNode.compare) throw new Error('比较触点应保留')
+    sourceNode.compare.value = 9
+    source.rungs[0].output.pattern?.push(4)
+
+    const snapNode = snapshot.nodes[0]
+    if (snapNode.type !== 'contact') throw new Error('快照应保留触点')
+    expect(snapNode.compare?.value).toBe(3)
+    expect(snapshot.output.pattern).toEqual([1, 2, 3])
+  })
+
+  it('insertRungCopies 粘贴后 ID 全换新，连续粘贴定时器得到 T2、T3', () => {
+    const source = program([
+      {
+        id: 'timer',
+        label: '定时',
+        nodes: [contact('c1', 'Start'), parallel('p', [contact('c2', 'A')], [contact('c3', 'B')])],
+        output: { id: 'timer-out', kind: 'TON', tag: 'T1', pt: 100 },
+      },
+    ])
+    const snapshot = snapshotRung(source.rungs[0])
+
+    const first = insertRungCopies(source, [snapshot], 1)
+    const second = insertRungCopies(first.program, [snapshot], 2)
+
+    expect(second.program.rungs.map((item) => item.output.tag)).toEqual(['T1', 'T2', 'T3'])
+    const ids = second.program.rungs.flatMap((item) => [
+      item.id,
+      item.output.id,
+      ...collectIds(item.nodes),
+    ])
+    expect(new Set(ids).size).toBe(ids.length)
+    expect(source.rungs).toHaveLength(1)
+    expect(first.program.rungs[0]).toBe(source.rungs[0])
+  })
+
+  it('insertRungCopies 空列表或非法边界时原样返回', () => {
+    const source = program([rung('r1', [])])
+
+    expect(insertRungCopies(source, [], 0)).toEqual({ program: source, rungs: [] })
+    expect(insertRungCopies(source, [source.rungs[0]], Number.NaN).program).toBe(source)
   })
 })
 

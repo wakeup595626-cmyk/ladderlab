@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type {
   KeyboardEvent as ReactKeyboardEvent,
@@ -33,6 +33,10 @@ export interface LadderCanvasProps {
   selection: Selection | null
   onSelect: (selection: Selection | null) => void
   onDuplicateRung: (rungId: string) => void
+  onCopyRung: (rungId: string) => void
+  onCutRung: (rungId: string) => void
+  onPasteRung: (afterRungId: string) => void
+  rungClipboardCount?: number
   onDeleteRung: (rungId: string) => void
   onMoveRung: (rungId: string, delta: -1 | 1) => void
   onMoveNode: (rungId: string, path: number[], delta: -1 | 1) => void
@@ -360,7 +364,7 @@ function pathsEqual(left: number[] | null, right: number[] | null): boolean {
 
 function isSelected(context: DrawContext, path: number[] | null): boolean {
   // 选中线路时 path 同样是 null，不能把输出线圈一起点亮。
-  if (context.selection?.wire) return false
+  if (context.selection?.wire || context.selection?.wholeRung) return false
   if (context.selection?.rungId !== context.rungId) return false
   if (context.selection.paths?.length) {
     return context.selection.paths.some((item) => pathsEqual(item, path))
@@ -370,7 +374,7 @@ function isSelected(context: DrawContext, path: number[] | null): boolean {
 
 /** 多选时主选中项用实线框，其余用虚线框，删除/编辑都以主选中为准。 */
 function isPrimarySelected(context: DrawContext, path: number[] | null): boolean {
-  if (context.selection?.wire) return false
+  if (context.selection?.wire || context.selection?.wholeRung) return false
   return context.selection?.rungId === context.rungId
     && pathsEqual(context.selection.path, path)
 }
@@ -1534,6 +1538,10 @@ interface RungSectionProps {
   total: number
   context: DrawContext
   onDuplicateRung: (rungId: string) => void
+  onCopyRung: (rungId: string) => void
+  onCutRung: (rungId: string) => void
+  onPasteRung: (afterRungId: string) => void
+  rungClipboardCount: number
   onDeleteRung: (rungId: string) => void
   onMoveRung: (rungId: string, delta: -1 | 1) => void
   onRenameRung?: (rungId: string, label: string) => void
@@ -1632,12 +1640,44 @@ function RungInsertMenu({
   )
 }
 
+/** 两段之间的插入线：只有拖动整段时才接收指针，平时不改变布局也不挡点击。 */
+function RungDropzone({
+  boundary,
+  dragging,
+  active,
+  noop,
+}: {
+  boundary: number
+  dragging: boolean
+  active: boolean
+  noop: boolean
+}) {
+  return (
+    <div
+      className={[
+        'll-rung-dropzone',
+        dragging ? 'is-visible' : '',
+        active ? 'is-active' : '',
+        noop ? 'is-noop' : '',
+      ].filter(Boolean).join(' ')}
+      data-drop={JSON.stringify({ type: 'rung-boundary', boundary })}
+      aria-hidden="true"
+    >
+      <i />
+    </div>
+  )
+}
+
 function RungSection({
   rung,
   index,
   total,
   context,
   onDuplicateRung,
+  onCopyRung,
+  onCutRung,
+  onPasteRung,
+  rungClipboardCount,
   onDeleteRung,
   onMoveRung,
   onRenameRung,
@@ -1674,14 +1714,20 @@ function RungSection({
     && draggedRungId !== rung.id
   // 段内工具栏只在“这一段里有选中元件”时启用删除：用户先点元件，再按删除，
   // 和博途里选中网络元素后按 Delete 的次序一致。
-  const localSelection = context.selection?.rungId === rung.id ? context.selection.path : null
+  const localSelection = context.selection?.rungId === rung.id && !context.selection.wholeRung
+    ? context.selection.path
+    : null
   const selectedNode = nodeAtPath(rung.nodes, localSelection)
   const selectedLabel = selectedNode
     ? selectedNode.type === 'contact'
       ? CONTACT_LABELS[selectedNode.kind] + (selectedNode.tag ? ' · ' + selectedNode.tag : '')
       : '并联分支 · ' + selectedNode.branches.length + ' 路'
     : ''
-  const localWire = context.selection?.rungId === rung.id ? context.selection.wire ?? null : null
+  const localWire = context.selection?.rungId === rung.id && !context.selection.wholeRung
+    ? context.selection.wire ?? null
+    : null
+  // 整段选择是显式状态，避免和“选中输出线圈”的 path:null 混淆。
+  const wholeRungSelected = rungSelected && context.selection?.wholeRung === true
   const armedHere = context.mergeTarget?.rungId === rung.id
   const multiCount = context.selection?.rungId === rung.id
     ? context.selection.paths?.length ?? 0
@@ -1693,7 +1739,9 @@ function RungSection({
       ? '分支未闭合 · 点右侧「合并分支」'
       : multiCount > 1
         ? '已选 ' + multiCount + ' 个元件 · Ctrl+C 复制'
-        : selectedLabel || (localWire ? '已选线路 ' + (localWire.index + 1) : '')
+        : wholeRungSelected
+          ? '整段已选 · 拖动排序 · Ctrl+C 复制'
+          : selectedLabel || (localWire ? '已选线路 ' + (localWire.index + 1) : '')
   const statusTip = Boolean(armedHere) || hasOpenBranch(rung.nodes) || multiCount > 1
 
   useLayoutEffect(() => {
@@ -1749,6 +1797,7 @@ function RungSection({
         'll-rung',
         powered ? 'is-powered' : '',
         rungSelected ? 'is-selected' : '',
+        wholeRungSelected ? 'is-whole-selected' : '',
       ].filter(Boolean).join(' ')}
       data-rung-id={rung.id}
       aria-label={segmentLabel + '：' + (rung.label || '未命名')}
@@ -1759,6 +1808,8 @@ function RungSection({
           isDropTarget ? 'is-drop-target' : '',
           draggedRungId === rung.id ? 'is-drag-source' : '',
         ].filter(Boolean).join(' ')}
+        tabIndex={0}
+        aria-label={segmentLabel + '：拖动或按 Enter 选中整段'}
         data-drop={JSON.stringify({ type: 'rung', index })}
         onPointerDown={(event) => {
           const target = event.target
@@ -1766,12 +1817,19 @@ function RungSection({
             && target.closest('button, input, textarea, select, a, [data-no-rung-drag]')) {
             return
           }
+          context.onSelect({ rungId: rung.id, path: null, wholeRung: true })
           context.beginDrag(
             event as unknown as ReactPointerEvent<SVGGElement>,
             { type: 'rung', rungId: rung.id },
             rung.label || segmentLabel,
             'rung:' + rung.id,
           )
+        }}
+        onKeyDown={(event) => {
+          if (event.target !== event.currentTarget) return
+          if (event.key !== 'Enter' && event.key !== ' ') return
+          event.preventDefault()
+          context.onSelect({ rungId: rung.id, path: null, wholeRung: true })
         }}
       >
         <div className="ll-rung-title">
@@ -1898,6 +1956,44 @@ function RungSection({
               <button
                 type="button"
                 role="menuitem"
+                onClick={(event) => {
+                  const details = event.currentTarget.closest('details')
+                  details?.removeAttribute('open')
+                  details?.querySelector<HTMLElement>('summary')?.focus()
+                  onCutRung(rung.id)
+                }}
+              >
+                <span>剪切程序段</span><kbd>Ctrl+X</kbd>
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={(event) => {
+                  const details = event.currentTarget.closest('details')
+                  details?.removeAttribute('open')
+                  details?.querySelector<HTMLElement>('summary')?.focus()
+                  onCopyRung(rung.id)
+                }}
+              >
+                <span>复制程序段</span><kbd>Ctrl+C</kbd>
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                disabled={rungClipboardCount === 0}
+                title={rungClipboardCount === 0 ? '先复制或剪切一个程序段' : '粘贴到本段之后'}
+                onClick={(event) => {
+                  const details = event.currentTarget.closest('details')
+                  details?.removeAttribute('open')
+                  onPasteRung(rung.id)
+                }}
+              >
+                <span>粘贴程序段</span><kbd>Ctrl+V</kbd>
+              </button>
+              <div className="ll-rung-menu-sep" role="separator" />
+              <button
+                type="button"
+                role="menuitem"
                 disabled={index === 0}
                 onClick={(event) => {
                   const details = event.currentTarget.closest('details')
@@ -1921,6 +2017,7 @@ function RungSection({
               >
                 下移
               </button>
+              <div className="ll-rung-menu-sep" role="separator" />
               <button
                 type="button"
                 role="menuitem"
@@ -1931,7 +2028,7 @@ function RungSection({
                   onDuplicateRung(rung.id)
                 }}
               >
-                复制程序段
+                创建副本
               </button>
               <button
                 type="button"
@@ -2192,6 +2289,10 @@ export default function LadderCanvas({
   selection,
   onSelect,
   onDuplicateRung,
+  onCopyRung,
+  onCutRung,
+  onPasteRung,
+  rungClipboardCount = 0,
   onDeleteRung,
   onMoveRung,
   onMoveNode,
@@ -2217,6 +2318,12 @@ export default function LadderCanvas({
   const [pendingFocus, setPendingFocus] = useState<SlotRef | null>(null)
   const [focusOpenBranch, setFocusOpenBranch] = useState(false)
   const [lastKind, setLastKind] = useState<ContactKind>('NO')
+  const draggingRungId = isDragging && dragSource?.startsWith('rung:')
+    ? dragSource.slice(5)
+    : null
+  const draggingRungIndex = draggingRungId
+    ? program.rungs.findIndex((rung) => rung.id === draggingRungId)
+    : -1
 
   // 选完元件后把焦点交给下一个 +，键盘用户和触屏都能连续往下加。
   // 这里按 DOM 里的 rung/chain/index 查找，避免并联嵌套时把路径拼错。
@@ -2401,7 +2508,11 @@ export default function LadderCanvas({
   return (
     <>
       <div
-        className={'ll-canvas' + (isDragging ? ' is-dragging' : '')}
+        className={[
+          'll-canvas',
+          isDragging ? 'is-dragging' : '',
+          draggingRungId ? 'is-rung-dragging' : '',
+        ].filter(Boolean).join(' ')}
         onClick={(event) => {
           const target = event.target
           if (!(target instanceof Element) || target.closest(
@@ -2424,20 +2535,38 @@ export default function LadderCanvas({
         ) : (
           <div className="ll-program-sheet">
             {program.rungs.map((rung, index) => (
-              <RungSection
-                key={rung.id}
-                rung={rung}
-                index={index}
-                total={program.rungs.length}
-                context={{ ...context, rungId: rung.id }}
-                onDuplicateRung={onDuplicateRung}
-                onDeleteRung={onDeleteRung}
-                onMoveRung={onMoveRung}
-                onRenameRung={onRenameRung}
-                onInsertContact={onInsertContact}
-                onDeleteNode={onDeleteNode}
-              />
+              <Fragment key={rung.id}>
+                <RungDropzone
+                  boundary={index}
+                  dragging={Boolean(draggingRungId)}
+                  active={dragTarget?.type === 'rung-boundary' && dragTarget.boundary === index}
+                  noop={index === draggingRungIndex || index === draggingRungIndex + 1}
+                />
+                <RungSection
+                  rung={rung}
+                  index={index}
+                  total={program.rungs.length}
+                  context={{ ...context, rungId: rung.id }}
+                  onDuplicateRung={onDuplicateRung}
+                  onCopyRung={onCopyRung}
+                  onCutRung={onCutRung}
+                  onPasteRung={onPasteRung}
+                  rungClipboardCount={rungClipboardCount}
+                  onDeleteRung={onDeleteRung}
+                  onMoveRung={onMoveRung}
+                  onRenameRung={onRenameRung}
+                  onInsertContact={onInsertContact}
+                  onDeleteNode={onDeleteNode}
+                />
+              </Fragment>
             ))}
+            <RungDropzone
+              boundary={program.rungs.length}
+              dragging={Boolean(draggingRungId)}
+              active={dragTarget?.type === 'rung-boundary'
+                && dragTarget.boundary === program.rungs.length}
+              noop={program.rungs.length === draggingRungIndex + 1}
+            />
           </div>
         )}
         {program.rungs.length > 0 && (
