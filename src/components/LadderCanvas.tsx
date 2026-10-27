@@ -786,9 +786,9 @@ function renderContact(
           {node.kind === 'NC' && (
             <line
               className="ll-contact-slash"
-              x1={centerX - 12}
+              x1={centerX - 9}
               y1="65"
-              x2={centerX + 12}
+              x2={centerX + 9}
               y2="35"
             />
           )}
@@ -1420,9 +1420,9 @@ function renderOutput(
           <line
             className={'ll-terminal ll-coil-terminal' + (powered ? ' is-on' : '')}
             x1={size.width}
-            y1={centerY - 10}
+            y1={centerY - 9}
             x2={size.width}
-            y2={centerY + 10}
+            y2={centerY + 9}
           />
           <path
             className={'ll-coil-arc' + (powered ? ' is-on' : '')}

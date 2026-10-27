@@ -605,6 +605,11 @@
   stroke-width: 3;
 }
 
+/* 博途的常闭斜线止于触点竖线，不能从两根竖线外侧探出。 */
+.ll-contact-slash {
+  stroke-linecap: butt;
+}
+
 .ll-rail {
   stroke-width: 3.5;
 }
@@ -617,23 +622,10 @@
   stroke-width: 3;
 }
 
-.ll-wire.is-on,
-.ll-power-wire.is-on,
-.ll-contact.has-input-power .ll-contact-bar,
-.ll-contact.has-input-power .ll-contact-slash,
-.ll-output.is-powered .ll-wire,
-.ll-coil-arc.is-on,
-.ll-coil-terminal.is-on {
-  stroke: var(--positive);
-}
-
-.ll-contact.has-input-power .ll-compare-box {
-  stroke: var(--positive);
-}
-
-.ll-contact.has-input-power .ll-edge-mark {
-  fill: var(--positive);
-}
+/*
+ * 梯形图本体始终沿用博途的黑色图线；回路通断只在程序段标题栏显示。
+ * is-on / has-input-power / is-powered 仍保留给运行时和自动化验收使用。
+ */
 
 .ll-compare-box {
   fill: var(--raised);
@@ -849,10 +841,6 @@
   pointer-events: none;
 }
 
-.ll-output.is-powered .ll-coil-mark {
-  fill: var(--positive);
-}
-
 .ll-instruction-box {
   fill: var(--ladder-box);
   stroke: var(--ladder-box-edge);
@@ -937,11 +925,6 @@
   stroke: var(--surface);
   stroke-width: 3px;
   stroke-linejoin: round;
-}
-
-.ll-output.is-true .ll-box-value,
-.ll-output.is-true .ll-coil-mark {
-  fill: var(--positive);
 }
 
 .ll-add-rung {

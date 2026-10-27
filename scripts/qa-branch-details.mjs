@@ -177,6 +177,60 @@ await send('Emulation.setEmulatedMedia', {
 })
 
 await reloadDemo()
+
+// Match TIA: the NC slash stays between the bars, and power is shown in the header only.
+const startVisualDemo = await evaluate(`(() => {
+  const card = [...document.querySelectorAll('.tag-card')]
+    .find((item) => item.querySelector('input')?.value === 'StartBtn')
+  const button = card?.querySelector('.live-value')
+  if (!button) return false
+  button.click()
+  return true
+})()`)
+await sleep(600)
+const tiaVisuals = await evaluate(`(() => {
+  const box = (element) => {
+    const value = element.getBBox()
+    return { left: value.x, right: value.x + value.width, width: value.width, height: value.height }
+  }
+  const probe = document.createElement('span')
+  probe.style.cssText = 'position:absolute;visibility:hidden;color:var(--text)'
+  document.body.append(probe)
+  const textColor = getComputedStyle(probe).color
+  probe.style.color = 'var(--positive)'
+  const positiveColor = getComputedStyle(probe).color
+  probe.remove()
+  const contacts = [...document.querySelectorAll('.ll-contact')]
+    .filter((contact) => contact.querySelector('.ll-contact-slash'))
+    .map((contact) => ({
+      bars: [...contact.querySelectorAll('.ll-contact-bar')].map(box),
+      slash: box(contact.querySelector('.ll-contact-slash')),
+    }))
+  const graphicSelector = ['.ll-wire', '.ll-power-wire', '.ll-contact-bar',
+    '.ll-contact-slash', '.ll-coil-arc', '.ll-rail', '.ll-terminal'].join(',')
+  const strokes = [...document.querySelectorAll('.ll-diagram ' + graphicSelector)]
+    .map((element) => getComputedStyle(element).stroke)
+  const coilMarks = [...document.querySelectorAll('.ll-diagram .ll-coil-mark')]
+    .map((element) => getComputedStyle(element).fill)
+  return {
+    textColor, positiveColor,
+    powered: document.querySelectorAll('.ll-rung.is-powered').length,
+    contacts,
+    offColorStrokes: strokes.filter((stroke) => stroke !== textColor),
+    greenCoilMarks: coilMarks.filter((fill) => fill === positiveColor),
+  }
+})()`)
+const ncInsideBars = tiaVisuals.contacts.length > 0
+  && tiaVisuals.contacts.every((contact) => (
+    contact.bars.length === 2
+    && contact.slash.left >= contact.bars[0].left - 0.1
+    && contact.slash.right <= contact.bars[1].left + 0.1
+  ))
+check('visual/start-and-power-state', startVisualDemo && tiaVisuals.powered > 0, tiaVisuals)
+check('visual/nc-slash-stays-between-bars', ncInsideBars, tiaVisuals.contacts)
+check('visual/ladder-graphics-stay-black-while-powered',
+  tiaVisuals.offColorStrokes.length === 0 && tiaVisuals.greenCoilMarks.length === 0, tiaVisuals)
+
 await clickPlus('', 1)
 await sleep(300)
 const branchFromMain = await pickBranch()
@@ -234,10 +288,10 @@ const coilTerminalAtEnd = coils.length > 0 && coils.every((coil) => (
   coil.terminal
   && Math.abs(coil.terminal.left - coil.outputRight) < 0.1
   && coil.terminal.width === 0
-  && coil.terminal.height >= 19
+  && Math.abs(coil.terminal.height - 18) < 0.1
 ))
 check('coil/no-horizontal-line-inside-brackets', coilLeadsClear, coils)
-check('coil/right-terminal-at-output-end', coilTerminalAtEnd, coils)
+check('coil/right-terminal-18px-at-output-end', coilTerminalAtEnd, coils)
 
 // 第二条支路起点继续创建嵌套草稿分支。
 await clickPlus(secondBranch, 0)

@@ -769,7 +769,7 @@ function PropertiesPanel({
       <div className="empty-inspector">
         <PointerIcon className="empty-icon" />
         <h3>选择一个元件</h3>
-        <p>点击梯形图中的触点、并联块或输出，在这里修改参数。运行后可观察绿色能流。</p>
+        <p>点击梯形图中的触点、并联块或输出，在这里修改参数。运行时可在程序段标题栏观察回路通断。</p>
         <div className="tip-card">
           <strong>当前档案：{profile}</strong>
           <span>档案只模拟指令集差异，不导入真实 TIA 工程。</span>
