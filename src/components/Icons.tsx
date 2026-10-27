@@ -246,6 +246,16 @@ export function PointerIcon(props: IconProps) {
   )
 }
 
+export function TargetIcon(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <circle cx="12" cy="12" r="6.2" />
+      <circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none" />
+      <path d="M12 2.8v3M12 18.2v3M2.8 12h3M18.2 12h3" />
+    </IconBase>
+  )
+}
+
 export function ToggleIcon(props: IconProps) {
   return (
     <IconBase {...props}>

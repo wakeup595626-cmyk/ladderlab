@@ -329,6 +329,10 @@ export default function App() {
   const [favoriteTargetRungId, setFavoriteTargetRungId] = useState<string | null>(
     () => initialProgram.rungs[0]?.id ?? null,
   )
+  // 画布上的落点高亮是“临时提示”，不是常驻装饰：换程序段或点「定位」时
+  // 亮一下，约 2 秒后退回正常线路；点空白处也会立即收起。
+  const [favoriteTargetPreview, setFavoriteTargetPreview] = useState(false)
+  const favoriteTargetPreviewTimerRef = useRef<number | null>(null)
   const [inspectorOpen, setInspectorOpen] = useState(false)
   const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth)
   const [inspectorWidth, setInspectorWidth] = useState(() => {
@@ -1176,27 +1180,67 @@ export default function App() {
     () => describeFavoriteInsertTarget(program, insertTarget),
     [insertTarget, program],
   )
+  // 落点标记只在切换程序段或点「定位」后短暂出现；平时线路保持干净。
+  // 顶部“· 段末 / 某个触点后”的文字始终保留，不靠高亮也能确认落点。
+  const visibleInsertTarget = favoriteTargetPreview ? insertTarget : null
 
-  const selectFavoriteTargetRung = useCallback((rungId: string) => {
-    const rung = program.rungs.find((item) => item.id === rungId)
-    if (!rung) return
-    // 换程序段时清掉元件选择，收藏触点就落在该段段末；
-    // 随后把视图带到这一段，让用户能马上看到高亮的目标。
-    setSelection(null)
-    setFavoriteTargetRungId(rungId)
-    setQuickEdit(null)
+  const scrollFavoriteTargetIntoView = useCallback((rungId: string) => {
     window.requestAnimationFrame(() => {
       const rungElement = Array.from(
         editorRef.current?.querySelectorAll<HTMLElement>('.ll-rung') ?? [],
       ).find((element) => element.dataset.rungId === rungId)
+      const targetSlot = rungElement?.querySelector<HTMLElement>('.ll-slot.is-favorite-target')
       const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
-      rungElement?.scrollIntoView({
+      const focusElement = targetSlot ?? rungElement
+      focusElement?.scrollIntoView({
         block: 'nearest',
         inline: 'nearest',
         behavior: reduceMotion ? 'auto' : 'smooth',
       })
     })
-  }, [program])
+  }, [])
+
+  const revealFavoriteInsertTarget = useCallback((rungId: string) => {
+    if (favoriteTargetPreviewTimerRef.current !== null) {
+      window.clearTimeout(favoriteTargetPreviewTimerRef.current)
+    }
+    setFavoriteTargetPreview(true)
+    favoriteTargetPreviewTimerRef.current = window.setTimeout(() => {
+      favoriteTargetPreviewTimerRef.current = null
+      setFavoriteTargetPreview(false)
+    }, 2200)
+    scrollFavoriteTargetIntoView(rungId)
+  }, [scrollFavoriteTargetIntoView])
+
+  const dismissFavoriteTargetPreview = useCallback(() => {
+    if (favoriteTargetPreviewTimerRef.current !== null) {
+      window.clearTimeout(favoriteTargetPreviewTimerRef.current)
+      favoriteTargetPreviewTimerRef.current = null
+    }
+    setFavoriteTargetPreview(false)
+  }, [])
+
+  useEffect(() => () => {
+    if (favoriteTargetPreviewTimerRef.current !== null) {
+      window.clearTimeout(favoriteTargetPreviewTimerRef.current)
+    }
+  }, [])
+
+  const selectFavoriteTargetRung = useCallback((rungId: string) => {
+    const rung = program.rungs.find((item) => item.id === rungId)
+    if (!rung) return
+    // 换程序段时清掉元件选择，收藏触点就落在该段段末；
+    // 高亮只闪一下，之后顶部仍保留目标文字，不妨碍看线路。
+    setSelection(null)
+    setFavoriteTargetRungId(rungId)
+    setQuickEdit(null)
+    revealFavoriteInsertTarget(rungId)
+  }, [program, revealFavoriteInsertTarget])
+
+  const locateFavoriteTarget = useCallback(() => {
+    if (!insertTarget) return
+    revealFavoriteInsertTarget(insertTarget.rungId)
+  }, [insertTarget, revealFavoriteInsertTarget])
 
   const runToggle = () => {
     if (compileResult.errors.length > 0) {
@@ -2178,12 +2222,12 @@ export default function App() {
     setProgramSheetWidth(PROGRAM_SHEET_DEFAULT_WIDTH)
   }
 
-  /** 点界面任意非交互留白都取消元件选中；图纸内部仍由画布处理。 */
+  /** 点界面任意非交互留白都取消元件选中并收起落点提示；图纸内部仍由画布处理。 */
   const clearSelectionOnBlankPointerDown = (event: {
     button: number
     target: EventTarget | null
   }) => {
-    if (event.button !== 0 || !selection || !(event.target instanceof Element)) return
+    if (event.button !== 0 || !(event.target instanceof Element)) return
     if (event.target.closest(
       '.ll-canvas, .qe-panel, .wb-context-panel, dialog, '
       + 'button, input, textarea, select, label, a, summary, '
@@ -2194,6 +2238,7 @@ export default function App() {
     )) return
     setSelection(null)
     setQuickEdit(null)
+    dismissFavoriteTargetPreview()
   }
 
   // 停靠的变量表是页面的一部分，不抢焦点；但按 Esc 也应该能收起，
@@ -2311,6 +2356,7 @@ export default function App() {
         insertTarget={insertTarget}
         targetAnchorLabel={targetAnchorLabel}
         onSelectRung={selectFavoriteTargetRung}
+        onLocateTarget={locateFavoriteTarget}
         onToggleFavorite={toggleInstructionFavorite}
         onInsertContact={insert}
         onChangeOutput={changeOutput}
@@ -2492,7 +2538,7 @@ export default function App() {
                 program={program}
                 runtime={runtime}
                 selection={selection}
-                insertTarget={insertTarget}
+                insertTarget={visibleInsertTarget}
                 insertTargetLabel={targetAnchorLabel}
                 dragTarget={drag.target}
                 isDragging={Boolean(drag.drag)}
@@ -2500,6 +2546,7 @@ export default function App() {
                   if (!next) {
                     setSelection(null)
                     setQuickEdit(null)
+                    dismissFavoriteTargetPreview()
                     return
                   }
                   setSelection(next)
@@ -2682,6 +2729,7 @@ export default function App() {
           insertTarget={insertTarget}
           targetAnchorLabel={targetAnchorLabel}
           onSelectRung={selectFavoriteTargetRung}
+          onLocateTarget={locateFavoriteTarget}
           onToggleFavorite={toggleInstructionFavorite}
           onInsertContact={insert}
           onChangeOutput={changeOutput}

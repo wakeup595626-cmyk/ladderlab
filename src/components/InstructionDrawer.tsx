@@ -12,6 +12,7 @@ interface InstructionDrawerProps {
   insertTarget: FavoriteInsertTarget | null
   targetAnchorLabel: string
   onSelectRung: (rungId: string) => void
+  onLocateTarget: () => void
   onToggleFavorite: (family: InstructionFamily, kind: ContactKind | OutputKind) => void
   onInsertContact: (kind: ContactKind) => void
   onChangeOutput: (kind: OutputKind) => void
@@ -31,6 +32,7 @@ export default function InstructionDrawer({
   insertTarget,
   targetAnchorLabel,
   onSelectRung,
+  onLocateTarget,
   onToggleFavorite,
   onInsertContact,
   onChangeOutput,
@@ -67,6 +69,7 @@ export default function InstructionDrawer({
         insertTarget={insertTarget}
         targetAnchorLabel={targetAnchorLabel}
         onSelectRung={onSelectRung}
+        onLocateTarget={onLocateTarget}
         onToggleFavorite={onToggleFavorite}
         onInsertContact={onInsertContact}
         onChangeOutput={onChangeOutput}

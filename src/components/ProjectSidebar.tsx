@@ -32,6 +32,7 @@ export interface ProjectSidebarProps {
   insertTarget: FavoriteInsertTarget | null
   targetAnchorLabel: string
   onSelectRung: (rungId: string) => void
+  onLocateTarget: () => void
   onToggleFavorite: (family: InstructionFamily, kind: ContactKind | OutputKind) => void
   onInsertContact: (kind: ContactKind) => void
   onChangeOutput: (kind: OutputKind) => void
@@ -54,6 +55,7 @@ export default function ProjectSidebar({
   insertTarget,
   targetAnchorLabel,
   onSelectRung,
+  onLocateTarget,
   onToggleFavorite,
   onInsertContact,
   onChangeOutput,
@@ -112,6 +114,7 @@ export default function ProjectSidebar({
             insertTarget={insertTarget}
             targetAnchorLabel={targetAnchorLabel}
             onSelectRung={onSelectRung}
+            onLocate={onLocateTarget}
           />
           <p className="sidebar-insert-target-note">
             触点插在所选元件之后；没有选中元件时插到段末。输出会替换该段输出。

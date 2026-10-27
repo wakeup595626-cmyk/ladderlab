@@ -19,6 +19,7 @@ interface InstructionBarProps {
   insertTarget: FavoriteInsertTarget | null
   targetAnchorLabel: string
   onSelectRung: (rungId: string) => void
+  onLocateTarget: () => void
   onToggleFavorite: (family: InstructionFamily, kind: ContactKind | OutputKind) => void
   onInsertContact: (kind: ContactKind) => void
   onChangeOutput: (kind: OutputKind) => void
@@ -55,6 +56,7 @@ export default function InstructionBar({
   insertTarget,
   targetAnchorLabel,
   onSelectRung,
+  onLocateTarget,
   onToggleFavorite,
   onInsertContact,
   onChangeOutput,
@@ -129,6 +131,7 @@ export default function InstructionBar({
           insertTarget={insertTarget}
           targetAnchorLabel={targetAnchorLabel}
           onSelectRung={onSelectRung}
+          onLocate={onLocateTarget}
         />
         <div className="wb-instruction-list" ref={listRef}>
           {favorites.length === 0 && (

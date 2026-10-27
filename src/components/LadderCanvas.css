@@ -103,6 +103,7 @@
     background-color var(--dur-press) var(--ease-out),
     outline-color var(--dur-press) var(--ease-out);
   cursor: grab;
+  transition: background-color var(--dur-press) var(--ease-out);
 }
 
 .ll-rung-header:active {
@@ -718,6 +719,7 @@
   fill: var(--surface);
   stroke: var(--accent);
   stroke-width: 1;
+  transition: fill var(--dur-press) var(--ease-out), stroke var(--dur-press) var(--ease-out);
 }
 
 .ll-slot-plus path {
@@ -725,6 +727,7 @@
   stroke: var(--accent);
   stroke-width: 1.5;
   stroke-linecap: round;
+  transition: stroke var(--dur-press) var(--ease-out);
 }
 
 .ll-slot:hover .ll-slot-plus,
@@ -1370,8 +1373,8 @@
   }
 }
 
-/* 收藏指令的落点：目标段标题、精确插入点和 + 都保持常亮，
-   让用户点收藏卡之前就知道东西会掉在哪。 */
+/* 收藏指令的落点：目标段标题轻着色，插入点只给 + 一个清楚的描边。
+   不铺满大片底色，避免高亮挡住导线细节；高亮本身也是临时提示。 */
 .ll-rung.is-favorite-target > .ll-rung-header {
   background: var(--accent-wash);
 }
@@ -1382,7 +1385,7 @@
 }
 
 .ll-slot.is-favorite-target .ll-slot-wide-hit {
-  fill: var(--accent-wash);
+  fill: transparent;
 }
 
 .ll-slot.is-favorite-target .ll-slot-plus {
@@ -1391,10 +1394,12 @@
 }
 
 .ll-slot.is-favorite-target .ll-slot-plus rect:not(.ll-slot-plus-hit) {
-  fill: var(--accent);
+  fill: var(--accent-wash);
   stroke: var(--accent);
+  stroke-width: 2;
 }
 
 .ll-slot.is-favorite-target .ll-slot-plus path {
-  stroke: var(--surface);
+  stroke: var(--accent-ink);
+  stroke-width: 2;
 }

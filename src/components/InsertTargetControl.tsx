@@ -1,12 +1,13 @@
 import type { Rung } from '../engine/types'
 import type { FavoriteInsertTarget } from '../lib/insertTarget'
-import { ChevronDownIcon } from './Icons'
+import { ChevronDownIcon, TargetIcon } from './Icons'
 
 interface InsertTargetControlProps {
   rungs: readonly Rung[]
   insertTarget: FavoriteInsertTarget | null
   targetAnchorLabel: string
   onSelectRung: (rungId: string) => void
+  onLocate: () => void
   className?: string
 }
 
@@ -19,6 +20,7 @@ export default function InsertTargetControl({
   insertTarget,
   targetAnchorLabel,
   onSelectRung,
+  onLocate,
   className,
 }: InsertTargetControlProps) {
   if (rungs.length === 0) {
@@ -54,6 +56,16 @@ export default function InsertTargetControl({
       >
         · {targetAnchorLabel}
       </span>
+      <button
+        type="button"
+        className="wb-insert-target-locate"
+        onClick={onLocate}
+        title="在图纸上短暂标出收藏指令的落点"
+        aria-label="在图纸上短暂标出收藏指令的落点"
+      >
+        <TargetIcon size={13} />
+        <span>定位</span>
+      </button>
     </span>
   )
 }
