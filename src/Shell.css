@@ -4,6 +4,9 @@
 
 .wb-shell {
   --ground: #f0f1ef;
+  /* The band either side of the sheet is the sheet-expansion area: it reads a
+     full step darker than the app ground so the white paper always floats. */
+  --workbench: #e4e8e1;
   --surface: #ffffff;
   --raised: #f6f7f5;
   --active: #eaebe8;
@@ -3604,8 +3607,14 @@ body[data-drag-kind] {
    paper. This keeps the original centred-document composition on wide screens. */
 .wb-program-pane {
   padding: 20px 24px 32px;
-  background: var(--ground);
+  background: var(--workbench);
   background-image: none;
+}
+
+/* The expansion bands are a different material from the paper, and the paper
+   keeps a firm 1px edge so a dragged-narrow sheet still reads as one object. */
+.wb-program-pane .ll-program-sheet {
+  border-color: var(--control);
 }
 
 .wb-program-frame {
@@ -3654,7 +3663,7 @@ body[data-drag-kind] {
     inset-block: 0;
     left: 50%;
     width: 1px;
-    background: var(--border);
+    background: color-mix(in srgb, var(--control) 72%, transparent);
     transform: translateX(-50%);
     transition: width 120ms ease, background-color 120ms ease;
   }

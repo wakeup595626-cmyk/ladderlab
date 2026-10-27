@@ -18,7 +18,7 @@
 
 | 类别 | 来源令牌 | 使用方式 |
 | --- | --- | --- |
-| 框架色 | --frame、--frame-ink、--ground | 应用外框、导航边界与工作区底色 |
+| 框架色 | --frame、--frame-ink、--ground、--workbench | 应用外框、导航边界、工作区底色，以及图纸两侧可扩展的加深带 |
 | 纸面色 | --surface、--raised、--active | 程序纸面、工具区和选中状态 |
 | 边界 | --border、--rule、--control | 框架分隔、纸面细线和可操作控件边界 |
 | 语义色 | --accent、--positive、--negative、--warning 及各 wash 色 | 主操作、能流与正常状态、故障、提醒 |
