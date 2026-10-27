@@ -51,6 +51,14 @@ import {
   persistInspectorWidth,
   readInspectorWidth,
 } from './lib/inspectorLayout'
+import {
+  clampProgramSheetWidth,
+  persistProgramSheetWidth,
+  PROGRAM_SHEET_DEFAULT_WIDTH,
+  PROGRAM_SHEET_MAX_WIDTH,
+  PROGRAM_SHEET_MIN_WIDTH,
+  readProgramSheetWidth,
+} from './lib/programSheetLayout'
 import { useDragController } from './lib/useDragController'
 import {
   archiveRecoveryCopy,
@@ -289,6 +297,13 @@ export default function App() {
     }
   })
   const [resizingInspector, setResizingInspector] = useState(false)
+  const [programSheetWidth, setProgramSheetWidth] = useState(() =>
+    readProgramSheetWidth(window.localStorage),
+  )
+  const [programSheetAvailableWidth, setProgramSheetAvailableWidth] = useState(() =>
+    Math.max(0, window.innerWidth - 48),
+  )
+  const [resizingProgramSheetSide, setResizingProgramSheetSide] = useState<'left' | 'right' | null>(null)
   const [libraryOpen, setLibraryOpen] = useState(false)
   const [guideOpen, setGuideOpen] = useState(false)
   const [aboutOpen, setAboutOpen] = useState(false)
@@ -303,6 +318,12 @@ export default function App() {
   const editorRef = useRef<HTMLElement>(null)
   const tagsButtonRef = useRef<HTMLButtonElement>(null)
   const inspectorResizePointerRef = useRef<number | null>(null)
+  const programSheetResizeRef = useRef<{
+    pointerId: number
+    side: 'left' | 'right'
+    startX: number
+    startWidth: number
+  } | null>(null)
   const pendingAutoRunRef = useRef(false)
   const saveTimerRef = useRef<number | null>(null)
   const saveRetryTimerRef = useRef<number | null>(null)
@@ -1524,6 +1545,18 @@ export default function App() {
   const inspectorVisible = inspectorOpen || mobilePanel === 'properties'
   const inspectorDocked = useMediaQuery('(min-width: 1025px)')
   const inspectorMaxWidth = maxInspectorWidth(viewportWidth)
+  const programSheetEffectiveWidth = clampProgramSheetWidth(
+    programSheetWidth,
+    programSheetAvailableWidth,
+  )
+  const programSheetAriaMin = Math.min(
+    PROGRAM_SHEET_MIN_WIDTH,
+    Math.max(1, programSheetAvailableWidth),
+  )
+  const programSheetAriaMax = clampProgramSheetWidth(
+    PROGRAM_SHEET_MAX_WIDTH,
+    programSheetAvailableWidth,
+  )
   /** 手机端一次只允许一层底部面板；提示条需要知道它是否被面板占住了底部。 */
   const sheetOpen = Boolean(quickEdit) || mobilePanel !== 'none'
 
@@ -1537,6 +1570,35 @@ export default function App() {
     }, 160)
     return () => window.clearTimeout(timer)
   }, [inspectorWidth])
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      persistProgramSheetWidth(window.localStorage, programSheetWidth)
+    }, 160)
+    return () => window.clearTimeout(timer)
+  }, [programSheetWidth])
+
+  useEffect(() => {
+    const pane = editorRef.current
+    if (!pane) return
+
+    const measure = () => {
+      const style = window.getComputedStyle(pane)
+      const horizontalPadding = (Number.parseFloat(style.paddingLeft) || 0)
+        + (Number.parseFloat(style.paddingRight) || 0)
+      const available = Math.max(0, pane.clientWidth - horizontalPadding)
+      if (available > 0) setProgramSheetAvailableWidth(available)
+    }
+
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(pane)
+    window.addEventListener('resize', measure)
+    return () => {
+      observer.disconnect()
+      window.removeEventListener('resize', measure)
+    }
+  }, [])
 
   useEffect(() => {
     const handleResize = () => {
@@ -1596,6 +1658,58 @@ export default function App() {
     setInspectorWidth(clampInspectorWidth(INSPECTOR_DEFAULT_WIDTH, window.innerWidth))
   }
 
+  const startProgramSheetResize = (
+    side: 'left' | 'right',
+    event: ReactPointerEvent<HTMLDivElement>,
+  ) => {
+    if (event.button !== 0) return
+    event.preventDefault()
+    programSheetResizeRef.current = {
+      pointerId: event.pointerId,
+      side,
+      startX: event.clientX,
+      startWidth: programSheetEffectiveWidth,
+    }
+    event.currentTarget.setPointerCapture(event.pointerId)
+    setResizingProgramSheetSide(side)
+  }
+
+  const moveProgramSheetResize = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const resize = programSheetResizeRef.current
+    if (!resize || resize.pointerId !== event.pointerId) return
+    event.preventDefault()
+    const direction = resize.side === 'right' ? 1 : -1
+    const nextWidth = resize.startWidth
+      + (event.clientX - resize.startX) * direction * 2
+    setProgramSheetWidth(clampProgramSheetWidth(nextWidth, programSheetAvailableWidth))
+  }
+
+  const endProgramSheetResize = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const resize = programSheetResizeRef.current
+    if (!resize) return
+    if (event.currentTarget.hasPointerCapture(resize.pointerId)) {
+      event.currentTarget.releasePointerCapture(resize.pointerId)
+    }
+    programSheetResizeRef.current = null
+    setResizingProgramSheetSide(null)
+  }
+
+  const resizeProgramSheetWithKeyboard = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    const step = event.shiftKey ? 160 : 40
+    let nextWidth: number | null = null
+    if (event.key === 'ArrowLeft') nextWidth = programSheetEffectiveWidth - step
+    if (event.key === 'ArrowRight') nextWidth = programSheetEffectiveWidth + step
+    if (event.key === 'Home') nextWidth = PROGRAM_SHEET_DEFAULT_WIDTH
+    if (event.key === 'End') nextWidth = programSheetAriaMax
+    if (nextWidth === null) return
+    event.preventDefault()
+    setProgramSheetWidth(clampProgramSheetWidth(nextWidth, programSheetAvailableWidth))
+  }
+
+  const resetProgramSheetWidth = () => {
+    setProgramSheetWidth(PROGRAM_SHEET_DEFAULT_WIDTH)
+  }
+
   /** 点界面任意非交互留白都取消元件选中；图纸内部仍由画布处理。 */
   const clearSelectionOnBlankPointerDown = (event: {
     button: number
@@ -1608,7 +1722,7 @@ export default function App() {
       + '[contenteditable="true"], [role="button"], [role="menu"], '
       + '[role="menuitem"], [role="dialog"], [role="alertdialog"], '
       + '[role="listbox"], [role="complementary"], [role="separator"], '
-      + '.wb-context-resizer',
+      + '.wb-context-resizer, .wb-program-resizer',
     )) return
     setSelection(null)
     setQuickEdit(null)
@@ -1654,6 +1768,7 @@ export default function App() {
       data-sheet={sheetOpen ? 'open' : 'closed'}
       data-inspector={inspectorVisible ? 'open' : 'closed'}
       data-inspector-resizing={resizingInspector ? 'true' : undefined}
+      data-program-sheet-resizing={resizingProgramSheetSide ? 'true' : undefined}
       style={{ '--inspector-width': `${inspectorWidth}px` } as CSSProperties}
       onPointerDown={clearSelectionOnBlankPointerDown}
     >
@@ -1727,7 +1842,40 @@ export default function App() {
 
       <div className="wb-workbench">
         <main className="wb-program-pane" ref={editorRef}>
-          <div className="wb-program-inner">
+          <div
+            id="wb-program-sheet"
+            className="wb-program-frame"
+            style={{ '--program-sheet-width': `${programSheetEffectiveWidth}px` } as CSSProperties}
+          >
+            <div
+              className="wb-program-resizer is-left"
+              role="separator"
+              aria-orientation="vertical"
+              aria-label="调整程序区宽度"
+              aria-controls="wb-program-sheet"
+              aria-valuemin={programSheetAriaMin}
+              aria-valuemax={programSheetAriaMax}
+              aria-valuenow={programSheetEffectiveWidth}
+              aria-valuetext={`${programSheetEffectiveWidth} 像素`}
+              data-resizing={resizingProgramSheetSide === 'left' ? 'true' : undefined}
+              tabIndex={0}
+              title="拖动调整程序区宽度；双击恢复默认；方向键微调"
+              onPointerDown={(event) => startProgramSheetResize('left', event)}
+              onPointerMove={moveProgramSheetResize}
+              onPointerUp={endProgramSheetResize}
+              onPointerCancel={endProgramSheetResize}
+              onLostPointerCapture={endProgramSheetResize}
+              onDoubleClick={resetProgramSheetWidth}
+              onKeyDown={resizeProgramSheetWithKeyboard}
+            >
+              <span className="wb-program-resizer-grip" aria-hidden="true" />
+              <span className="wb-program-resizer-tip" aria-hidden="true">
+                {resizingProgramSheetSide === 'left'
+                  ? `${programSheetEffectiveWidth} px · 双击复位`
+                  : '拖动调宽 · 双击复位'}
+              </span>
+            </div>
+            <div className="wb-program-inner">
               {remoteConflict && (
                 <section
                   className="recovery-banner conflict-banner"
@@ -1910,6 +2058,35 @@ export default function App() {
                 onExtendSelect={extendSelection}
               />
 
+            </div>
+            <div
+              className="wb-program-resizer is-right"
+              role="separator"
+              aria-orientation="vertical"
+              aria-label="调整程序区宽度"
+              aria-controls="wb-program-sheet"
+              aria-valuemin={programSheetAriaMin}
+              aria-valuemax={programSheetAriaMax}
+              aria-valuenow={programSheetEffectiveWidth}
+              aria-valuetext={`${programSheetEffectiveWidth} 像素`}
+              data-resizing={resizingProgramSheetSide === 'right' ? 'true' : undefined}
+              tabIndex={0}
+              title="拖动调整程序区宽度；双击恢复默认；方向键微调"
+              onPointerDown={(event) => startProgramSheetResize('right', event)}
+              onPointerMove={moveProgramSheetResize}
+              onPointerUp={endProgramSheetResize}
+              onPointerCancel={endProgramSheetResize}
+              onLostPointerCapture={endProgramSheetResize}
+              onDoubleClick={resetProgramSheetWidth}
+              onKeyDown={resizeProgramSheetWithKeyboard}
+            >
+              <span className="wb-program-resizer-grip" aria-hidden="true" />
+              <span className="wb-program-resizer-tip" aria-hidden="true">
+                {resizingProgramSheetSide === 'right'
+                  ? `${programSheetEffectiveWidth} px · 双击复位`
+                  : '拖动调宽 · 双击复位'}
+              </span>
+            </div>
           </div>
         </main>
       </div>

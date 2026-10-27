@@ -3380,3 +3380,170 @@ body[data-drag-kind] {
     user-select: none;
   }
 }
+
+/* ------------------------------------------ resizable drafting sheet */
+
+/* The sheet floats on the workbench instead of turning the entire pane into
+   paper. This keeps the original centred-document composition on wide screens. */
+.wb-program-pane {
+  padding: 20px 24px 32px;
+  background: var(--ground);
+  background-image: none;
+}
+
+.wb-program-frame {
+  position: relative;
+  width: min(var(--program-sheet-width, 1360px), 100%);
+  min-width: 0;
+  margin-inline: auto;
+}
+
+.wb-program-inner {
+  width: 100%;
+  max-width: none;
+}
+
+.wb-program-resizer {
+  display: none;
+}
+
+@media (min-width: 1025px) {
+  .wb-program-resizer {
+    position: absolute;
+    inset-block: 0;
+    z-index: 4;
+    display: block;
+    width: 24px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: var(--control);
+    cursor: col-resize;
+    touch-action: none;
+    outline: none;
+  }
+
+  .wb-program-resizer.is-left {
+    left: -24px;
+  }
+
+  .wb-program-resizer.is-right {
+    right: -24px;
+  }
+
+  .wb-program-resizer::before {
+    content: '';
+    position: absolute;
+    inset-block: 0;
+    left: 50%;
+    width: 1px;
+    background: var(--border);
+    transform: translateX(-50%);
+    transition: width 120ms ease, background-color 120ms ease;
+  }
+
+  .wb-program-resizer-grip {
+    position: absolute;
+    top: 72px;
+    left: 50%;
+    width: 9px;
+    height: 44px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background-color: var(--surface);
+    background-image: radial-gradient(circle, currentColor 1.1px, transparent 1.3px);
+    background-position: center;
+    background-size: 4px 6px;
+    transform: translateX(-50%);
+    pointer-events: none;
+    transition: border-color 120ms ease, color 120ms ease;
+  }
+
+  .wb-program-resizer-tip {
+    position: absolute;
+    top: 124px;
+    z-index: 2;
+    padding: 4px 8px;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    background: var(--surface);
+    box-shadow: var(--shadow-overlay);
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 500;
+    line-height: 1.4;
+    white-space: nowrap;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 120ms ease;
+  }
+
+  .wb-program-resizer.is-left .wb-program-resizer-tip {
+    left: 18px;
+  }
+
+  .wb-program-resizer.is-right .wb-program-resizer-tip {
+    right: 18px;
+  }
+
+  .wb-program-resizer:hover,
+  .wb-program-resizer:focus-visible,
+  .wb-shell[data-program-sheet-resizing='true'] .wb-program-resizer {
+    color: var(--accent);
+  }
+
+  .wb-program-resizer:hover::before,
+  .wb-program-resizer:focus-visible::before,
+  .wb-shell[data-program-sheet-resizing='true'] .wb-program-resizer::before {
+    width: 2px;
+    background: var(--accent);
+  }
+
+  .wb-program-resizer:hover .wb-program-resizer-grip,
+  .wb-program-resizer:focus-visible .wb-program-resizer-grip,
+  .wb-program-resizer[data-resizing='true'] .wb-program-resizer-grip {
+    border-color: var(--accent);
+  }
+
+  .wb-program-resizer:hover .wb-program-resizer-tip,
+  .wb-program-resizer:focus-visible .wb-program-resizer-tip,
+  .wb-program-resizer[data-resizing='true'] .wb-program-resizer-tip {
+    opacity: 1;
+  }
+
+  .wb-program-resizer:focus-visible .wb-program-resizer-grip {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  .wb-shell[data-program-sheet-resizing='true'] {
+    cursor: col-resize;
+    user-select: none;
+  }
+}
+
+@media (max-width: 1200px) {
+  .wb-program-pane {
+    padding: 18px 18px 28px;
+  }
+}
+
+@media (max-width: 1024px) {
+  .wb-program-frame {
+    width: 100%;
+  }
+}
+
+@media (max-width: 720px) {
+  .wb-program-pane {
+    padding: 14px 12px 24px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wb-program-resizer::before,
+  .wb-program-resizer-grip,
+  .wb-program-resizer-tip {
+    transition: none;
+  }
+}

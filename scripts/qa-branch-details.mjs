@@ -335,9 +335,10 @@ check('selection/program-gutter-clears-node', paneGeometry.selected === 0
   && paneGeometry.wires === 0 && !paneGeometry.editor, {
   paneGeometry,
 })
-check('layout/program-fills-available-width', paneGeometry.present
-  && paneGeometry.sheetWidth >= paneGeometry.paneWidth - 20
-  && paneGeometry.leftGap <= 2 && paneGeometry.rightGap <= 18, paneGeometry)
+check('layout/program-sheet-default-width', paneGeometry.present
+  && paneGeometry.sheetWidth === 1360
+  && paneGeometry.leftGap >= 24 && paneGeometry.rightGap >= 24
+  && Math.abs(paneGeometry.leftGap - paneGeometry.rightGap) <= 2, paneGeometry)
 
 // P/N 标记位于两根触点竖线之间、变量名下方，不能贴字。
 await evaluate(`document.querySelector('.ll-node.ll-contact[data-node-id]')
