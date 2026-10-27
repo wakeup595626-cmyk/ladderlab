@@ -922,17 +922,24 @@ export default function App() {
   const openBranchAt = useCallback((slot: SlotRef) => {
     const opened = openBranchAtSlot(program, slot.rungId, slot)
     if (!opened) {
-      notify('请在元件之后的插入点打开分支')
+      notify('主线路末尾没有回接点，请在元件之间打开分支')
       return
     }
     commit(opened.program)
-    setSelection({
+    const selectionForNode = {
       rungId: slot.rungId,
       path: findNodePath(opened.program, slot.rungId, opened.nodeId),
-    })
-    setQuickEdit(null)
+    }
+    setSelection(selectionForNode)
+    if (opened.mode === 'sibling') {
+      setQuickEdit({ selection: selectionForNode, anchor: null, autoFocus: true })
+    } else {
+      setQuickEdit(null)
+    }
     setMobilePanel('none')
-    notify('并联分支已打开：点 + 继续加元件，画完点右侧「合并分支」')
+    notify(opened.mode === 'sibling'
+      ? '已在同一并联组新增支路，可直接输入变量或地址'
+      : '并联分支已打开：点 + 继续加元件，画完点右侧「合并分支」')
   }, [commit, notify, program])
 
   const mergeBranch = useCallback((rungId: string, parallelPath: number[], closeIndex: number) => {
@@ -1736,6 +1743,11 @@ export default function App() {
                 dragTarget={drag.target}
                 isDragging={Boolean(drag.drag)}
                 onSelect={(next) => {
+                  if (!next) {
+                    setSelection(null)
+                    setQuickEdit(null)
+                    return
+                  }
                   setSelection(next)
                   // 画布上选中谁，右边面板就跟到谁：否则会出现
                   // 画布里选了 Motor、右侧却在显示变量表的割裂感。

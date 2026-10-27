@@ -31,7 +31,7 @@ export interface LadderCanvasProps {
   program: Program
   runtime: Runtime
   selection: Selection | null
-  onSelect: (selection: Selection) => void
+  onSelect: (selection: Selection | null) => void
   onDuplicateRung: (rungId: string) => void
   onDeleteRung: (rungId: string) => void
   onMoveRung: (rungId: string, delta: -1 | 1) => void
@@ -791,8 +791,8 @@ function renderContact(
           {(node.kind === 'P' || node.kind === 'N') && (
             <text
               className="ll-edge-mark"
-              x={centerX + 13}
-              y="39"
+              x={centerX}
+              y="50"
               textAnchor="middle"
             >
               {node.kind}
@@ -1998,20 +1998,6 @@ function RungSection({
           <g transform={'translate(' + layout.outputX + ', ' + layout.outputY + ')'}>
             {renderOutput(rung.output, rungContext, rung.id)}
           </g>
-          <line
-            className="ll-rail"
-            x1={layout.width - metrics.railRight}
-            y1="0"
-            x2={layout.width - metrics.railRight}
-            y2={layout.height}
-          />
-          <line
-            className={'ll-power-wire' + (powered ? ' is-on' : '')}
-            x1={layout.outputX + layout.output.width}
-            y1={layout.centerY}
-            x2={layout.width - metrics.railRight}
-            y2={layout.centerY}
-          />
         </svg>
       </div>
     </article>
@@ -2043,12 +2029,18 @@ function SlotMenu({
 }: SlotMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null)
   const [placement, setPlacement] = useState<{ left: number; top: number } | null>(null)
-  const canBranch = request.index >= 1 && request.index < request.chainLength
-  const positionHint = request.index === 0
-    ? '插到线路最前面'
-    : request.index >= request.chainLength
-      ? '插到线路末尾'
-      : `插到第 ${request.index} 个元件之后`
+  const atBranchEnd = request.chainLength > 0
+    && request.chain.length > 0
+    && request.index === request.chainLength
+  const canBranch = request.chainLength > 0
+    && (request.index < request.chainLength || request.chain.length > 0)
+  const positionHint = atBranchEnd
+    ? '在并联组末尾追加一条支路'
+    : request.index === 0
+      ? '插到线路最前面'
+      : request.index >= request.chainLength
+        ? '插到线路末尾'
+        : `插到第 ${request.index} 个元件之后`
 
   useLayoutEffect(() => {
     const menu = menuRef.current
@@ -2165,8 +2157,12 @@ function SlotMenu({
         className="ll-slot-menu-item"
         disabled={!canBranch}
         title={canBranch
-          ? '在这里向下打开一条并联分支，画完点右侧「合并分支」'
-          : '分支要从元件之后、且后面还有元件的位置打开'}
+          ? atBranchEnd
+            ? '在这条支路旁加入一条同级并联支路，新支路会直接回到同一汇合点'
+            : '在这里向下打开一条并联分支，画完点右侧「合并分支」'
+          : request.chainLength === 0
+            ? '空支路请先插入一个元件'
+            : '主线路末尾没有可回接的位置'}
         onClick={onBranch}
       >
         <span className="ll-slot-menu-symbol" aria-hidden="true">−┬−</span>
@@ -2180,7 +2176,9 @@ function SlotMenu({
       )}
       {!canBranch && (
         <p className="ll-slot-menu-hint" role="presentation">
-          分支要从元件之后、且后面还有元件的位置打开。
+          {request.chainLength === 0
+            ? '空支路请先插入元件，再创建分支。'
+            : '主线路末尾没有可回接的位置，请在元件之间打开分支。'}
         </p>
       )}
     </div>,
@@ -2402,7 +2400,20 @@ export default function LadderCanvas({
 
   return (
     <>
-      <div className={'ll-canvas' + (isDragging ? ' is-dragging' : '')}>
+      <div
+        className={'ll-canvas' + (isDragging ? ' is-dragging' : '')}
+        onClick={(event) => {
+          const target = event.target
+          if (!(target instanceof Element) || target.closest(
+            'button, input, textarea, select, a, summary, [role="button"], '
+            + '[role="menu"], [data-node-id], [data-output-id], .ll-slot, '
+            + '.ll-merge-chip, .ll-node-grip, [data-drag-handle], .ll-rung-header',
+          )) return
+          setMergeArmed(null)
+          setSlotMenu(null)
+          onSelect(null)
+        }}
+      >
         {program.rungs.length === 0 ? (
           <div className="ll-empty-board">
             <div className="ll-empty-symbol">—[ ]—( )</div>

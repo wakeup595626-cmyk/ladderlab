@@ -14,6 +14,7 @@
     "lint": "oxlint",
     "check": "npm run test && npm run typecheck && npm run lint && npm run build",
     "qa": "node scripts/qa-smoke.mjs",
+    "qa:branch": "node scripts/qa-branch-details.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

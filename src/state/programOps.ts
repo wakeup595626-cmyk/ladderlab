@@ -756,6 +756,8 @@ export interface OpenedBranch {
   program: Program
   nodeId: string
   parallelId: string
+  /** draft 需要走「合并分支」；sibling 已直接成为并联组的一条完整支路。 */
+  mode: 'draft' | 'sibling'
 }
 
 /** 递归判断一段链里是否还有没闭合的并联分支。 */
@@ -778,8 +780,35 @@ export function openBranchAtSlot(
   if (!rung) return null
   const chain = chainAtPath(rung.nodes, slot.chain)
   if (!chain) return null
-  // 分叉点之前至少要有一个元件，否则会生成悬空的双线。
-  if (!Number.isInteger(slot.index) || slot.index < 1 || slot.index >= chain.length) return null
+
+  if (!Number.isInteger(slot.index) || slot.index < 0 || slot.index > chain.length) return null
+
+  // 支路末尾直接追加同组的下一条支路。这样第 2、3 条支路也能继续分支，
+  // 不必绕回主线；新支路有真实回接点，因此无需再走草稿合并。
+  if (slot.index === chain.length && chain.length > 0 && slot.chain.length > 0) {
+    const parallelPath = slot.chain.slice(0, -1)
+    const parent = getNodeAtPath(program, rungId, parallelPath)
+    if (!parent || parent.type !== 'parallel') return null
+    const made = makeContactNode(program, 'NO')
+    const nextNodes = mapChain(rung.nodes, parallelPath, (node) => (
+      node.type === 'parallel'
+        ? { ...node, branches: [...node.branches, [made.node]] }
+        : node
+    ))
+    return {
+      program: withRung(made.program, rungId, (item) => ({
+        ...item,
+        nodes: sanitizeChain(nextNodes),
+      })),
+      nodeId: made.node.id,
+      parallelId: parent.id,
+      mode: 'sibling',
+    }
+  }
+
+  // 起点、中间点都能向下打开草稿；空链和主线路末尾没有可回接的主线，
+  // 继续拒绝，避免生成永远无法闭合的双线。
+  if (chain.length === 0 || slot.index >= chain.length) return null
   const made = makeContactNode(program, 'NO')
   const parallel: LadderNode = {
     type: 'parallel',
@@ -800,6 +829,7 @@ export function openBranchAtSlot(
     })),
     nodeId: made.node.id,
     parallelId: parallel.id,
+    mode: 'draft',
   }
 }
 

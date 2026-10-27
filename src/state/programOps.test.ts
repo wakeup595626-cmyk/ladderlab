@@ -431,7 +431,7 @@ describe('programOps 分支编排与批量编辑', () => {
     expect(hasOpenBranch([closed, nestedDraft])).toBe(true)
   })
 
-  it('openBranchAtSlot 在主线指定插入点打开并联草稿，并拒绝 index 0 与末尾', () => {
+  it('openBranchAtSlot 可从主线起点或中间打开并联草稿，并拒绝主线末尾', () => {
     const a = contact('a', 'A')
     const b = contact('b', 'B')
     const c = contact('c', 'C')
@@ -454,8 +454,79 @@ describe('programOps 分支编排与批量编辑', () => {
     expect(hasOpenBranch(nodes)).toBe(true)
 
     expect(rungOf(source, 'r1').nodes).toEqual([a, b, c])
-    expect(openBranchAtSlot(source, 'r1', { chain: [], index: 0 })).toBeNull()
+    const fromStart = openBranchAtSlot(source, 'r1', { chain: [], index: 0 })
+    if (!fromStart) throw new Error('主线起点应能打开分支')
+    expect(fromStart.mode).toBe('draft')
+    expect(rungOf(fromStart.program, 'r1').nodes[0]).toMatchObject({
+      id: fromStart.parallelId,
+      type: 'parallel',
+      open: true,
+    })
     expect(openBranchAtSlot(source, 'r1', { chain: [], index: 3 })).toBeNull()
+  })
+
+  it('第二条和第三条并联支路都能继续打开嵌套分支', () => {
+    const root = parallel(
+      'root',
+      [contact('a', 'A'), contact('b', 'B')],
+      [contact('c', 'C'), contact('d', 'D')],
+      [contact('e', 'E'), contact('f', 'F')],
+    )
+    const source = program([rung('r1', [root])])
+
+    const fromSecondStart = openBranchAtSlot(source, 'r1', { chain: [0, 1], index: 0 })
+    if (!fromSecondStart) throw new Error('第二条支路起点应能打开分支')
+    expect(fromSecondStart.mode).toBe('draft')
+    const secondGroup = rungOf(fromSecondStart.program, 'r1').nodes[0]
+    if (secondGroup.type !== 'parallel') throw new Error('原并联节点应保留')
+    expect(secondGroup.branches[1][0]).toMatchObject({
+      id: fromSecondStart.parallelId,
+      type: 'parallel',
+      open: true,
+    })
+
+    const fromThirdMiddle = openBranchAtSlot(source, 'r1', { chain: [0, 2], index: 1 })
+    if (!fromThirdMiddle) throw new Error('第三条支路中间应能打开分支')
+    expect(fromThirdMiddle.mode).toBe('draft')
+  })
+
+  it('第二条和第三条并联支路末尾可直接追加同级支路，无需再次合并', () => {
+    const root = parallel(
+      'root',
+      [contact('a', 'A'), contact('b', 'B')],
+      [contact('c', 'C')],
+      [contact('e', 'E')],
+    )
+    const source = program([rung('r1', [root])])
+
+    const fromSecondEnd = openBranchAtSlot(source, 'r1', { chain: [0, 1], index: 1 })
+    if (!fromSecondEnd) throw new Error('第二条支路末尾应能追加同级支路')
+    expect(fromSecondEnd.mode).toBe('sibling')
+    expect(fromSecondEnd.parallelId).toBe('root')
+    const secondUpdated = rungOf(fromSecondEnd.program, 'r1').nodes[0]
+    if (secondUpdated.type !== 'parallel') throw new Error('并联节点应保留')
+    expect(secondUpdated.open).toBeUndefined()
+    expect(secondUpdated.branches).toHaveLength(4)
+    expect(secondUpdated.branches[3][0]).toMatchObject({
+      id: fromSecondEnd.nodeId,
+      kind: 'NO',
+    })
+
+    const fromThirdEnd = openBranchAtSlot(fromSecondEnd.program, 'r1', {
+      chain: [0, 2],
+      index: 1,
+    })
+    if (!fromThirdEnd) throw new Error('第三条支路末尾应能追加同级支路')
+    expect(fromThirdEnd.mode).toBe('sibling')
+    const thirdUpdated = rungOf(fromThirdEnd.program, 'r1').nodes[0]
+    if (thirdUpdated.type !== 'parallel') throw new Error('并联节点应保留')
+    expect(thirdUpdated.branches).toHaveLength(5)
+    expect(thirdUpdated.branches[2]).toEqual([contact('e', 'E')])
+    expect(thirdUpdated.branches[4][0]).toMatchObject({
+      id: fromThirdEnd.nodeId,
+      kind: 'NO',
+    })
+    expect(rungOf(source, 'r1').nodes[0]).toEqual(root)
   })
 
   it('草稿支路可以连续插入多个节点并保留 open 状态', () => {
