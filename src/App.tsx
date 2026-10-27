@@ -1,4 +1,14 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import {
+  type CSSProperties,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 import './App.css'
 import './Shell.css'
 import AboutDialog from './components/AboutDialog'
@@ -32,6 +42,15 @@ import type {
 } from './engine/types'
 import type { DragPayload, DropTarget } from './lib/dragTypes'
 import { downloadText, MAX_IMPORT_BYTES, parseProgramText, serializeProgram } from './lib/io'
+import {
+  clampInspectorWidth,
+  INSPECTOR_DEFAULT_WIDTH,
+  INSPECTOR_DOCKED_MIN_VIEWPORT,
+  INSPECTOR_MIN_WIDTH,
+  maxInspectorWidth,
+  persistInspectorWidth,
+  readInspectorWidth,
+} from './lib/inspectorLayout'
 import { useDragController } from './lib/useDragController'
 import {
   archiveRecoveryCopy,
@@ -257,6 +276,19 @@ export default function App() {
   const [clipboard, setClipboard] = useState<LadderNode[]>([])
   const [mobilePanel, setMobilePanel] = useState<MobilePanel>('none')
   const [inspectorOpen, setInspectorOpen] = useState(false)
+  const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth)
+  const [inspectorWidth, setInspectorWidth] = useState(() => {
+    const initialViewportWidth = window.innerWidth
+    try {
+      const storedWidth = readInspectorWidth(window.localStorage)
+      return initialViewportWidth >= INSPECTOR_DOCKED_MIN_VIEWPORT
+        ? clampInspectorWidth(storedWidth, initialViewportWidth)
+        : storedWidth
+    } catch {
+      return clampInspectorWidth(INSPECTOR_DEFAULT_WIDTH, initialViewportWidth)
+    }
+  })
+  const [resizingInspector, setResizingInspector] = useState(false)
   const [libraryOpen, setLibraryOpen] = useState(false)
   const [guideOpen, setGuideOpen] = useState(false)
   const [aboutOpen, setAboutOpen] = useState(false)
@@ -270,6 +302,7 @@ export default function App() {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const editorRef = useRef<HTMLElement>(null)
   const tagsButtonRef = useRef<HTMLButtonElement>(null)
+  const inspectorResizePointerRef = useRef<number | null>(null)
   const pendingAutoRunRef = useRef(false)
   const saveTimerRef = useRef<number | null>(null)
   const saveRetryTimerRef = useRef<number | null>(null)
@@ -1490,8 +1523,78 @@ export default function App() {
   )
   const inspectorVisible = inspectorOpen || mobilePanel === 'properties'
   const inspectorDocked = useMediaQuery('(min-width: 1025px)')
+  const inspectorMaxWidth = maxInspectorWidth(viewportWidth)
   /** 手机端一次只允许一层底部面板；提示条需要知道它是否被面板占住了底部。 */
   const sheetOpen = Boolean(quickEdit) || mobilePanel !== 'none'
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      try {
+        persistInspectorWidth(window.localStorage, inspectorWidth)
+      } catch {
+        // The panel remains resizable when browser storage is unavailable.
+      }
+    }, 160)
+    return () => window.clearTimeout(timer)
+  }, [inspectorWidth])
+
+  useEffect(() => {
+    const handleResize = () => {
+      const nextViewportWidth = window.innerWidth
+      setViewportWidth(nextViewportWidth)
+      if (nextViewportWidth >= INSPECTOR_DOCKED_MIN_VIEWPORT) {
+        setInspectorWidth((current) => clampInspectorWidth(current, nextViewportWidth))
+      }
+    }
+    window.addEventListener('resize', handleResize)
+    return () => window.removeEventListener('resize', handleResize)
+  }, [])
+
+  const updateInspectorWidthFromPointer = useCallback((clientX: number) => {
+    const nextViewportWidth = window.innerWidth
+    setViewportWidth(nextViewportWidth)
+    setInspectorWidth(clampInspectorWidth(nextViewportWidth - clientX, nextViewportWidth))
+  }, [])
+
+  const startInspectorResize = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return
+    event.preventDefault()
+    inspectorResizePointerRef.current = event.pointerId
+    event.currentTarget.setPointerCapture(event.pointerId)
+    setResizingInspector(true)
+  }
+
+  const moveInspectorResize = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (inspectorResizePointerRef.current !== event.pointerId) return
+    event.preventDefault()
+    updateInspectorWidthFromPointer(event.clientX)
+  }
+
+  const endInspectorResize = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const pointerId = inspectorResizePointerRef.current
+    if (pointerId === null) return
+    if (event.currentTarget.hasPointerCapture(pointerId)) {
+      event.currentTarget.releasePointerCapture(pointerId)
+    }
+    inspectorResizePointerRef.current = null
+    setResizingInspector(false)
+  }
+
+  const resizeInspectorWithKeyboard = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    const step = event.shiftKey ? 48 : 16
+    let nextWidth: number | null = null
+    if (event.key === 'ArrowLeft') nextWidth = inspectorWidth + step
+    if (event.key === 'ArrowRight') nextWidth = inspectorWidth - step
+    if (event.key === 'Home') nextWidth = INSPECTOR_DEFAULT_WIDTH
+    if (event.key === 'End') nextWidth = inspectorMaxWidth
+    if (nextWidth === null) return
+    event.preventDefault()
+    setInspectorWidth(clampInspectorWidth(nextWidth, window.innerWidth))
+  }
+
+  const resetInspectorWidth = () => {
+    setInspectorWidth(clampInspectorWidth(INSPECTOR_DEFAULT_WIDTH, window.innerWidth))
+  }
 
   /** 点界面任意非交互留白都取消元件选中；图纸内部仍由画布处理。 */
   const clearSelectionOnBlankPointerDown = (event: {
@@ -1504,7 +1607,8 @@ export default function App() {
       + 'button, input, textarea, select, label, a, summary, '
       + '[contenteditable="true"], [role="button"], [role="menu"], '
       + '[role="menuitem"], [role="dialog"], [role="alertdialog"], '
-      + '[role="listbox"], [role="complementary"]',
+      + '[role="listbox"], [role="complementary"], [role="separator"], '
+      + '.wb-context-resizer',
     )) return
     setSelection(null)
     setQuickEdit(null)
@@ -1549,6 +1653,8 @@ export default function App() {
       data-mobile-panel={mobilePanel}
       data-sheet={sheetOpen ? 'open' : 'closed'}
       data-inspector={inspectorVisible ? 'open' : 'closed'}
+      data-inspector-resizing={resizingInspector ? 'true' : undefined}
+      style={{ '--inspector-width': `${inspectorWidth}px` } as CSSProperties}
       onPointerDown={clearSelectionOnBlankPointerDown}
     >
       <WorkspaceTopBar
@@ -1938,7 +2044,30 @@ export default function App() {
             }}
             aria-label="关闭属性面板"
           />
+          {inspectorDocked && (
+            <div
+              className="wb-context-resizer"
+              role="separator"
+              aria-orientation="vertical"
+              aria-label="调整右侧属性面板宽度"
+              aria-controls="wb-context-panel"
+              aria-valuemin={INSPECTOR_MIN_WIDTH}
+              aria-valuemax={inspectorMaxWidth}
+              aria-valuenow={inspectorWidth}
+              aria-valuetext={`${inspectorWidth} 像素`}
+              tabIndex={0}
+              title="拖动调整宽度；双击恢复默认；方向键微调"
+              onPointerDown={startInspectorResize}
+              onPointerMove={moveInspectorResize}
+              onPointerUp={endInspectorResize}
+              onPointerCancel={endInspectorResize}
+              onLostPointerCapture={endInspectorResize}
+              onDoubleClick={resetInspectorWidth}
+              onKeyDown={resizeInspectorWithKeyboard}
+            />
+          )}
           <aside
+            id="wb-context-panel"
             className="wb-context-panel"
             role={inspectorDocked ? 'complementary' : 'dialog'}
             aria-modal={inspectorDocked ? undefined : true}

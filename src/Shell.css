@@ -32,6 +32,7 @@
   --sheet-inset: 8px;
   --row-height: 42px;
   --sidebar-width: 244px;
+  --inspector-width: 400px;
   --gap: 24px;
   --pad: 24px;
   --control-height: 34px;
@@ -1205,18 +1206,18 @@ body[data-drag-kind] {
   .wb-shell[data-inspector='open'] .wb-documentbar,
   .wb-shell[data-inspector='open'] .wb-instruction-strip,
   .wb-shell[data-inspector='open'] .wb-coach {
-    padding-right: 424px;
+    padding-right: calc(var(--inspector-width) + 24px);
   }
 
   .wb-shell[data-inspector='open'] .wb-workbench {
-    padding-right: 400px;
+    padding-right: var(--inspector-width);
   }
 
   .wb-context-layer {
     top: 56px;
     bottom: 34px;
     left: auto;
-    width: 400px;
+    width: var(--inspector-width);
     display: block;
   }
 
@@ -3307,5 +3308,75 @@ body[data-drag-kind] {
     top: calc(64px + env(safe-area-inset-top, 0px));
     bottom: auto;
     z-index: 140;
+  }
+}
+
+/* Desktop dock: the visible rule stays quiet, while a wider invisible hit
+   area makes the split easy to grab. */
+@media (min-width: 1025px) {
+  .wb-context-layer {
+    overflow: visible;
+  }
+
+  .wb-context-resizer {
+    position: absolute;
+    inset-block: 0;
+    left: -7px;
+    z-index: 3;
+    width: 16px;
+    cursor: col-resize;
+    touch-action: none;
+    outline: none;
+  }
+
+  .wb-context-resizer::before {
+    content: '';
+    position: absolute;
+    inset-block: 0;
+    left: 7px;
+    width: 1px;
+    background: var(--border);
+  }
+
+  .wb-context-resizer::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 5px;
+    width: 4px;
+    height: 28px;
+    opacity: 0;
+    background: repeating-linear-gradient(
+      to bottom,
+      var(--control) 0 2px,
+      transparent 2px 6px
+    );
+    transform: translateY(-50%);
+  }
+
+  .wb-context-resizer:hover::before,
+  .wb-context-resizer:focus-visible::before,
+  .wb-shell[data-inspector-resizing='true'] .wb-context-resizer::before {
+    width: 2px;
+    background: var(--accent);
+  }
+
+  .wb-context-resizer:hover::after,
+  .wb-context-resizer:focus-visible::after,
+  .wb-shell[data-inspector-resizing='true'] .wb-context-resizer::after {
+    opacity: 1;
+  }
+
+  .wb-context-resizer:focus-visible::after {
+    background: repeating-linear-gradient(
+      to bottom,
+      var(--accent) 0 2px,
+      transparent 2px 6px
+    );
+  }
+
+  .wb-shell[data-inspector-resizing='true'] {
+    cursor: col-resize;
+    user-select: none;
   }
 }
