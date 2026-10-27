@@ -1369,3 +1369,32 @@
     width: min(232px, calc(100vw - 16px));
   }
 }
+
+/* 收藏指令的落点：目标段标题、精确插入点和 + 都保持常亮，
+   让用户点收藏卡之前就知道东西会掉在哪。 */
+.ll-rung.is-favorite-target > .ll-rung-header {
+  background: var(--accent-wash);
+}
+
+.ll-rung.is-favorite-target > .ll-rung-header .ll-rung-marker {
+  height: 26px;
+  background: var(--accent);
+}
+
+.ll-slot.is-favorite-target .ll-slot-wide-hit {
+  fill: var(--accent-wash);
+}
+
+.ll-slot.is-favorite-target .ll-slot-plus {
+  opacity: 1 !important;
+  pointer-events: all !important;
+}
+
+.ll-slot.is-favorite-target .ll-slot-plus rect:not(.ll-slot-plus-hit) {
+  fill: var(--accent);
+  stroke: var(--accent);
+}
+
+.ll-slot.is-favorite-target .ll-slot-plus path {
+  stroke: var(--surface);
+}

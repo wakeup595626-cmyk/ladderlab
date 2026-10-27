@@ -16,6 +16,7 @@ import type {
   TagDef,
 } from '../engine/types'
 import type { DragPayload, DropTarget } from '../lib/dragTypes'
+import type { FavoriteInsertTarget } from '../lib/insertTarget'
 import { FIELD_LIMITS } from '../lib/limits'
 import { hasOpenBranch } from '../state/programOps'
 import {
@@ -31,6 +32,8 @@ export interface LadderCanvasProps {
   program: Program
   runtime: Runtime
   selection: Selection | null
+  insertTarget?: FavoriteInsertTarget | null
+  insertTargetLabel?: string
   onSelect: (selection: Selection | null) => void
   onDuplicateRung: (rungId: string) => void
   onCopyRung: (rungId: string) => void
@@ -85,6 +88,8 @@ interface DrawContext {
   runtime: Runtime
   tags: TagDef[]
   selection: Selection | null
+  insertTarget: FavoriteInsertTarget | null
+  insertTargetLabel: string
   dragTarget: DropTarget | null
   dragSource: string | null
   rungId: string
@@ -491,6 +496,12 @@ function renderSlot(
     && pathsEqual(context.mergeTarget.chain, chain)
     && index >= 1,
   )
+  const favoriteTarget = Boolean(
+    context.insertTarget
+    && context.insertTarget.rungId === context.rungId
+    && context.insertTarget.index === index
+    && pathsEqual(context.insertTarget.chain, chain)
+  )
   const openMenu = (element: Element) => context.onOpenSlotMenu({
     rungId: context.rungId,
     chain,
@@ -510,7 +521,9 @@ function renderSlot(
   }
   const plusLabel = mergeCandidate
     ? '在这里闭合并联分支'
-    : '在' + slotLabel + '插入元件或分支'
+    : favoriteTarget
+      ? '收藏指令的插入点：' + slotLabel + '；点 + 可手动插入'
+      : '在' + slotLabel + '插入元件或分支'
 
   return (
     <g
@@ -519,6 +532,7 @@ function renderSlot(
         active ? 'is-drop-target' : '',
         wireSelected ? 'is-wire-selected' : '',
         mergeCandidate ? 'is-merge-candidate' : '',
+        favoriteTarget ? 'is-favorite-target' : '',
       ].filter(Boolean).join(' ')}
       data-drop={JSON.stringify(target)}
       data-chain={chain.join('.')}
@@ -1742,6 +1756,7 @@ function RungSection({
   // 整段选择是显式状态，避免和“选中输出线圈”的 path:null 混淆。
   const wholeRungSelected = rungSelected && context.selection?.wholeRung === true
   const armedHere = context.mergeTarget?.rungId === rung.id
+  const favoriteTargetHere = context.insertTarget?.rungId === rung.id
   const multiCount = context.selection?.rungId === rung.id
     ? context.selection.paths?.length ?? 0
     : 0
@@ -1754,7 +1769,11 @@ function RungSection({
         ? '已选 ' + multiCount + ' 个元件 · Ctrl+C 复制'
         : wholeRungSelected
           ? '整段已选 · 拖动排序 · Ctrl+C 复制'
-          : selectedLabel || (localWire ? '已选线路 ' + (localWire.index + 1) : '')
+          : selectedLabel || (localWire
+            ? '已选线路 ' + (localWire.index + 1)
+            : favoriteTargetHere
+              ? '收藏指令 · ' + (context.insertTargetLabel || '插入本段')
+              : '')
   const statusTip = Boolean(armedHere) || hasOpenBranch(rung.nodes) || multiCount > 1
 
   useLayoutEffect(() => {
@@ -1811,6 +1830,7 @@ function RungSection({
         powered ? 'is-powered' : '',
         rungSelected ? 'is-selected' : '',
         wholeRungSelected ? 'is-whole-selected' : '',
+        favoriteTargetHere ? 'is-favorite-target' : '',
       ].filter(Boolean).join(' ')}
       data-rung-id={rung.id}
       aria-label={segmentLabel + '：' + (rung.label || '未命名')}
@@ -2324,6 +2344,8 @@ export default function LadderCanvas({
   onInsertContact,
   onDeleteNode,
   onNotice,
+  insertTarget = null,
+  insertTargetLabel = '',
 }: LadderCanvasProps) {
   const [dragSource, setDragSource] = useState<string | null>(null)
   const [slotMenu, setSlotMenu] = useState<SlotMenuRequest | null>(null)
@@ -2475,6 +2497,8 @@ export default function LadderCanvas({
     runtime,
     tags: program.tags,
     selection,
+    insertTarget,
+    insertTargetLabel,
     dragTarget,
     dragSource,
     rungId: '',

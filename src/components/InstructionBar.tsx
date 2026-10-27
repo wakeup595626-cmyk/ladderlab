@@ -1,9 +1,11 @@
 import { useCallback, useLayoutEffect, useRef, useState } from 'react'
 import { getProfile } from '../engine/profiles'
-import type { ContactKind, OutputKind, ProfileId } from '../engine/types'
+import type { ContactKind, OutputKind, ProfileId, Rung } from '../engine/types'
 import type { DragPayload } from '../lib/dragTypes'
 import { favoriteInstructionEntry, favoriteInstructionId } from '../lib/instructionFavorites'
+import type { FavoriteInsertTarget } from '../lib/insertTarget'
 import { ChevronRightIcon, GripIcon, StarFilledIcon } from './Icons'
+import InsertTargetControl from './InsertTargetControl'
 import {
   isInstructionAllowed,
   type InstructionFamily,
@@ -13,6 +15,10 @@ interface InstructionBarProps {
   profile: ProfileId
   /** 已收藏指令的 id，顺序即显示顺序。 */
   favoriteIds: readonly string[]
+  rungs: readonly Rung[]
+  insertTarget: FavoriteInsertTarget | null
+  targetAnchorLabel: string
+  onSelectRung: (rungId: string) => void
   onToggleFavorite: (family: InstructionFamily, kind: ContactKind | OutputKind) => void
   onInsertContact: (kind: ContactKind) => void
   onChangeOutput: (kind: OutputKind) => void
@@ -45,6 +51,10 @@ const SHORT_LABELS: Record<string, string> = {
 export default function InstructionBar({
   profile,
   favoriteIds,
+  rungs,
+  insertTarget,
+  targetAnchorLabel,
+  onSelectRung,
   onToggleFavorite,
   onInsertContact,
   onChangeOutput,
@@ -58,6 +68,9 @@ export default function InstructionBar({
   const favorites = favoriteIds
     .map((id) => favoriteInstructionEntry(id))
     .filter((entry) => entry !== undefined)
+  const segmentLabel = insertTarget
+    ? '程序段 ' + (insertTarget.rungIndex + 1)
+    : '目标程序段'
 
   const favoriteKey = favoriteIds.join('|')
 
@@ -111,6 +124,12 @@ export default function InstructionBar({
       </div>
 
       <div className="wb-instruction-tools" role="toolbar" aria-label="收藏的梯形图指令">
+        <InsertTargetControl
+          rungs={rungs}
+          insertTarget={insertTarget}
+          targetAnchorLabel={targetAnchorLabel}
+          onSelectRung={onSelectRung}
+        />
         <div className="wb-instruction-list" ref={listRef}>
           {favorites.length === 0 && (
             <div className="wb-instruction-empty">
@@ -129,6 +148,9 @@ export default function InstructionBar({
             const id = favoriteInstructionId(entry.family, entry.kind)
             const shortLabel = SHORT_LABELS[id] ?? entry.label
             const allowed = isInstructionAllowed(profile, entry)
+            const placement = entry.family === 'output'
+              ? '点击替换' + segmentLabel + '的输出，也可拖动'
+              : '点击插入到' + segmentLabel + '，' + targetAnchorLabel + '，也可拖动'
             return (
               <div className="wb-instruction-card" key={id}>
                 <button
@@ -137,9 +159,9 @@ export default function InstructionBar({
                   data-drag-handle
                   disabled={!allowed}
                   title={allowed
-                    ? `${entry.detail}，点击插入，也可拖动`
+                    ? entry.detail + '。' + placement
                     : `${entry.label}在当前 ${activeProfile.shortName} 指令集中不可用`}
-                  aria-label={`${entry.label}，点击插入，也可拖动`}
+                  aria-label={allowed ? entry.label + '，' + placement : entry.label + ' 当前不可用'}
                   onClick={() => {
                     if (!allowed) return
                     if (entry.family === 'contact') onInsertContact(entry.kind as ContactKind)
@@ -155,6 +177,9 @@ export default function InstructionBar({
                 >
                   <span className="wb-instruction-symbol mono" aria-hidden="true">{entry.symbol}</span>
                   <span className="wb-instruction-label">{shortLabel}</span>
+                  {entry.family === 'output' && (
+                    <span className="wb-instruction-replace">替换</span>
+                  )}
                   <GripIcon size={14} className="wb-drag-mark" />
                 </button>
                 <button

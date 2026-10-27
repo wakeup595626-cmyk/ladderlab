@@ -4,6 +4,7 @@ import { getProfile } from '../engine/profiles'
 import type { ContactKind, OutputKind, ProfileId, Program } from '../engine/types'
 import type { DragPayload } from '../lib/dragTypes'
 import { favoriteInstructionId } from '../lib/instructionFavorites'
+import type { FavoriteInsertTarget } from '../lib/insertTarget'
 import { INSTRUCTIONS, isInstructionAllowed, type InstructionFamily } from './instructionCatalog'
 import {
   BookIcon,
@@ -19,6 +20,7 @@ import {
   StarIcon,
   TagIcon,
 } from './Icons'
+import InsertTargetControl from './InsertTargetControl'
 
 export interface ProjectSidebarProps {
   program: Program
@@ -27,6 +29,9 @@ export interface ProjectSidebarProps {
   variant?: 'full' | 'instructions'
   /** 已收藏指令的 id，用于星标的选中状态。 */
   favoriteIds: readonly string[]
+  insertTarget: FavoriteInsertTarget | null
+  targetAnchorLabel: string
+  onSelectRung: (rungId: string) => void
   onToggleFavorite: (family: InstructionFamily, kind: ContactKind | OutputKind) => void
   onInsertContact: (kind: ContactKind) => void
   onChangeOutput: (kind: OutputKind) => void
@@ -46,6 +51,9 @@ export default function ProjectSidebar({
   activeRungId,
   variant = 'full',
   favoriteIds,
+  insertTarget,
+  targetAnchorLabel,
+  onSelectRung,
   onToggleFavorite,
   onInsertContact,
   onChangeOutput,
@@ -58,6 +66,9 @@ export default function ProjectSidebar({
 }: ProjectSidebarProps) {
   const [query, setQuery] = useState('')
   const activeProfile = getProfile(profile)
+  const segmentLabel = insertTarget
+    ? '程序段 ' + (insertTarget.rungIndex + 1)
+    : '目标程序段'
   const normalizedQuery = query.trim().toLocaleLowerCase()
   const visibleInstructions = normalizedQuery
     ? INSTRUCTIONS.filter((entry) =>
@@ -80,7 +91,7 @@ export default function ProjectSidebar({
         <div className="sidebar-mobile-head">
           <div>
             <h2>{variant === 'instructions' ? '全部指令' : '项目与指令'}</h2>
-            {variant === 'instructions' && <p className="sidebar-drawer-note">点击插入，或拖到梯形图位置。</p>}
+            {variant === 'instructions' && <p className="sidebar-drawer-note">点一下插到下面的位置，也可以拖到梯形图。</p>}
           </div>
           <button
             type="button"
@@ -91,6 +102,20 @@ export default function ProjectSidebar({
           >
             <CloseIcon size={18} />
           </button>
+        </div>
+      )}
+
+      {variant === 'instructions' && (
+        <div className="sidebar-insert-target">
+          <InsertTargetControl
+            rungs={program.rungs}
+            insertTarget={insertTarget}
+            targetAnchorLabel={targetAnchorLabel}
+            onSelectRung={onSelectRung}
+          />
+          <p className="sidebar-insert-target-note">
+            触点插在所选元件之后；没有选中元件时插到段末。输出会替换该段输出。
+          </p>
         </div>
       )}
 
@@ -173,8 +198,11 @@ export default function ProjectSidebar({
               const allowed = isInstructionAllowed(profile, entry)
               const id = favoriteInstructionId(entry.family, entry.kind)
               const isFavorite = favoriteIds.includes(id)
+              const placement = entry.family === 'output'
+                ? '点击替换' + segmentLabel + '的输出'
+                : '点击插入到' + segmentLabel + ' · ' + targetAnchorLabel
               const title = allowed
-                ? `${entry.detail} 点击使用，拖动放置`
+                ? entry.detail + '。' + placement + '，也可拖动'
                 : `${entry.label}在 ${activeProfile.shortName} 指令集中不可用`
 
               return (
@@ -184,7 +212,7 @@ export default function ProjectSidebar({
                     className="instruction-row"
                     data-drag-handle
                     disabled={!allowed}
-                    aria-label={`${entry.label}：${entry.detail}`}
+                    aria-label={allowed ? entry.label + '：' + placement : entry.label + ' 当前不可用'}
                     title={title}
                     onClick={() => {
                       if (!allowed) return

@@ -1,5 +1,6 @@
 import type { ContactKind, OutputKind, Program } from '../engine/types'
 import type { DragPayload } from '../lib/dragTypes'
+import type { FavoriteInsertTarget } from '../lib/insertTarget'
 import { useModalFocus } from '../lib/useModalFocus'
 import ProjectSidebar from './ProjectSidebar'
 import type { InstructionFamily } from './instructionCatalog'
@@ -8,6 +9,9 @@ interface InstructionDrawerProps {
   program: Program
   activeRungId: string | null
   favoriteIds: readonly string[]
+  insertTarget: FavoriteInsertTarget | null
+  targetAnchorLabel: string
+  onSelectRung: (rungId: string) => void
   onToggleFavorite: (family: InstructionFamily, kind: ContactKind | OutputKind) => void
   onInsertContact: (kind: ContactKind) => void
   onChangeOutput: (kind: OutputKind) => void
@@ -24,6 +28,9 @@ export default function InstructionDrawer({
   program,
   activeRungId,
   favoriteIds,
+  insertTarget,
+  targetAnchorLabel,
+  onSelectRung,
   onToggleFavorite,
   onInsertContact,
   onChangeOutput,
@@ -57,6 +64,9 @@ export default function InstructionDrawer({
         activeRungId={activeRungId}
         variant="instructions"
         favoriteIds={favoriteIds}
+        insertTarget={insertTarget}
+        targetAnchorLabel={targetAnchorLabel}
+        onSelectRung={onSelectRung}
         onToggleFavorite={onToggleFavorite}
         onInsertContact={onInsertContact}
         onChangeOutput={onChangeOutput}

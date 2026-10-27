@@ -82,6 +82,11 @@ import {
   writeFavoriteInstructions,
 } from './lib/instructionFavorites'
 import {
+  describeFavoriteInsertTarget,
+  favoriteTargetSegmentLabel,
+  resolveFavoriteInsertTarget,
+} from './lib/insertTarget'
+import {
   archiveRecoveryCopy,
   isRecoveryBackupIntact,
   getLastSavedAt,
@@ -105,7 +110,6 @@ import {
   deleteRung,
   duplicateRung,
   getNodeAtPath,
-  insertContact,
   insertNodeAt,
   insertNodesAt,
   insertRungCopies,
@@ -318,6 +322,13 @@ export default function App() {
     readFavoriteInstructions(),
   )
   const persistedFavoritesRef = useRef<string[]>(favoriteInstructions)
+  /**
+   * 顶部下拉选中的程序段。画布里有选中元件时以画布为准；
+   * 没有元件时保留这个值，连续点击收藏指令不会莫名跳回第一段。
+   */
+  const [favoriteTargetRungId, setFavoriteTargetRungId] = useState<string | null>(
+    () => initialProgram.rungs[0]?.id ?? null,
+  )
   const [inspectorOpen, setInspectorOpen] = useState(false)
   const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth)
   const [inspectorWidth, setInspectorWidth] = useState(() => {
@@ -1156,10 +1167,36 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKeyDown, true)
   }, [requestSaveProject])
 
-  const activeRung = selection
-    ? program.rungs.find((rung) => rung.id === selection.rungId)
-    : program.rungs[0]
-  const activeRungId = activeRung?.id ?? null
+  const insertTarget = useMemo(
+    () => resolveFavoriteInsertTarget(program, selection, favoriteTargetRungId),
+    [favoriteTargetRungId, program, selection],
+  )
+  const activeRungId = insertTarget?.rungId ?? null
+  const targetAnchorLabel = useMemo(
+    () => describeFavoriteInsertTarget(program, insertTarget),
+    [insertTarget, program],
+  )
+
+  const selectFavoriteTargetRung = useCallback((rungId: string) => {
+    const rung = program.rungs.find((item) => item.id === rungId)
+    if (!rung) return
+    // 换程序段时清掉元件选择，收藏触点就落在该段段末；
+    // 随后把视图带到这一段，让用户能马上看到高亮的目标。
+    setSelection(null)
+    setFavoriteTargetRungId(rungId)
+    setQuickEdit(null)
+    window.requestAnimationFrame(() => {
+      const rungElement = Array.from(
+        editorRef.current?.querySelectorAll<HTMLElement>('.ll-rung') ?? [],
+      ).find((element) => element.dataset.rungId === rungId)
+      const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+      rungElement?.scrollIntoView({
+        block: 'nearest',
+        inline: 'nearest',
+        behavior: reduceMotion ? 'auto' : 'smooth',
+      })
+    })
+  }, [program])
 
   const runToggle = () => {
     if (compileResult.errors.length > 0) {
@@ -1208,19 +1245,45 @@ export default function App() {
       commit(next)
       const path = findNodePath(next, slot.rungId, made.node.id)
       setSelection({ rungId: slot.rungId, path })
+      setFavoriteTargetRungId(slot.rungId)
+      setQuickEdit(null)
       setMobilePanel('none')
-      notify(`${instructionLabel('contact', kind)}已放置`)
+      const dropIndex = program.rungs.findIndex((rung) => rung.id === slot.rungId)
+      notify(
+        instructionLabel('contact', kind)
+        + (dropIndex >= 0 ? '已放置到程序段 ' + (dropIndex + 1) : '已放置'),
+      )
       return
     }
-    const source = activeRungId ? program : addRung(program)
-    const targetRung = activeRungId ?? source.rungs.at(-1)?.id
-    if (!targetRung) return
-    const next = insertContact(source, targetRung, selection?.rungId === targetRung ? selection.path : null, kind)
+
+    if (!insertTarget) {
+      notify('请先添加程序段，再插入触点')
+      return
+    }
+
+    const made = makeContactNode(program, kind)
+    const next = insertNodeAt(made.program, insertTarget.rungId, insertTarget, made.node)
+    if (next === made.program) {
+      notify('这个位置放不下新的触点，请在程序段里点一个插入位')
+      return
+    }
     commit(next)
-    setSelection({ rungId: targetRung, path: null })
+    const selectionForNode = {
+      rungId: insertTarget.rungId,
+      path: findNodePath(next, insertTarget.rungId, made.node.id),
+    }
+    // 新触点立即成为选中项：下一次点收藏指令就会接在它后面，
+    // 连续点几下自然形成一条串联回路。
+    setSelection(selectionForNode)
+    setFavoriteTargetRungId(insertTarget.rungId)
+    setQuickEdit(null)
     setMobilePanel('none')
-    notify('触点已插入')
-  }, [activeRungId, commit, notify, program, selection])
+    notify(
+      instructionLabel('contact', kind)
+      + '已插入到' + favoriteTargetSegmentLabel(insertTarget)
+      + ' · ' + targetAnchorLabel,
+    )
+  }, [commit, insertTarget, notify, program, targetAnchorLabel])
 
   // 插入点菜单选中的触点：精确落在刚点的那个“+”，不做二次猜测。
   const insertAt = useCallback((slot: SlotRef, kind: ContactKind) => {
@@ -1233,6 +1296,7 @@ export default function App() {
     commit(next)
     const selectionForNode = { rungId: slot.rungId, path: findNodePath(next, slot.rungId, made.node.id) }
     setSelection(selectionForNode)
+    setFavoriteTargetRungId(slot.rungId)
     // 博途放下元件后可以直接输入操作数；这里把焦点送到新元件的操作数字段。
     setQuickEdit({ selection: selectionForNode, anchor: null, autoFocus: true })
     setMobilePanel('none')
@@ -1259,6 +1323,7 @@ export default function App() {
     commit(next)
     const selectionForNode = { rungId, path: findNodePath(next, rungId, made.node.id) }
     setSelection(selectionForNode)
+    setFavoriteTargetRungId(rungId)
     setQuickEdit({ selection: selectionForNode, anchor: null, autoFocus: true })
     setMobilePanel('none')
     notify(`${instructionLabel('contact', kind)}已插入，可直接输入变量或地址`)
@@ -1370,19 +1435,36 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [commit, deleteRungWithUndo, notify, program, removeNode, selection])
 
-  const changeOutput = (kind: OutputKind, targetRungId = activeRungId) => {
+  const changeOutput = (kind: OutputKind, targetRungId = insertTarget?.rungId ?? null) => {
     if (!targetRungId) {
-      const next = addRung(program)
-      const rung = next.rungs.at(-1)
-      if (!rung) return
-      commit(changeOutputKind(next, rung.id, kind))
-      setSelection({ rungId: rung.id, path: null })
-      setMobilePanel('none')
+      notify('请先添加程序段，再选择输出指令')
       return
     }
+
+    const targetIndex = program.rungs.findIndex((rung) => rung.id === targetRungId)
+    const targetRung = targetIndex >= 0 ? program.rungs[targetIndex] : null
+    if (!targetRung) {
+      notify('目标程序段已经不存在，请重新选择')
+      return
+    }
+
+    const segment = '程序段 ' + (targetIndex + 1)
+    const label = instructionLabel('output', kind)
+    if (targetRung.output.kind === kind) {
+      setSelection({ rungId: targetRungId, path: null })
+      setFavoriteTargetRungId(targetRungId)
+      setQuickEdit(null)
+      setMobilePanel('none')
+      notify(segment + ' 的输出已经是' + label)
+      return
+    }
+
     commit(changeOutputKind(program, targetRungId, kind))
     setSelection({ rungId: targetRungId, path: null })
+    setFavoriteTargetRungId(targetRungId)
+    setQuickEdit(null)
     setMobilePanel('none')
+    notify('已替换' + segment + ' 的输出为' + label)
   }
 
   const handleDrop = useCallback((payload: DragPayload, target: DropTarget) => {
@@ -1530,7 +1612,10 @@ export default function App() {
     const next = addRung(program)
     const rung = next.rungs.at(-1)
     commit(next)
-    if (rung) setSelection({ rungId: rung.id, path: null })
+    if (rung) {
+      setSelection({ rungId: rung.id, path: null })
+      setFavoriteTargetRungId(rung.id)
+    }
     notify('已新增程序段')
   }
 
@@ -2222,6 +2307,10 @@ export default function App() {
       <InstructionBar
         profile={program.profile}
         favoriteIds={favoriteInstructions}
+        rungs={program.rungs}
+        insertTarget={insertTarget}
+        targetAnchorLabel={targetAnchorLabel}
+        onSelectRung={selectFavoriteTargetRung}
         onToggleFavorite={toggleInstructionFavorite}
         onInsertContact={insert}
         onChangeOutput={changeOutput}
@@ -2403,6 +2492,8 @@ export default function App() {
                 program={program}
                 runtime={runtime}
                 selection={selection}
+                insertTarget={insertTarget}
+                insertTargetLabel={targetAnchorLabel}
                 dragTarget={drag.target}
                 isDragging={Boolean(drag.drag)}
                 onSelect={(next) => {
@@ -2588,6 +2679,9 @@ export default function App() {
           program={program}
           activeRungId={activeRungId}
           favoriteIds={favoriteInstructions}
+          insertTarget={insertTarget}
+          targetAnchorLabel={targetAnchorLabel}
+          onSelectRung={selectFavoriteTargetRung}
           onToggleFavorite={toggleInstructionFavorite}
           onInsertContact={insert}
           onChangeOutput={changeOutput}
