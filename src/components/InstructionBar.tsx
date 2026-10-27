@@ -2,7 +2,11 @@ import { useCallback, useLayoutEffect, useRef, useState } from 'react'
 import { getProfile } from '../engine/profiles'
 import type { ContactKind, OutputKind, ProfileId, Rung } from '../engine/types'
 import type { DragPayload } from '../lib/dragTypes'
-import { favoriteInstructionEntry, favoriteInstructionId } from '../lib/instructionFavorites'
+import {
+  favoriteFocusIdAfterRemoval,
+  favoriteInstructionEntry,
+  favoriteInstructionId,
+} from '../lib/instructionFavorites'
 import type { FavoriteInsertTarget } from '../lib/insertTarget'
 import { ChevronRightIcon, GripIcon, StarFilledIcon } from './Icons'
 import InsertTargetControl from './InsertTargetControl'
@@ -65,11 +69,14 @@ export default function InstructionBar({
 }: InstructionBarProps) {
   const activeProfile = getProfile(profile)
   const allButtonRef = useRef<HTMLButtonElement | null>(null)
+  const starRefs = useRef(new Map<string, HTMLButtonElement>())
+  const pendingStarFocusRef = useRef<{ targetId: string | null } | null>(null)
   const listRef = useRef<HTMLDivElement | null>(null)
   const [listScroll, setListScroll] = useState({ canScroll: false, atEnd: false })
   const favorites = favoriteIds
     .map((id) => favoriteInstructionEntry(id))
     .filter((entry) => entry !== undefined)
+  const favoriteKeys = favorites.map((entry) => favoriteInstructionId(entry.family, entry.kind))
   const segmentLabel = insertTarget
     ? '程序段 ' + (insertTarget.rungIndex + 1)
     : '目标程序段'
@@ -104,6 +111,22 @@ export default function InstructionBar({
       observer?.disconnect()
       window.removeEventListener('resize', sync)
     }
+  }, [favoriteKey])
+
+  // 取消收藏会让当前星标随卡片一起消失。等列表更新后，把焦点交给相邻星标，
+  // 键盘用户就能连续取消多条，而不会掉回页面开头或误触「全部指令」。
+  useLayoutEffect(() => {
+    const pending = pendingStarFocusRef.current
+    if (!pending) return
+    pendingStarFocusRef.current = null
+    if (pending.targetId) {
+      const target = starRefs.current.get(pending.targetId)
+      if (target) {
+        target.focus()
+        return
+      }
+    }
+    allButtonRef.current?.focus()
   }, [favoriteKey])
 
   const scrollFavorites = useCallback(() => {
@@ -188,6 +211,10 @@ export default function InstructionBar({
                 <button
                   type="button"
                   className="wb-instruction-star"
+                  ref={(element) => {
+                    if (element) starRefs.current.set(id, element)
+                    else starRefs.current.delete(id)
+                  }}
                   aria-pressed="true"
                   title="取消收藏"
                   aria-label={`取消收藏：${entry.label}`}
@@ -196,9 +223,10 @@ export default function InstructionBar({
                   }}
                   onClick={(event) => {
                     event.stopPropagation()
+                    pendingStarFocusRef.current = {
+                      targetId: favoriteFocusIdAfterRemoval(favoriteKeys, id),
+                    }
                     onToggleFavorite(entry.family, entry.kind)
-                    // 取消收藏后这张卡片会消失，把焦点交给始终存在的入口。
-                    allButtonRef.current?.focus()
                   }}
                 >
                   <StarFilledIcon size={15} />

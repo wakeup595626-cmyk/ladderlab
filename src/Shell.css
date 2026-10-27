@@ -4231,7 +4231,9 @@ body[data-drag-kind] {
     padding-inline: 7px;
   }
 
-  .wb-shell[data-inspector='open'] .wb-insert-target-anchor {
+  /* 属性栏占位时省掉“插入到”三个字，把宽度留给精确落点：
+     用户最需要一直看见的是“段末（输出前）”，而不是这句引导语。 */
+  .wb-shell[data-inspector='open'] .wb-insert-target-kicker {
     display: none;
   }
 }

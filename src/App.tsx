@@ -1239,6 +1239,9 @@ export default function App() {
 
   const locateFavoriteTarget = useCallback(() => {
     if (!insertTarget) return
+    // 抽屉（手机全屏、桌面居中模态）会盖住线路：先收起它，再滚动并高亮落点，
+    // 否则用户点完「定位」只看到抽屉，提示在背后两秒就消失了。
+    setMobilePanel('none')
     revealFavoriteInsertTarget(insertTarget.rungId)
   }, [insertTarget, revealFavoriteInsertTarget])
 

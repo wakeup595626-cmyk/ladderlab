@@ -114,3 +114,16 @@ export function toggleFavoriteInstruction(
   if (current.length >= MAX_FAVORITE_INSTRUCTIONS) return current
   return [...current, id]
 }
+
+/**
+ * 取消收藏后键盘焦点该去哪里：优先右邻（列表收紧后落在同一位置），
+ * 其次左邻，整条列表清空时返回 null，由调用方退回「全部指令」入口。
+ */
+export function favoriteFocusIdAfterRemoval(
+  ids: readonly string[],
+  removedId: string,
+): string | null {
+  const index = ids.indexOf(removedId)
+  if (index < 0) return null
+  return ids[index + 1] ?? ids[index - 1] ?? null
+}

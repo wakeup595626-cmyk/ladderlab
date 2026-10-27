@@ -3,6 +3,7 @@ import {
   DEFAULT_FAVORITE_INSTRUCTIONS,
   FAVORITE_INSTRUCTIONS_STORAGE_KEY,
   MAX_FAVORITE_INSTRUCTIONS,
+  favoriteFocusIdAfterRemoval,
   favoriteInstructionId,
   readFavoriteInstructions,
   toggleFavoriteInstruction,
@@ -178,5 +179,12 @@ describe('instruction favorites', () => {
     const full = TEN_VALID_IDS.slice(0, MAX_FAVORITE_INSTRUCTIONS)
     expect(full).not.toContain('output:TON')
     expect(toggleFavoriteInstruction(full, 'output', 'TON')).toEqual(full)
+  })
+
+  it('moves focus to the right neighbor, then the left one, when a favorite is removed', () => {
+    expect(favoriteFocusIdAfterRemoval(['a', 'b', 'c'], 'b')).toBe('c')
+    expect(favoriteFocusIdAfterRemoval(['a', 'b', 'c'], 'c')).toBe('b')
+    expect(favoriteFocusIdAfterRemoval(['a'], 'a')).toBeNull()
+    expect(favoriteFocusIdAfterRemoval(['a', 'b'], 'missing')).toBeNull()
   })
 })
