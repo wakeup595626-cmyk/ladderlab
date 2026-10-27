@@ -1358,6 +1358,9 @@ function renderOutput(
   const isCoil = output.kind === 'COIL' || output.kind === 'SET' || output.kind === 'RESET'
   const centerY = isCoil ? m.coilLineY : m.boxLineY
   const symbolX = size.width / 2
+  // Bezier 顶点位于 ±15；导线停在顶点，避免伸进括号内部。
+  const coilLeadIn = symbolX - 15
+  const coilLeadOut = symbolX + 15
   const selection = { rungId, path: null }
   const isDropTarget = context.dragTarget?.type === 'output'
     && context.dragTarget.rungId === rungId
@@ -1408,8 +1411,18 @@ function renderOutput(
         <g>
           <path
             className={'ll-wire' + (powered ? ' is-on' : '')}
-            d={'M 0 ' + centerY + ' H ' + (symbolX - 10)
-              + ' M ' + (symbolX + 10) + ' ' + centerY + ' H ' + size.width}
+            d={'M 0 ' + centerY + ' H ' + coilLeadIn}
+          />
+          <path
+            className={'ll-wire' + (powered ? ' is-on' : '')}
+            d={'M ' + coilLeadOut + ' ' + centerY + ' H ' + size.width}
+          />
+          <line
+            className={'ll-terminal ll-coil-terminal' + (powered ? ' is-on' : '')}
+            x1={size.width}
+            y1={centerY - 10}
+            x2={size.width}
+            y2={centerY + 10}
           />
           <path
             className={'ll-coil-arc' + (powered ? ' is-on' : '')}

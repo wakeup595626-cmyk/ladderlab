@@ -200,6 +200,45 @@ check('branch/from-main-draft', branchFromMain.enabled && initialChains.length >
 })
 check('rail/only-left-power-rail', rails.count === 1 && rails.rightRail === 0, rails)
 
+const coils = await evaluate(`(() => {
+  const box = (element) => {
+    if (!element) return null
+    const value = element.getBBox()
+    return {
+      left: value.x,
+      right: value.x + value.width,
+      top: value.y,
+      bottom: value.y + value.height,
+      width: value.width,
+      height: value.height,
+    }
+  }
+  return [...document.querySelectorAll('.ll-output.ll-coil')].map((coil) => {
+    const hit = coil.querySelector('.ll-node-hit')
+    const hitBox = hit?.getBBox()
+    return {
+      leads: [...coil.querySelectorAll('path.ll-wire')].map(box),
+      arcs: [...coil.querySelectorAll('path.ll-coil-arc')].map(box),
+      terminal: box(coil.querySelector('line.ll-coil-terminal')),
+      outputRight: hitBox ? hitBox.x + hitBox.width + 2 : null,
+    }
+  })
+})()`)
+const coilLeadsClear = coils.length > 0 && coils.every((coil) => (
+  coil.leads.length === 2
+  && coil.arcs.length === 2
+  && coil.leads[0].right <= coil.arcs[0].left + 0.1
+  && coil.leads[1].left >= coil.arcs[1].right - 0.1
+))
+const coilTerminalAtEnd = coils.length > 0 && coils.every((coil) => (
+  coil.terminal
+  && Math.abs(coil.terminal.left - coil.outputRight) < 0.1
+  && coil.terminal.width === 0
+  && coil.terminal.height >= 19
+))
+check('coil/no-horizontal-line-inside-brackets', coilLeadsClear, coils)
+check('coil/right-terminal-at-output-end', coilTerminalAtEnd, coils)
+
 // 第二条支路起点继续创建嵌套草稿分支。
 await clickPlus(secondBranch, 0)
 await sleep(300)

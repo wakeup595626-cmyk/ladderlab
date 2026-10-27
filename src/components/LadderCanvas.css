@@ -613,12 +613,17 @@
   stroke-width: 2.5;
 }
 
+.ll-coil-terminal {
+  stroke-width: 3;
+}
+
 .ll-wire.is-on,
 .ll-power-wire.is-on,
 .ll-contact.has-input-power .ll-contact-bar,
 .ll-contact.has-input-power .ll-contact-slash,
 .ll-output.is-powered .ll-wire,
-.ll-coil-arc.is-on {
+.ll-coil-arc.is-on,
+.ll-coil-terminal.is-on {
   stroke: var(--positive);
 }
 
