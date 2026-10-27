@@ -7,6 +7,7 @@ import {
   closeOpenBranchAt,
   collectNodesAtPaths,
   deleteTag,
+  deleteNodesAtPaths,
   deleteNodesByIds,
   duplicateRung,
   ensureAddressTag,
@@ -20,6 +21,7 @@ import {
   moveNodeBy,
   moveRungTo,
   moveRungToBoundary,
+  nextInstanceName,
   openBranchAtSlot,
   pickDefaultTag,
   snapshotRung,
@@ -826,5 +828,35 @@ describe('programOps 分支编排与批量编辑', () => {
 
     expect(deleteNodesByIds(source, 'r1', new Set())).toBe(source)
     expect(rungOf(source, 'r1').nodes).toEqual([a, branch, d])
+  })
+
+  it('deleteNodesAtPaths 只删选中的位置，重复 ID 的触点不会被连带删除', () => {
+    const first = contact('same', 'A')
+    const other = contact('other', 'B')
+    const second = contact('same', 'C')
+    const source = program([rung('r1', [first, other, second])])
+
+    const result = deleteNodesAtPaths(source, 'r1', [[0]])
+    expect(rungOf(result, 'r1').nodes).toEqual([other, second])
+    expect(rungOf(source, 'r1').nodes).toEqual([first, other, second])
+  })
+
+  it('deleteNodesAtPaths 支持嵌套路径多选并清理空并联', () => {
+    const a = contact('a', 'A')
+    const b = contact('b', 'B')
+    const c = contact('c', 'C')
+    const d = contact('d', 'D')
+    const group = parallel('p', [a, b], [c])
+    const source = program([rung('r1', [group, d])])
+
+    const result = deleteNodesAtPaths(source, 'r1', [[1], [0, 0, 0]])
+    expect(collectIds(rungOf(result, 'r1').nodes)).toEqual(['p', 'b', 'c'])
+    expect(deleteNodesAtPaths(source, 'r1', [[], []])).toBe(source)
+  })
+
+  it('nextInstanceName 避开变量表里的同名变量', () => {
+    const source = program([rung('r1', [])], [tag('T1'), tag('T2')])
+    expect(nextInstanceName(source, 'T')).toBe('T3')
+    expect(nextInstanceName(source, 'C')).toBe('C1')
   })
 })

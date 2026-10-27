@@ -36,7 +36,11 @@ export function nextTagName(program: Program, kind: TagKind): string {
 }
 
 export function nextInstanceName(program: Program, prefix: 'T' | 'C'): string {
-  const names = new Set(program.rungs.map((rung) => rung.output.tag))
+  // 编译要求实例名不能与变量表重名，自动命名也必须遵守，否则复制一个定时器
+  // 就会生成一个立即编译失败的工程。
+  const names = new Set<string>()
+  for (const tag of program.tags) names.add(normalizeReference(tag.name))
+  for (const rung of program.rungs) names.add(normalizeReference(rung.output.tag))
   let index = 1
   while (names.has(`${prefix}${index}`)) index += 1
   return `${prefix}${index}`
@@ -1077,6 +1081,39 @@ export function deleteNodesByIds(program: Program, rungId: string, ids: Set<stri
   return withRung(program, rungId, (rung) => ({
     ...rung,
     nodes: sanitizeChain(stripNodeIds(rung.nodes, ids)),
+  }))
+}
+
+/**
+ * 按路径删除多选元件。导入的工程可能有重复的普通触点 ID，按 ID 删会连带
+ * 删掉同 ID 的其他触点，所以多选删除必须按用户实际选中的位置删除。
+ */
+export function deleteNodesAtPaths(
+  program: Program,
+  rungId: string,
+  paths: number[][],
+): Program {
+  const wanted = new Set(
+    paths.filter((path) => path.length > 0).map((path) => path.join('.')),
+  )
+  if (wanted.size === 0) return program
+  const strip = (chain: LadderNode[], prefix: number[]): LadderNode[] => {
+    const next: LadderNode[] = []
+    chain.forEach((node, index) => {
+      const path = [...prefix, index]
+      if (wanted.has(path.join('.'))) return
+      next.push(node.type === 'parallel'
+        ? {
+          ...node,
+          branches: node.branches.map((branch, branchIndex) => strip(branch, [...path, branchIndex])),
+        }
+        : node)
+    })
+    return next
+  }
+  return withRung(program, rungId, (rung) => ({
+    ...rung,
+    nodes: sanitizeChain(strip(rung.nodes, [])),
   }))
 }
 

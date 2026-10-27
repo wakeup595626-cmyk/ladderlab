@@ -271,6 +271,36 @@ describe('输出驱动与定时器边界', () => {
     expect(compile(source).warnings).toEqual([])
   })
 
+  it('算术指令引用不存在的源变量会报错，不再静默按 0 计算', () => {
+    for (const kind of ['ADD', 'SUB', 'SHL', 'ROL'] as const) {
+      const source = program(
+        [tag('Pulse'), tag('Value', 'INT', 0)],
+        [rung(
+          'op',
+          [contact('c1', 'NO', 'Pulse')],
+          output(kind, 'Value', { id: 'op-out', sourceTag: 'Ghost', value: 1 }),
+        )],
+      )
+
+      const messages = compile(source).errors.map((item) => item.message).join('\n')
+      expect(messages, kind).toContain(`${kind} 源变量“Ghost”不存在`)
+    }
+  })
+
+  it('算术指令的源变量类型必须是 INT', () => {
+    const source = program(
+      [tag('Pulse'), tag('Value', 'INT', 0), tag('Flag')],
+      [rung(
+        'op',
+        [contact('c1', 'NO', 'Pulse')],
+        output('ADD', 'Value', { id: 'op-out', sourceTag: 'Flag', value: 1 }),
+      )],
+    )
+
+    const messages = compile(source).errors.map((item) => item.message).join('\n')
+    expect(messages).toContain('ADD 源变量“Flag”必须是 INT')
+  })
+
   it('PATTERN 输出和步号变量参与写冲突告警，同一输出自写不误报', () => {
     const tags = [
       tag('Pulse'),

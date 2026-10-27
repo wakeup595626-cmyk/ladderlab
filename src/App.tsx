@@ -106,7 +106,7 @@ import {
   closeOpenBranchAt,
   collectNodesAtPaths,
   deleteNode,
-  deleteNodesByIds,
+  deleteNodesAtPaths,
   deleteRung,
   duplicateRung,
   getNodeAtPath,
@@ -828,12 +828,11 @@ export default function App() {
     }
     setClipboard({ kind: 'nodes', nodes: cloneNodesForPaste(nodes) })
     if (paths.length > 1) {
-      const ids = new Set(nodes.map((node) => node.id))
-      const next = deleteNodesByIds(program, selection.rungId, ids)
+      const next = deleteNodesAtPaths(program, selection.rungId, paths)
       if (next === program) return
       commit(next)
       setSelection({ rungId: selection.rungId, path: null })
-      notify('已剪切 ' + ids.size + ' 个元件，按 Ctrl+V 粘贴')
+      notify('已剪切 ' + nodes.length + ' 个元件，按 Ctrl+V 粘贴')
       return
     }
     const next = deleteNode(program, selection.rungId, paths[0])
@@ -1494,19 +1493,18 @@ export default function App() {
       }
       const multiPaths = selection.paths?.length ?? 0
       if (multiPaths > 1) {
-        const ids = new Set<string>()
-        for (const path of selection.paths ?? []) {
-          const node = getNodeAtPath(program, selection.rungId, path)
-          if (node) ids.add(node.id)
-        }
-        if (ids.size === 0) return
-        const next = deleteNodesByIds(program, selection.rungId, ids)
+        const paths = selection.paths ?? []
+        const existing = paths.filter(
+          (path) => getNodeAtPath(program, selection.rungId, path) !== null,
+        )
+        if (existing.length === 0) return
+        const next = deleteNodesAtPaths(program, selection.rungId, paths)
         if (next === program) return
         event.preventDefault()
         commit(next)
         setSelection({ rungId: selection.rungId, path: null })
         setQuickEdit(null)
-        notify('已删除 ' + ids.size + ' 个元件（Ctrl+Z 撤销）')
+        notify('已删除 ' + existing.length + ' 个元件（Ctrl+Z 撤销）')
         return
       }
       if (!selection?.path) return

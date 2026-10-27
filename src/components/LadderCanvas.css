@@ -817,6 +817,15 @@
   stroke-width: 4;
 }
 
+/* 并联组外圈只帮助快速识别支路边界，保持细虚线并让指针事件穿透。 */
+.ll-branch-frame {
+  fill: none;
+  stroke: var(--control);
+  stroke-width: 1.25;
+  stroke-dasharray: 5 4;
+  pointer-events: none;
+}
+
 .ll-branch-stub path {
   fill: none;
   stroke: var(--accent);

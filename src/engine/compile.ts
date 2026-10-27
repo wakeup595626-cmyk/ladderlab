@@ -590,8 +590,18 @@ function checkOutput(ctx: Ctx, rungId: string, output: Program['rungs'][number][
       )
     }
     if (output.kind === 'MOVE') variableRef(output.sourceTag, 'INT', 'MOVE 源变量')
-    else variableRef(output.valueTag, 'INT', `${output.kind} 操作数变量`)
-    if (!normalizeReference(output.sourceTag ?? '') && output.value !== undefined) {
+    else {
+      variableRef(output.valueTag, 'INT', `${output.kind} 操作数变量`)
+      // ADD/SUB/SHL/ROL 的被操作数可以直接引用变量；引用不存在时仿真是把
+      // 未定义变量静默当成 0 参与计算，结果错误却不报错，所以这里必须校验。
+      variableRef(output.sourceTag, 'INT', `${output.kind} 源变量`)
+    }
+    // MOVE 用 sourceTag 或常量；算术指令用 valueTag 或常量，两边的“用常量”
+    // 条件不同，不能一律看 sourceTag。
+    const usesConstant = output.kind === 'MOVE'
+      ? !normalizeReference(output.sourceTag ?? '')
+      : !normalizeReference(output.valueTag ?? '')
+    if (usesConstant && output.value !== undefined) {
       if (!Number.isInteger(output.value) || output.value < -32768 || output.value > 32767) {
         error(ctx, `${output.kind} 的整数常量必须是 -32768～32767 之间的整数。`, rungId, output.id)
       }

@@ -18,6 +18,11 @@ import type {
 import type { DragPayload, DropTarget } from '../lib/dragTypes'
 import type { FavoriteInsertTarget } from '../lib/insertTarget'
 import { FIELD_LIMITS } from '../lib/limits'
+import {
+  compactContactHitHeight,
+  hasCompactParallelPitch,
+  parallelBranchOffsets,
+} from '../lib/parallelLayout'
 import { hasOpenBranch } from '../state/programOps'
 import {
   ChevronDownIcon,
@@ -95,6 +100,8 @@ interface DrawContext {
   rungId: string
   segment: string
   metrics: LadderMetrics
+  /** 压缩并联支路内触点热区的最大高度；其他区域沿用完整触点高度。 */
+  contactHitHeight?: number
   onSelect: (selection: Selection) => void
   onEdit?: (selection: Selection, anchor: DOMRect) => void
   onMoveNode: (rungId: string, path: number[], delta: -1 | 1) => void
@@ -143,6 +150,8 @@ interface LadderMetrics {
   /** 左右分叉竖线之间留给“合流车道”的宽度，避免嵌套并联的竖线互相贴合。 */
   parallelJoinW: number
   parallelGap: number
+  /** 全是标准高度支路时的竖向节距，比自然节距短三分之一。 */
+  parallelPitch: number
   /** 未闭合分支右侧「合并分支」按钮预留的宽度。 */
   openMergeW: number
   minWidth: number
@@ -178,6 +187,7 @@ const DEFAULT_METRICS: LadderMetrics = {
   parallelGutter: 18,
   parallelJoinW: 30,
   parallelGap: 8,
+  parallelPitch: 67,
   openMergeW: 116,
   minWidth: 600,
   railLeft: 18,
@@ -210,6 +220,7 @@ const COMPACT_METRICS: LadderMetrics = {
   parallelGutter: 12,
   parallelJoinW: 22,
   parallelGap: 6,
+  parallelPitch: 65,
   openMergeW: 92,
   minWidth: 300,
   railLeft: 6,
@@ -351,12 +362,11 @@ function measureNode(node: LadderNode, m: LadderMetrics): Size {
   const contentW = Math.max(...branches.map((branch) => branch.width))
     + m.parallelGutter * 2
     + m.parallelJoinW
+  const placements = parallelBranchOffsets(branches, m)
   return {
     // 未闭合时右侧要留出「合并分支」按钮，否则按钮会压到输出线上。
     width: contentW + (node.open === true ? m.openMergeW : 0),
-    height:
-      branches.reduce((total, branch) => total + branch.height, 0)
-      + m.parallelGap * (branches.length - 1),
+    height: placements[placements.length - 1] + branches[branches.length - 1].height,
     lineY: branches[0].lineY,
   }
 }
@@ -681,6 +691,7 @@ function renderContact(
   const source = context.dragSource === sourceKey
   const nodeTarget: DropTarget = { type: 'node', rungId: context.rungId, path }
   const dropActive = !source && nodeMatches(context.dragTarget, context.rungId, path)
+  const hitHeight = Math.min(size.height - 6, context.contactHitHeight ?? size.height - 6)
 
   return (
     <g
@@ -748,7 +759,7 @@ function renderContact(
         x="2"
         y="3"
         width={size.width - 4}
-        height={size.height - 6}
+        height={hitHeight}
         rx="4"
       />
       <path
@@ -838,7 +849,7 @@ function renderContact(
         x="2"
         y="3"
         width={size.width - 4}
-        height={size.height - 6}
+        height={hitHeight}
         rx="4"
       />
     </g>
@@ -2660,15 +2671,29 @@ function renderParallel(
   // 博途把嵌套并联的所有支路都画到同一根右侧汇合竖线上；只有未闭合的
   // 草稿分组保留自己的暂存列，等待用户把它接到主线的某个插入点。
   const collectX = !isOpen && mergeColumn !== undefined ? mergeColumn : ownCollectX
-  let branchY = 0
-  const placements = branchSizes.map((branch) => {
-    const y = branchY
-    branchY += branch.height + m.parallelGap
-    return { y, centerY: y + branch.lineY }
-  })
+  const branchYs = parallelBranchOffsets(branchSizes, m)
+  const compact = hasCompactParallelPitch(branchSizes, m)
+  const branchContext = compact
+    ? { ...context, contactHitHeight: compactContactHitHeight(m) }
+    : context
+  const placements = branchSizes.map((branch, index) => ({
+    y: branchYs[index],
+    centerY: branchYs[index] + branch.lineY,
+    height: branch.height,
+  }))
   const entryY = size.lineY
   const firstCenter = placements[0]?.centerY ?? entryY
   const lastCenter = placements[placements.length - 1]?.centerY ?? entryY
+  const frameTop = Math.max(
+    2,
+    Math.min(...placements.map((placement) => placement.y)) - 8,
+  )
+  const frameBottom = Math.min(
+    size.height - 2,
+    Math.max(...placements.map((placement) => placement.y + placement.height)) + 8,
+  )
+  const frameLeft = Math.max(0, Math.min(splitX, ownSplitX) - 8)
+  const frameRight = Math.min(size.width, Math.max(collectX, splitX, ownSplitX) + 8)
   const outputPower = context.runtime.nodePower[node.id] === true
   const selection = { rungId: context.rungId, path }
   const draftPlacements = placements.slice(1)
@@ -2737,6 +2762,15 @@ function renderParallel(
         width={size.width - 4}
         height={size.height - 6}
         rx="4"
+      />
+      <rect
+        className="ll-branch-frame"
+        data-parallel-frame
+        x={frameLeft}
+        y={frameTop}
+        width={Math.max(16, frameRight - frameLeft)}
+        height={Math.max(16, frameBottom - frameTop)}
+        rx="8"
       />
       <path
         className={'ll-wire' + (incomingPower ? ' is-on' : '')}
@@ -2843,7 +2877,7 @@ function renderParallel(
           >
             {renderChain(
               branch,
-              context,
+              branchContext,
               [...path, index],
               incomingPower,
               isOpen ? undefined : collectX - branchOriginX,
