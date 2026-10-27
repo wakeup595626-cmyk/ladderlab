@@ -18,6 +18,7 @@ import {
   RedoIcon,
   ResetIcon,
   ExportIcon,
+  SaveIcon,
   StepIcon,
   UndoIcon,
 } from './Icons'
@@ -39,6 +40,8 @@ export interface WorkspaceTopBarProps {
   onUndo: () => void
   onRedo: () => void
   onOpenProject: () => void
+  onSaveProject: () => void
+  saveBlocked?: boolean
   onImportProject: () => void
   onExportProject: () => void
   onExportImage: (mode: 'complete' | 'plain') => void
@@ -64,6 +67,8 @@ export default function WorkspaceTopBar({
   onUndo,
   onRedo,
   onOpenProject,
+  onSaveProject,
+  saveBlocked = false,
   onImportProject,
   onExportProject,
   onExportImage,
@@ -79,29 +84,22 @@ export default function WorkspaceTopBar({
   const fileMenuRef = useRef<HTMLDivElement>(null)
   const exportButtonRef = useRef<HTMLButtonElement>(null)
   const compactFileButtonRef = useRef<HTMLButtonElement>(null)
-  const [nameDraft, setNameDraft] = useState(projectName)
-  const nameEditingRef = useRef(false)
   const nameCancelRef = useRef(false)
 
-  // 工程名按“一次输入、一次提交”处理：避免每敲一个字都写一条撤销记录。
-  useEffect(() => {
-    if (!nameEditingRef.current) setNameDraft(projectName)
-  }, [projectName])
-
-  const commitName = () => {
-    nameEditingRef.current = false
+  // 非受控输入只在失焦或回车时提交；key 跟随工程名，新建/导入后会立即同步。
+  const commitName = (input: HTMLInputElement) => {
     if (nameCancelRef.current) {
       nameCancelRef.current = false
-      setNameDraft(projectName)
+      input.value = projectName
       return
     }
-    const next = nameDraft.trim()
+    const next = input.value.trim()
     if (!next) {
-      setNameDraft(projectName)
+      input.value = projectName
       return
     }
     if (next !== projectName) onProjectName(next)
-    else setNameDraft(next)
+    else input.value = next
   }
 
   const menuItems = () => Array.from(
@@ -259,12 +257,11 @@ export default function WorkspaceTopBar({
       <label className="wb-project-name" htmlFor="project-name">
         <span className="visually-hidden">工程名称</span>
         <input
+          key={projectName}
           id="project-name"
-          value={nameDraft}
+          defaultValue={projectName}
           maxLength={FIELD_LIMITS.programName}
-          onChange={(event) => setNameDraft(event.target.value)}
-          onFocus={() => { nameEditingRef.current = true }}
-          onBlur={commitName}
+          onBlur={(event) => commitName(event.currentTarget)}
           onKeyDown={(event) => {
             if (event.key === 'Enter') {
               event.preventDefault()
@@ -276,7 +273,7 @@ export default function WorkspaceTopBar({
             }
           }}
           spellCheck={false}
-          title={nameDraft || '工程名称'}
+          title={projectName || '工程名称'}
           aria-label="工程名称，输入后按回车保存"
         />
       </label>
@@ -441,6 +438,19 @@ export default function WorkspaceTopBar({
             </div>
           )}
         </div>
+
+        <button
+          type="button"
+          className="wb-save-button"
+          onClick={onSaveProject}
+          disabled={saveBlocked}
+          aria-label="保存到本机项目库"
+          aria-keyshortcuts="Control+S Meta+S"
+          title={saveBlocked ? '本机项目库不可用，请先导出工程 JSON' : '保存到本机项目库 (Ctrl+S)'}
+        >
+          <SaveIcon size={16} />
+          <span>保存</span>
+        </button>
 
         <button
           type="button"

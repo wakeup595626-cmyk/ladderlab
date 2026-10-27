@@ -2,30 +2,31 @@ import { useRef } from 'react'
 import { COURSE_LABS } from '../engine/courseLabs'
 import { getProfile } from '../engine/profiles'
 import type { Program } from '../engine/types'
+import type { SavedProject } from '../lib/projectLibrary'
+import { formatProjectTime } from '../lib/projectSummary'
 import { useModalFocus } from '../lib/useModalFocus'
 import {
   BookIcon,
   CloseIcon,
-  ExportIcon,
-  ImageIcon,
-  ImportIcon,
+  FolderIcon,
   InfoIcon,
   LadderIcon,
-  PlusIcon,
   TagIcon,
+  TrashIcon,
 } from './Icons'
 
 interface ProjectDrawerProps {
   open: boolean
   program: Program
   activeRungId: string | null
+  savedProjects: SavedProject[]
+  activeSavedProjectId: string | null
+  projectLibraryError: string | null
   onClose: () => void
   onOpenTags: () => void
   onOpenLibrary: () => void
-  onNew: () => void
-  onImport: () => void
-  onExport: () => void
-  onExportImage: (mode: 'complete' | 'plain') => void
+  onOpenSavedProject: (project: SavedProject) => void
+  onDeleteSavedProject: (project: SavedProject) => void
   onGuide: () => void
   onAbout: () => void
 }
@@ -34,13 +35,14 @@ export default function ProjectDrawer({
   open,
   program,
   activeRungId,
+  savedProjects,
+  activeSavedProjectId,
+  projectLibraryError,
   onClose,
   onOpenTags,
   onOpenLibrary,
-  onNew,
-  onImport,
-  onExport,
-  onExportImage,
+  onOpenSavedProject,
+  onDeleteSavedProject,
   onGuide,
   onAbout,
 }: ProjectDrawerProps) {
@@ -70,7 +72,7 @@ export default function ProjectDrawer({
         <header className="wb-drawer-head">
           <div>
             <h2 id="project-drawer-title">项目</h2>
-            <p>自动保存在本机</p>
+            <p>本机项目库与实验资源</p>
           </div>
           <button ref={closeRef} type="button" className="icon-button wb-drawer-close" onClick={onClose} aria-label="关闭项目">
             <CloseIcon size={19} />
@@ -105,27 +107,59 @@ export default function ProjectDrawer({
           </div>
         </div>
 
-        <section className="wb-drawer-section" aria-labelledby="project-files-title">
-          <h3 id="project-files-title">工程文件</h3>
-          <div className="wb-project-actions">
-            <button type="button" onClick={onNew}><PlusIcon size={17} /><span>新建</span></button>
-            <button type="button" onClick={onImport}><ImportIcon size={17} /><span>导入工程</span></button>
-            <button type="button" onClick={onExport}><ExportIcon size={17} /><span>导出工程</span></button>
+        <section className="wb-drawer-section wb-saved-section" aria-labelledby="saved-projects-title">
+          <div className="wb-drawer-section-head">
+            <h3 id="saved-projects-title">本机项目</h3>
+            <span>{savedProjects.length > 0 ? savedProjects.length + ' 个' : '未保存'}</span>
           </div>
-        </section>
 
-        <section className="wb-drawer-section" aria-labelledby="project-images-title">
-          <h3 id="project-images-title">导出图片</h3>
-          <div className="wb-project-actions is-images">
-            <button type="button" onClick={() => onExportImage('complete')}>
-              <ImageIcon size={17} />
-              <span>完整程序 PNG</span>
-            </button>
-            <button type="button" onClick={() => onExportImage('plain')}>
-              <ImageIcon size={17} />
-              <span>纯梯形图 PNG</span>
-            </button>
-          </div>
+          {projectLibraryError ? (
+            <p className="wb-project-library-error" role="alert">{projectLibraryError}</p>
+          ) : savedProjects.length === 0 ? (
+            <div className="wb-project-empty">
+              <FolderIcon size={20} />
+              <p>还没有命名项目</p>
+              <small>点击顶栏「保存」，给当前工程起一个名称。</small>
+            </div>
+          ) : (
+            <ul className="wb-saved-projects">
+              {savedProjects.map((project) => {
+                const current = project.id === activeSavedProjectId
+                return (
+                  <li key={project.id} className={`wb-saved-project${current ? ' is-current' : ''}`}>
+                    <button
+                      type="button"
+                      className="wb-saved-project-open"
+                      onClick={() => onOpenSavedProject(project)}
+                      aria-current={current ? 'true' : undefined}
+                      title={`打开「${project.name}」`}
+                    >
+                      <span className="wb-saved-project-name">
+                        {project.name}
+                        {current && <span className="wb-saved-project-badge">当前</span>}
+                      </span>
+                      <span className="wb-saved-project-meta">
+                        {formatProjectTime(project.savedAt)} · {project.program.rungs.length} 段 · {project.program.tags.length} 个变量
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      className="wb-saved-project-delete"
+                      onClick={() => onDeleteSavedProject(project)}
+                      aria-label={`删除项目「${project.name}」`}
+                      title="从本机项目库删除"
+                    >
+                      <TrashIcon size={15} />
+                    </button>
+                  </li>
+                )
+              })}
+            </ul>
+          )}
+
+          <p className="wb-saved-project-note">
+            「保存」写入当前浏览器；换设备请从右上角「导出」下载工程 JSON。
+          </p>
         </section>
 
         <section className="wb-drawer-section" aria-labelledby="project-help-title">
@@ -135,7 +169,6 @@ export default function ProjectDrawer({
             <button type="button" onClick={onAbout}><InfoIcon size={16} />关于与数据说明</button>
           </div>
         </section>
-
       </aside>
     </div>
   )

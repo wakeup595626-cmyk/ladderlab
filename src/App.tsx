@@ -15,7 +15,7 @@ import AboutDialog from './components/AboutDialog'
 import CoachStrip from './components/CoachStrip'
 import { useConfirmDialog } from './lib/useConfirmDialog'
 import Guide from './components/Guide'
-import { GripIcon, LadderIcon, TagIcon } from './components/Icons'
+import { FolderIcon, GripIcon, LadderIcon, TagIcon } from './components/Icons'
 import Inspector, { type InspectorTab } from './components/Inspector'
 import InstructionBar from './components/InstructionBar'
 import InstructionDrawer from './components/InstructionDrawer'
@@ -24,6 +24,7 @@ import LibraryDialog from './components/LibraryDialog'
 import { useMediaQuery } from './lib/useMediaQuery'
 import ProjectDrawer from './components/ProjectDrawer'
 import ProjectImportDialog from './components/ProjectImportDialog'
+import SaveProjectDialog from './components/SaveProjectDialog'
 import ProgramImageExporter, { type ProgramImageMode } from './components/ProgramImageExporter'
 import QuickEditor from './components/QuickEditor'
 import StatusBar from './components/StatusBar'
@@ -44,6 +45,17 @@ import type {
 } from './engine/types'
 import type { DragPayload, DropTarget } from './lib/dragTypes'
 import { downloadDataUrl, downloadText, parseProgramText, serializeProgram } from './lib/io'
+import {
+  ACTIVE_PROJECT_STORAGE_KEY,
+  PROJECT_LIBRARY_STORAGE_KEY,
+  deleteSavedProject as removeSavedProjectFromLibrary,
+  readActiveSavedProjectId,
+  readProjectLibrary,
+  saveNamedProject,
+  writeActiveSavedProjectId,
+  type SaveNamedProjectResult,
+  type SavedProject,
+} from './lib/projectLibrary'
 import {
   clampInspectorWidth,
   INSPECTOR_DEFAULT_WIDTH,
@@ -258,6 +270,7 @@ function chainLengthAtPath(nodes: LadderNode[], chain: number[]): number | null 
 export default function App() {
   const { confirm, dialog: confirmDialog } = useConfirmDialog()
   const [startup] = useState<LoadSavedProgramResult>(() => loadSavedProgram())
+  const [startupLibrary] = useState(() => readProjectLibrary())
   const [initialProgram] = useState<Program>(() =>
     startup.status === 'ok' ? startup.program : blankProgram(),
   )
@@ -330,6 +343,19 @@ export default function App() {
       return false
     }
   })
+  const [savedProjects, setSavedProjects] = useState<SavedProject[]>(() =>
+    startupLibrary.status === 'ok' ? startupLibrary.projects : [],
+  )
+  const [projectLibraryError, setProjectLibraryError] = useState<string | null>(() =>
+    startupLibrary.status === 'corrupt' ? startupLibrary.message : null,
+  )
+  const [activeSavedProjectId, setActiveSavedProjectId] = useState<string | null>(() => {
+    if (startupLibrary.status !== 'ok') return null
+    const id = readActiveSavedProjectId()
+    return id && startupLibrary.projects.some((project) => project.id === id) ? id : null
+  })
+  const [saveDialogOpen, setSaveDialogOpen] = useState(false)
+  const [saveDialogError, setSaveDialogError] = useState<string | null>(null)
   const editorRef = useRef<HTMLElement>(null)
   const tagsButtonRef = useRef<HTMLButtonElement>(null)
   const inspectorResizePointerRef = useRef<number | null>(null)
@@ -386,6 +412,27 @@ export default function App() {
     savingEnabledRef.current = savingEnabled
   }, [program, savingEnabled])
 
+  // 两个标签页同时打开时，项目库或当前项目可能被另一页改写。
+  // 只在收到 storage 事件时重新读取，避免本页挂载时反向覆盖另一页的数据。
+  useEffect(() => {
+    const syncLibrary = () => {
+      const result = readProjectLibrary()
+      if (result.status === 'ok') {
+        setSavedProjects(result.projects)
+        setProjectLibraryError(null)
+        setActiveSavedProjectId(readActiveSavedProjectId())
+      } else {
+        setProjectLibraryError(result.message)
+      }
+    }
+    const onStorage = (event: StorageEvent) => {
+      if (event.key !== PROJECT_LIBRARY_STORAGE_KEY && event.key !== ACTIVE_PROJECT_STORAGE_KEY) return
+      syncLibrary()
+    }
+    window.addEventListener('storage', onStorage)
+    return () => window.removeEventListener('storage', onStorage)
+  }, [])
+
   const notify = useCallback((
     message: string,
     options?: { tone?: 'info' | 'error'; sticky?: boolean; action?: { label: string; run: () => void } },
@@ -413,6 +460,11 @@ export default function App() {
       setToast(null)
     }, duration)
   }, [stopToastTimer])
+
+  const setActiveProject = useCallback((id: string | null) => {
+    setActiveSavedProjectId(id)
+    writeActiveSavedProjectId(id)
+  }, [])
 
   const clearSaveRetryTimer = useCallback(() => {
     if (saveRetryTimerRef.current !== null) {
@@ -488,6 +540,50 @@ export default function App() {
       return { past, present: next, future: [] }
     })
   }, [])
+
+  const requestSaveProject = useCallback(() => {
+    setSaveDialogError(null)
+    if (projectLibraryError || !activeSavedProjectId) {
+      setSaveDialogOpen(true)
+      return
+    }
+
+    const result = saveNamedProject({
+      id: activeSavedProjectId,
+      name: program.name,
+      program,
+    })
+    if (result.ok) {
+      setSavedProjects(result.projects)
+      setActiveProject(result.project.id)
+      notify(`已保存「${result.project.name}」到本机项目库`)
+      return
+    }
+
+    if (result.reason === 'missing-project') setActiveProject(null)
+    if (result.reason === 'corrupt-library') setProjectLibraryError(result.message)
+    setSaveDialogError(result.message)
+    setSaveDialogOpen(true)
+  }, [activeSavedProjectId, notify, program, projectLibraryError, setActiveProject])
+
+  const handleSaveNamedProject = useCallback((name: string): SaveNamedProjectResult => {
+    const result = saveNamedProject({ id: activeSavedProjectId, name, program })
+    if (!result.ok) {
+      if (result.reason === 'missing-project') setActiveProject(null)
+      if (result.reason === 'corrupt-library') setProjectLibraryError(result.message)
+      return result
+    }
+
+    setSavedProjects(result.projects)
+    setActiveProject(result.project.id)
+    if (result.project.program.name !== program.name) {
+      commit(setProjectName(program, result.project.program.name))
+    }
+    setSaveDialogOpen(false)
+    setSaveDialogError(null)
+    notify(`已保存「${result.project.name}」到本机项目库`)
+    return result
+  }, [activeSavedProjectId, commit, notify, program, setActiveProject])
 
   // Toast 上的「撤销」只能把这一段插回当前工程，不能回滚成删除那一刻的整份快照，
   // 否则用户在删除后继续做的编辑会被悄悄丢掉。
@@ -1019,6 +1115,22 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [clipboard, copySelection, cutSelection, pasteAt, redo, selection, undo])
 
+  // Ctrl/Cmd+S 是浏览器“保存网页”的默认快捷键，必须在捕获阶段拦住；
+  // 即使焦点在工程名输入框里，也应该把当前工程存进本机项目库。
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || event.altKey) return
+      if (event.key.toLowerCase() !== 's') return
+      event.preventDefault()
+      event.stopPropagation()
+      if (event.repeat) return
+      if (document.querySelector('[role="dialog"][aria-modal="true"]')) return
+      requestSaveProject()
+    }
+    window.addEventListener('keydown', onKeyDown, true)
+    return () => window.removeEventListener('keydown', onKeyDown, true)
+  }, [requestSaveProject])
+
   const activeRung = selection
     ? program.rungs.find((rung) => rung.id === selection.rungId)
     : program.rungs[0]
@@ -1421,6 +1533,7 @@ export default function App() {
     if (!accepted) return false
     commit(sample)
     setSelection(sample.rungs[0] ? { rungId: sample.rungs[0].id, path: null } : null)
+    setActiveProject(null)
     notify('实验 / 示例已载入，可直接编辑和运行')
     return true
   }
@@ -1431,6 +1544,7 @@ export default function App() {
     pendingAutoRunRef.current = true
     commit(sample)
     setSelection(sample.rungs[0] ? { rungId: sample.rungs[0].id, path: null } : null)
+    setActiveProject(null)
     setMobilePanel('none')
     openInspector('tags')
     closeGuide()
@@ -1488,6 +1602,7 @@ export default function App() {
     setBackups(listRecoveryBackups())
     setRawDownloaded(false)
     lastSaveFailureRef.current = null
+    setActiveProject(null)
     notify('已接受当前工程，自动保存已恢复')
   }
 
@@ -1528,6 +1643,7 @@ export default function App() {
     setSelection(next.rungs[0] ? { rungId: next.rungs[0].id, path: null } : null)
     setBackups(listRecoveryBackups())
     setRawDownloaded(false)
+    setActiveProject(null)
     notify('已放弃损坏工程，并新建空白工程')
   }
 
@@ -1565,6 +1681,7 @@ export default function App() {
     setSavePending(false)
     setBackups(listRecoveryBackups())
     setBackupsDismissed(false)
+    setActiveProject(null)
     notify('已载入另一标签页版本；本页修改已存为恢复副本')
   }
 
@@ -1608,9 +1725,62 @@ export default function App() {
     setBackups(listRecoveryBackups())
     commit(restored)
     setSelection(restored.rungs[0] ? { rungId: restored.rungs[0].id, path: null } : null)
+    setActiveProject(null)
     notify(corruptProject
       ? '已载入恢复副本；请确认恢复横幅中的「接受当前工程」以恢复自动保存'
       : '已从恢复副本载入工程，会作为当前工程自动保存')
+  }
+
+  const openSavedProject = async (saved: SavedProject) => {
+    if (saved.id === activeSavedProjectId) {
+      setMobilePanel('none')
+      notify(`「${saved.name}」已经是当前工程`)
+      return
+    }
+    if (remoteConflict) {
+      setMobilePanel('none')
+      notify('另一个标签页的版本还没处理，请先完成版本选择再打开项目', { tone: 'error' })
+      return
+    }
+    const accepted = await confirm({
+      title: `打开「${saved.name}」？`,
+      description: '当前工程会被替换，打开前会先留一份恢复副本。',
+      confirmLabel: '打开',
+    })
+    if (!accepted) return
+    if (!archiveProgramVersion(program)) {
+      notify('无法暂存当前工程，已取消打开；请先从右上角导出工程 JSON', { tone: 'error' })
+      return
+    }
+
+    setBackups(listRecoveryBackups())
+    setBackupsDismissed(false)
+    commit(saved.program)
+    setSelection(saved.program.rungs[0]
+      ? { rungId: saved.program.rungs[0].id, path: null }
+      : null)
+    setRunning(false)
+    setMobilePanel('none')
+    setActiveProject(saved.id)
+    notify(`已打开「${saved.name}」`)
+  }
+
+  const handleDeleteSavedProject = async (saved: SavedProject) => {
+    const accepted = await confirm({
+      title: `从本机项目库删除「${saved.name}」？`,
+      description: '只删除浏览器里的这份命名项目，当前编辑区内容不会改变。',
+      confirmLabel: '删除',
+      danger: true,
+    })
+    if (!accepted) return
+    const result = removeSavedProjectFromLibrary(saved.id)
+    if (!result.ok) {
+      notify(result.message, { tone: 'error' })
+      return
+    }
+    setSavedProjects(result.projects)
+    if (saved.id === activeSavedProjectId) setActiveProject(null)
+    notify(`已从本机项目库删除「${saved.name}」`)
   }
 
   const newProject = async () => {
@@ -1623,7 +1793,16 @@ export default function App() {
     const next = blankProgram()
     commit(next)
     setSelection(next.rungs[0] ? { rungId: next.rungs[0].id, path: null } : null)
-    notify('已新建空白工程')
+    setActiveProject(null)
+    notify('已新建空白工程', {
+      action: {
+        label: '命名并保存',
+        run: () => {
+          setSaveDialogError(null)
+          setSaveDialogOpen(true)
+        },
+      },
+    })
   }
 
   const changeProfile = (profile: Program['profile']) => {
@@ -1639,11 +1818,22 @@ export default function App() {
   const applyImportedProject = (imported: Program) => {
     commit(imported)
     setSelection(imported.rungs[0] ? { rungId: imported.rungs[0].id, path: null } : null)
+    setActiveProject(null)
     setImportOpen(false)
     setMobilePanel('none')
     notify(corruptProject
       ? `已导入「${imported.name}」；现在可点「接受当前工程并恢复自动保存」`
-      : `已导入「${imported.name}」`)
+      : `已导入「${imported.name}」`, {
+        action: corruptProject
+          ? undefined
+          : {
+              label: '保存到项目库',
+              run: () => {
+                setSaveDialogError(null)
+                setSaveDialogOpen(true)
+              },
+            },
+      })
   }
 
   const startImageExport = (mode: ProgramImageMode) => {
@@ -1949,6 +2139,8 @@ export default function App() {
         onUndo={undo}
         onRedo={redo}
         onOpenProject={() => setMobilePanel('project')}
+        onSaveProject={requestSaveProject}
+        saveBlocked={Boolean(projectLibraryError)}
         onNewProject={() => void newProject()}
         onImportProject={() => setImportOpen(true)}
         onExportProject={exportProject}
@@ -2314,13 +2506,30 @@ export default function App() {
           <TagIcon size={18} />
           <span>变量</span>
         </button>
+        <button
+          type="button"
+          className={mobilePanel === 'project' ? 'mobile-tab-action is-active' : 'mobile-tab-action'}
+          onClick={() => {
+            setInspectorOpen(false)
+            setMobilePanel((panel) => (panel === 'project' ? 'none' : 'project'))
+          }}
+          aria-pressed={mobilePanel === 'project'}
+        >
+          <FolderIcon size={18} />
+          <span>项目</span>
+        </button>
       </nav>
 
       <ProjectDrawer
         open={mobilePanel === 'project'}
         program={program}
         activeRungId={activeRungId}
+        savedProjects={savedProjects}
+        activeSavedProjectId={activeSavedProjectId}
+        projectLibraryError={projectLibraryError}
         onClose={() => setMobilePanel('none')}
+        onOpenSavedProject={(saved) => void openSavedProject(saved)}
+        onDeleteSavedProject={(saved) => void handleDeleteSavedProject(saved)}
         onOpenTags={() => {
           setMobilePanel('none')
           openInspector('tags')
@@ -2328,22 +2537,6 @@ export default function App() {
         onOpenLibrary={() => {
           setMobilePanel('none')
           setLibraryOpen(true)
-        }}
-        onNew={() => {
-          setMobilePanel('none')
-          newProject()
-        }}
-        onImport={() => {
-          setMobilePanel('none')
-          setImportOpen(true)
-        }}
-        onExport={() => {
-          setMobilePanel('none')
-          exportProject()
-        }}
-        onExportImage={(mode) => {
-          setMobilePanel('none')
-          startImageExport(mode)
         }}
         onGuide={() => {
           setMobilePanel('none')
@@ -2451,6 +2644,20 @@ export default function App() {
         open={importOpen}
         onClose={() => setImportOpen(false)}
         onImport={applyImportedProject}
+      />
+
+      <SaveProjectDialog
+        open={saveDialogOpen}
+        program={program}
+        projects={savedProjects}
+        activeProjectId={activeSavedProjectId}
+        libraryError={projectLibraryError}
+        initialError={saveDialogError}
+        onClose={() => {
+          setSaveDialogOpen(false)
+          setSaveDialogError(null)
+        }}
+        onSave={handleSaveNamedProject}
       />
 
       <LibraryDialog
