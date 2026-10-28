@@ -43,7 +43,22 @@ function program(name: string, profile: Program['profile'], tags: TagDef[], rung
   return ensureTrailingBlankRung({ schema: 1, name, profile, tags, rungs })
 }
 
+/** 新建工程与首次进入：只有一条等待录入的空程序段，不预置任何指令。 */
 export function blankProgram(): Program {
+  return program(
+    '未命名项目',
+    'v14',
+    [
+      tag('StartBtn', '%I0.0', 'BOOL', false, '启动按钮'),
+      tag('StopBtn', '%I0.1', 'BOOL', false, '停止按钮'),
+      tag('Motor', '%Q0.0', 'BOOL', false, '电机接触器'),
+    ],
+    [],
+  )
+}
+
+/** 单元测试与教学示例共用的起保停内容，不用于应用启动。 */
+export function starterProgram(): Program {
   return program(
     '未命名项目',
     'v14',

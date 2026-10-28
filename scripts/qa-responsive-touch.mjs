@@ -294,12 +294,12 @@ for (const viewport of viewports) {
     nodes: document.querySelectorAll('.ll-node[data-node-id]').length,
     wireSelected: document.querySelectorAll('.ll-slot.is-wire-selected').length,
     selectedIndex: document.querySelector('.ll-slot.is-wire-selected')?.dataset.index ?? null,
-    chip: document.querySelector('.ll-selected-chip')?.textContent?.trim() ?? null,
+    chips: document.querySelectorAll('.ll-selected-chip').length,
     menuOpen: !!document.querySelector('.ll-slot-menu[role="menu"]'),
   }))()`)
   check(`${label}/touch-wire-selects-only`, afterWireTap.nodes === beforeTap.nodes
     && afterWireTap.wireSelected === 1
-    && String(afterWireTap.chip).includes('已选线路')
+    && afterWireTap.chips === 0
     && !afterWireTap.menuOpen, afterWireTap)
 
   // 4) 另一个插入点的 44px 热区：触摸左缘应只选中该线路，不落到 + 上。

@@ -473,7 +473,6 @@ export default function WorkspaceTopBar({
                   <ExportIcon size={16} />
                   <span className="wb-menu-item-copy">
                     <strong>工程文件</strong>
-                    <small>.ladderlab.json · 可导入其他 LadderLab</small>
                   </span>
                 </button>
               </div>
@@ -483,14 +482,12 @@ export default function WorkspaceTopBar({
                   <ImageIcon size={16} />
                   <span className="wb-menu-item-copy">
                     <strong>完整程序 PNG</strong>
-                    <small>含工程名与程序段标题</small>
                   </span>
                 </button>
                 <button type="button" role="menuitem" onClick={() => chooseFileMenuAction(() => onExportImage('plain'))}>
                   <ImageIcon size={16} />
                   <span className="wb-menu-item-copy">
                     <strong>纯梯形图 PNG</strong>
-                    <small>只保留梯形图，适合插入报告</small>
                   </span>
                 </button>
               </div>

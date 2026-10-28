@@ -506,7 +506,6 @@ export default function ProgramImageExporter({
           onPasteRung={noop}
           onDeleteRung={noop}
           onMoveRung={noop}
-          onMoveNode={noop}
         />
       </div>
     </div>

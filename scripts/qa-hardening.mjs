@@ -265,7 +265,7 @@ function compileErrorProgram() {
 async function openTagMonitor(page) {
   if (!(await page.evaluate("Boolean(document.querySelector('.inspector'))"))) {
     const clicked = await page.evaluate(`(() => {
-      const button = [...document.querySelectorAll('.wb-doc-action')].find((item) => item.textContent?.includes('变量表'))
+      const button = document.querySelector('[data-inspector-entry="tags"]')
       button?.click()
       return Boolean(button)
     })()`)

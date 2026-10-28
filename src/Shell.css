@@ -551,162 +551,6 @@ body[data-drag-kind] {
   }
 }
 
-/* -------------------------------------------------------------- document */
-
-.wb-documentbar {
-  display: flex;
-  height: 54px;
-  flex: 0 0 54px;
-  align-items: center;
-  gap: 20px;
-  padding: 0 24px;
-  border-bottom: 1px solid var(--border);
-  background: var(--surface);
-}
-
-.wb-doc-tab {
-  display: flex;
-  min-width: 0;
-  height: 34px;
-  align-items: center;
-  gap: 8px;
-  padding: 0 11px;
-  border: 1px solid var(--border);
-  border-radius: 5px;
-  background: var(--ground);
-  color: var(--accent-ink);
-}
-
-.wb-doc-tab h1 {
-  margin: 0;
-  color: var(--text);
-  font-family: var(--mono);
-  font-size: 16px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  line-height: 1;
-  white-space: nowrap;
-}
-
-.wb-doc-meta {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  gap: 14px;
-  color: var(--muted);
-  font-size: 12.5px;
-}
-
-.wb-doc-state {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  white-space: nowrap;
-}
-
-.wb-doc-state i {
-  width: 7px;
-  height: 7px;
-  border: 1px solid var(--control);
-  border-radius: 50%;
-  background: transparent;
-}
-
-.wb-doc-state.is-live {
-  color: var(--positive);
-  font-weight: 600;
-}
-
-.wb-doc-state.is-live i {
-  border-color: var(--positive);
-  background: var(--positive);
-}
-
-.wb-doc-errors {
-  display: inline-flex;
-  height: 30px;
-  align-items: center;
-  gap: 6px;
-  padding: 0 10px;
-  border: 1px solid color-mix(in srgb, var(--negative) 36%, var(--border));
-  border-radius: 999px;
-  background: var(--negative-wash);
-  color: var(--negative);
-  font-size: 12px;
-  font-weight: 600;
-  white-space: nowrap;
-  cursor: pointer;
-}
-
-.wb-doc-errors::before {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: currentColor;
-  content: '';
-}
-
-.wb-doc-errors:hover {
-  border-color: var(--negative);
-  background: color-mix(in srgb, var(--negative) 13%, var(--surface));
-}
-
-.wb-doc-errors.is-error {
-  color: var(--negative);
-  font-weight: 600;
-}
-
-.wb-doc-actions {
-  display: flex;
-  flex: 0 0 auto;
-  align-items: center;
-  gap: 3px;
-  margin-left: auto;
-}
-
-.wb-doc-action {
-  display: inline-flex;
-  height: 36px;
-  align-items: center;
-  gap: 6px;
-  padding: 0 10px;
-  border: 1px solid transparent;
-  border-radius: 5px;
-  background: transparent;
-  color: var(--muted);
-  font-size: 12.5px;
-  cursor: pointer;
-}
-
-.wb-doc-action:hover {
-  border-color: var(--border);
-  background: var(--raised);
-  color: var(--text);
-}
-
-.wb-doc-action.is-active,
-.wb-doc-action.is-active:hover {
-  border-color: color-mix(in srgb, var(--accent) 30%, var(--border));
-  background: var(--accent-wash);
-  color: var(--accent-ink);
-}
-
-.wb-doc-action svg {
-  color: var(--faint);
-}
-
-.wb-doc-divider {
-  width: 1px;
-  height: 22px;
-  margin: 0 5px;
-  background: var(--border);
-}
-
-.wb-doc-actions .icon-button {
-  width: 36px;
-  height: 36px;
-}
-
 /* ---------------------------------------------------------- instruction */
 
 .wb-instruction-strip {
@@ -1675,7 +1519,6 @@ body[data-drag-kind] {
    it: the ladder stays fully readable, and the panel no longer behaves like a
    modal (no scrim, no focus trap). */
 @media (min-width: 1025px) {
-  .wb-shell[data-inspector='open'] .wb-documentbar,
   .wb-shell[data-inspector='open'] .wb-instruction-strip,
   .wb-shell[data-inspector='open'] .wb-coach {
     padding-right: calc(var(--inspector-width) + 24px);
@@ -1750,10 +1593,6 @@ body[data-drag-kind] {
 }
 
 @media (max-width: 900px) {
-  .wb-documentbar {
-    padding: 0 18px;
-  }
-
   .wb-instruction-strip {
     gap: 12px;
     padding: 9px 18px;
@@ -1866,29 +1705,6 @@ body[data-drag-kind] {
   .wb-shell .wb-more .icon-button {
     width: 42px;
     height: 42px;
-  }
-
-  .wb-documentbar {
-    height: 54px;
-    flex-basis: 54px;
-    gap: 12px;
-    padding: 0 16px;
-  }
-
-  .wb-doc-tab {
-    height: 34px;
-  }
-
-  .wb-doc-tab h1 {
-    font-size: 15px;
-  }
-
-  .wb-doc-meta {
-    margin-left: auto;
-  }
-
-  .wb-doc-actions {
-    display: none;
   }
 
   .wb-instruction-strip {
@@ -2018,10 +1834,6 @@ body[data-drag-kind] {
     gap: 4px;
   }
 
-  .wb-doc-meta {
-    font-size: 11.5px;
-  }
-
   .wb-coach-path > span:first-child {
     flex-basis: 100%;
   }
@@ -2067,8 +1879,6 @@ body[data-drag-kind] {
   .wb-project-button,
   .wb-shell .wb-run-toggle,
   .wb-shell .wb-more .icon-button,
-  .wb-doc-action,
-  .wb-doc-actions .icon-button,
   .wb-instruction-button,
   .wb-coach-demo,
   .wb-coach-dismiss,
@@ -2336,7 +2146,6 @@ body[data-drag-kind] {
 
   .wb-shell .wb-project-button,
   .wb-shell .wb-more .icon-button,
-  .wb-shell .wb-doc-actions .icon-button,
   .wb-shell .wb-drawer-close,
   .wb-shell .inspector-mobile-head .icon-button,
   .wb-shell .qe-close,
@@ -2630,46 +2439,6 @@ body[data-drag-kind] {
 
 .wb-speed-row button {
   border-radius: var(--radius-control);
-}
-
-.wb-documentbar {
-  gap: 16px;
-  padding-inline: 18px;
-  border-bottom-color: var(--control);
-}
-
-.wb-doc-tab {
-  align-self: stretch;
-  height: 100%;
-  padding: 0 2px;
-  border: 0;
-  border-bottom: 2px solid var(--accent);
-  border-radius: 0;
-  background: transparent;
-  color: var(--accent-ink);
-}
-
-.wb-doc-tab h1 {
-  font-size: 15px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-}
-
-.wb-doc-action {
-  height: 34px;
-  border-radius: var(--radius-control);
-  font-size: 12px;
-}
-
-.wb-doc-action:hover {
-  border-color: transparent;
-  background: var(--active);
-}
-
-.wb-doc-action.is-active,
-.wb-doc-action.is-active:hover {
-  border-color: var(--control);
-  background: var(--accent-wash);
 }
 
 .wb-instruction-strip {
@@ -3033,8 +2802,6 @@ body[data-drag-kind] {
 }
 
 .property-heading p,
-.panel-note,
-.form-note,
 .tags-help span,
 .empty-diagnostics p,
 .empty-inspector p {
@@ -3287,13 +3054,6 @@ body[data-drag-kind] {
   border-radius: var(--radius-control);
 }
 
-.qe-note {
-  border: 0;
-  border-left: 2px solid var(--control);
-  border-radius: 0;
-  background: transparent;
-}
-
 .toast {
   border-radius: var(--radius-control);
 }
@@ -3378,20 +3138,6 @@ body[data-drag-kind] {
     min-width: 66px;
     height: 44px;
     padding-inline: 9px;
-  }
-
-  .wb-documentbar {
-    height: 50px;
-    flex-basis: 50px;
-    padding-inline: 12px;
-  }
-
-  .wb-doc-tab {
-    max-width: 52vw;
-  }
-
-  .wb-doc-tab h1 {
-    font-size: 14.5px;
   }
 
   .wb-coach {
@@ -3489,10 +3235,6 @@ body[data-drag-kind] {
     width: 40px;
     min-width: 40px;
     padding: 0;
-  }
-
-  .wb-doc-tab {
-    max-width: 58vw;
   }
 
   .wb-coach-demo {
@@ -3708,14 +3450,6 @@ body[data-drag-kind] {
 .wb-shell .wb-instruction-button:focus-visible .wb-drag-mark,
 .wb-shell .wb-instruction-button:focus-within .wb-drag-mark {
   opacity: 0.65;
-}
-
-.wb-shell .wb-doc-action.is-active,
-.wb-shell .wb-doc-action.is-active:hover {
-  border-color: transparent;
-  background: var(--surface);
-  box-shadow: inset 0 -2px 0 var(--accent);
-  color: var(--accent-ink);
 }
 
 /* ------------------------------------------------ paper notification */
@@ -4211,12 +3945,6 @@ body[data-drag-kind] {
   font-weight: 600;
 }
 
-.wb-menu-item-copy small {
-  color: var(--faint);
-  font-size: 10.75px;
-  font-weight: 400;
-}
-
 .wb-shell .wb-topbar:has(.wb-more-menu),
 .wb-shell .wb-topbar:has(.wb-file-menu) {
   z-index: 89;
@@ -4447,13 +4175,6 @@ body[data-drag-kind] {
   background: var(--surface);
 }
 
-.sidebar-insert-target-note {
-  margin: 0;
-  color: var(--muted);
-  font-size: 12px;
-  line-height: 1.45;
-}
-
 @media (min-width: 1025px) and (max-width: 1359px) {
   .wb-shell[data-inspector='open'] .wb-insert-target {
     gap: 4px;
@@ -4632,6 +4353,57 @@ body[data-drag-kind] {
   border: 1px solid var(--control);
   border-radius: 9px;
   background: var(--surface);
+}
+
+/* 变量表按钮停在收藏条最右端：高度和收藏卡一致，但独立成卡，
+   不混进「指令」的连续插入区。 */
+.wb-instruction-utility-slot {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+}
+
+.wb-instruction-utility {
+  display: inline-flex;
+  height: 46px;
+  align-items: center;
+  gap: 6px;
+  padding: 0 13px;
+  border: 1px solid var(--control);
+  border-radius: 9px;
+  background: var(--surface);
+  color: var(--muted);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.wb-instruction-utility svg {
+  color: var(--faint);
+}
+
+.wb-instruction-utility:hover {
+  border-color: var(--accent);
+  background: var(--accent-wash);
+  color: var(--accent-ink);
+}
+
+.wb-instruction-utility:hover svg {
+  color: var(--accent-ink);
+}
+
+.wb-instruction-utility.is-active,
+.wb-instruction-utility.is-active:hover {
+  border-color: color-mix(in srgb, var(--accent) 34%, var(--control));
+  background: var(--accent-wash);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent-ink);
+}
+
+.wb-instruction-utility.is-active svg {
+  color: var(--accent-ink);
 }
 
 .wb-instruction-scroll {

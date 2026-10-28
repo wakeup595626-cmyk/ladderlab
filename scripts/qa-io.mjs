@@ -207,6 +207,8 @@ async function uploadImportFile(path) {
 
 await send('Page.enable')
 await send('Runtime.enable')
+// 后台标签页会把 requestAnimationFrame 冻结，PNG 导出因此永远等不到下一帧。
+await send('Page.bringToFront').catch(() => {})
 try {
   await send('Browser.setDownloadBehavior', {
     behavior: 'allow',

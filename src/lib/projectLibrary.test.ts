@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { blankProgram } from '../engine/samples'
+import { starterProgram } from '../engine/samples'
 import type { Program } from '../engine/types'
 import {
   ACTIVE_PROJECT_STORAGE_KEY,
@@ -28,7 +28,7 @@ let storage: MemoryStorage
 let session: MemoryStorage
 
 function namedProgram(name: string, label = name): Program {
-  const program = blankProgram()
+  const program = starterProgram()
   return {
     ...program,
     name,

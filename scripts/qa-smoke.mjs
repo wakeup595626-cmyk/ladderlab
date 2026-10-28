@@ -469,8 +469,7 @@ await screenshot('docs/qa/desktop-quick-editor.png')
 
 // 反方向也必须是单层：就近参数框开着时点「变量表」，参数框要收起，
 // 不能让同一个触点同时出现在浮动框和右侧属性栏里。
-await evaluate(`[...document.querySelectorAll('.wb-doc-action')]
-  .find((button) => button.textContent?.includes('变量表'))?.click()`)
+await evaluate(`document.querySelector('[data-inspector-entry="tags"]')?.click()`)
 await sleep(320)
 const inspectorSwitch = await evaluate(`({
   editor: !!document.querySelector('.qe-panel'),
@@ -497,14 +496,14 @@ await sleep(250)
 const wireSelection = await evaluate(`({
   nodes: document.querySelectorAll('.ll-node[data-node-id]').length,
   wires: document.querySelectorAll('.ll-slot.is-wire-selected').length,
-  chip: document.querySelector('.ll-selected-chip')?.textContent?.trim() ?? null,
+  chips: document.querySelectorAll('.ll-selected-chip').length,
 })`)
 check(
   'desktop/slot-wire-selects-without-insert',
   wireSelected
     && wireSelection.nodes === beforeInsert
     && wireSelection.wires === 1
-    && String(wireSelection.chip ?? '').includes('已选线路'),
+    && wireSelection.chips === 0,
   wireSelection,
 )
 
@@ -634,7 +633,7 @@ await evaluate(`(() => {
 await sleep(280)
 const wireForToolbar = await evaluate(`({
   selectedWires: document.querySelectorAll('.ll-slot.is-wire-selected').length,
-  chip: document.querySelector('.ll-selected-chip')?.textContent?.trim() ?? null,
+  chips: document.querySelectorAll('.ll-selected-chip').length,
 })`)
 await evaluate(`(() => {
   const plus = document.querySelector('.ll-slot[data-chain=""][data-index="1"] .ll-slot-plus')
@@ -658,7 +657,7 @@ const wireInserted = await evaluate(`(() => {
 check(
   'desktop/inline-insert-uses-selected-wire',
   wireForToolbar.selectedWires === 1
-    && String(wireForToolbar.chip ?? '').includes('已选线路')
+    && wireForToolbar.chips === 0
     && wireInserted.selectedIndex === 1
     && wireInserted.selectedCount === 1,
   { wireForToolbar, wireInserted },
@@ -1377,10 +1376,12 @@ const mobileFirst = await evaluate(`({
   overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth + 1,
   coach: !!document.querySelector('.wb-coach'),
   tabbar: !!document.querySelector('.wb-tabbar'),
-  heights: ['.wb-topbar', '.wb-documentbar'].map((selector) => Math.round(document.querySelector(selector)?.getBoundingClientRect().height ?? 0)),
+  documentbar: !!document.querySelector('.wb-documentbar'),
+  heights: ['.wb-topbar'].map((selector) => Math.round(document.querySelector(selector)?.getBoundingClientRect().height ?? 0)),
 })`)
 check('mobile/no-page-overflow', !mobileFirst.overflow)
 check('mobile/tabbar-present', mobileFirst.tabbar)
+check('mobile/no-legacy-documentbar', !mobileFirst.documentbar)
 
 // 手机顶栏的「更多」浮层也必须完整落在视口内，且每个菜单项都点得到。
 await evaluate(`document.querySelector('.wb-more .icon-button')?.click()`)

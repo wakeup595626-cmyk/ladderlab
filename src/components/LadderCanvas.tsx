@@ -28,7 +28,6 @@ import {
   hasCompactParallelPitch,
   parallelBranchOffsets,
 } from '../lib/parallelLayout'
-import { hasOpenBranch } from '../state/programOps'
 import {
   GripIcon,
   MoreIcon,
@@ -50,7 +49,6 @@ export interface LadderCanvasProps {
   rungClipboardCount?: number
   onDeleteRung: (rungId: string) => void
   onMoveRung: (rungId: string, delta: -1 | 1) => void
-  onMoveNode: (rungId: string, path: number[], delta: -1 | 1) => void
   dragTarget?: DropTarget | null
   isDragging?: boolean
   onEdit?: (selection: Selection, anchor: DOMRect) => void
@@ -119,7 +117,6 @@ interface DrawContext {
   contactHitHeight?: number
   onSelect: (selection: Selection) => void
   onEdit?: (selection: Selection, anchor: DOMRect) => void
-  onMoveNode: (rungId: string, path: number[], delta: -1 | 1) => void
   onOpenSlotMenu: (request: SlotMenuRequest) => void
   onMergeSlotClick: (slot: SlotRef, closeIndex: number) => void
   onMergeChipClick: (rungId: string, parallelPath: number[]) => void
@@ -828,7 +825,6 @@ function renderContact(
         CONTACT_LABELS[node.kind] + '，' + details.name + '，'
         + details.address + '，点击编辑'
       }
-      aria-keyshortcuts="ArrowLeft ArrowRight"
       data-node-id={node.id}
       data-node-path={path.join('.')}
       onClick={(event) => {
@@ -846,11 +842,6 @@ function renderContact(
         selectAndEdit(context, selection, event.currentTarget)
       }}
       onKeyDown={(event) => {
-        if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
-          event.preventDefault()
-          context.onMoveNode(context.rungId, path, event.key === 'ArrowLeft' ? -1 : 1)
-          return
-        }
         activateWithKeyboard(
           event,
           () => selectAndEdit(context, selection, event.currentTarget),
@@ -1800,34 +1791,9 @@ function RungSection({
       ? CONTACT_LABELS[selectedNode.kind] + (selectedNode.tag ? ' · ' + selectedNode.tag : '')
       : '并联分支 · ' + selectedNode.branches.length + ' 路'
     : ''
-  const localWire = context.selection?.rungId === rung.id && !context.selection.wholeRung
-    ? context.selection.wire ?? null
-    : null
   // 整段选择是显式状态，避免和“选中输出线圈”的 path:null 混淆。
   const wholeRungSelected = rungSelected && context.selection?.wholeRung === true
-  const armedHere = context.mergeTarget?.rungId === rung.id
   const favoriteTargetHere = context.insertTarget?.rungId === rung.id
-  const multiCount = context.selection?.rungId === rung.id
-    ? context.selection.paths?.length ?? 0
-    : 0
-  // 段头只保留一条最相关的提示：正在合并 > 有未闭合分支 > 多选 > 单选。
-  const statusLabel = placeholder
-    ? ''
-    : armedHere
-    ? '点主线上的 + 合并（Esc 取消）'
-    : hasOpenBranch(rung.nodes)
-      ? '分支未闭合 · 点右侧「合并分支」'
-      : multiCount > 1
-        ? '已选 ' + multiCount + ' 个元件 · Ctrl+C 复制'
-        : wholeRungSelected
-          ? '整段已选 · 拖动排序 · Ctrl+C 复制'
-          : selectedLabel || (localWire
-            ? '已选线路 ' + (localWire.index + 1)
-            : favoriteTargetHere
-              ? '收藏指令 · ' + (context.insertTargetLabel || '插入本段')
-              : '')
-  const statusTip = Boolean(armedHere) || hasOpenBranch(rung.nodes) || multiCount > 1
-
   useLayoutEffect(() => {
     const element = scrollRef.current
     if (!element) return
@@ -1945,7 +1911,7 @@ function RungSection({
             className="ll-rung-name"
             value={titleValue}
             readOnly={!onRenameRung}
-            placeholder={onRenameRung ? '添加标题（可选）' : ''}
+            placeholder={onRenameRung ? '标题' : ''}
             aria-label={'给 ' + segmentLabel + ' 添加标题'}
             maxLength={FIELD_LIMITS.rungLabel}
             data-no-rung-drag
@@ -1983,15 +1949,6 @@ function RungSection({
               <span className="ll-tool-label">删除元件</span>
             </button>
           </div>
-          {statusLabel && (
-            <span
-              className={'ll-selected-chip' + (statusTip ? ' is-branch-tip' : '')}
-              title={statusLabel}
-              role="status"
-            >
-              {statusLabel}
-            </span>
-          )}
           {!placeholder && (
             <span
               className={'ll-power-state' + (powered ? ' is-on' : '')}
@@ -2022,7 +1979,7 @@ function RungSection({
             }}
           >
             <summary aria-label="程序段操作" title="程序段操作">
-              <MoreIcon size={17} />
+              <MoreIcon size={19} />
             </summary>
             <div
               className="ll-rung-menu-panel"
@@ -2436,7 +2393,6 @@ export default function LadderCanvas({
   rungClipboardCount = 0,
   onDeleteRung,
   onMoveRung,
-  onMoveNode,
   dragTarget = null,
   isDragging = false,
   onEdit,
@@ -2626,7 +2582,6 @@ export default function LadderCanvas({
       onSelect(next)
     },
     onEdit,
-    onMoveNode,
     onOpenSlotMenu: (request) => {
       setMergeArmed(null)
       onArmInsert?.({ rungId: request.rungId, chain: [...request.chain], index: request.index })
@@ -2844,17 +2799,11 @@ function renderParallel(
         aria-label={isOpen
           ? '并联分支，主线未闭合，点击编辑或点右侧合并分支'
           : '并联分支，' + node.branches.length + ' 条支路，点击编辑'}
-        aria-keyshortcuts="ArrowLeft ArrowRight"
         onClick={(event) => {
           event.stopPropagation()
           selectAndEdit(context, selection, event.currentTarget)
         }}
         onKeyDown={(event) => {
-          if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
-            event.preventDefault()
-            context.onMoveNode(context.rungId, path, event.key === 'ArrowLeft' ? -1 : 1)
-            return
-          }
           activateWithKeyboard(
             event,
             () => selectAndEdit(context, selection, event.currentTarget),

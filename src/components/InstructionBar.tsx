@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { getProfile } from '../engine/profiles'
 import type { ContactKind, OutputKind, ProfileId, Rung } from '../engine/types'
 import type { DragPayload } from '../lib/dragTypes'
@@ -37,6 +37,9 @@ interface InstructionBarProps {
   onMergeBranch: () => void
   onStartDrag: (event: React.PointerEvent<HTMLElement>, payload: DragPayload, label: string) => void
   onOpenAll: () => void
+  /** 收藏条最右侧的工作区动作，例如打开变量表。放在工具组外边，
+   *  这样点击它仍会结束收藏条的连续插入状态。 */
+  inspectorAction?: ReactNode
 }
 
 /** 指令条空间紧张，沿用原来的两个汉字叫法；目录里的全名留给抽屉和提示。 */
@@ -76,6 +79,7 @@ export default function InstructionBar({
   onMergeBranch,
   onStartDrag,
   onOpenAll,
+  inspectorAction,
 }: InstructionBarProps) {
   const activeProfile = getProfile(profile)
   const allButtonRef = useRef<HTMLButtonElement | null>(null)
@@ -361,6 +365,10 @@ export default function InstructionBar({
           <ChevronRightIcon size={15} aria-hidden="true" />
         </button>
       </div>
+
+      {inspectorAction && (
+        <div className="wb-instruction-utility-slot">{inspectorAction}</div>
+      )}
     </section>
   )
 }

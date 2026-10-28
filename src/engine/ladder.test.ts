@@ -9,7 +9,7 @@ import {
 } from '../state/programOps'
 import { compile } from './compile'
 import { supportsContact, supportsOutput } from './profiles'
-import { blankProgram } from './samples'
+import { starterProgram } from './samples'
 import { createRuntime, step, writeRuntimeValue } from './simulate'
 import type {
   ContactKind,
@@ -385,7 +385,7 @@ describe('扫描仿真', () => {
 
 describe('工程操作与序列化', () => {
   it('修改变量名时同步改写所有引用', () => {
-    const source = blankProgram()
+    const source = starterProgram()
     const start = source.tags.find((item) => item.name === 'StartBtn')!
     const renamed = updateTag(source, start.id, { name: 'Start1' })
     const node = renamed.rungs[0].nodes[0]
@@ -395,7 +395,7 @@ describe('工程操作与序列化', () => {
   })
 
   it('变量字段没有实际变化时不新增编辑记录', () => {
-    const source = blankProgram()
+    const source = starterProgram()
     const start = source.tags.find((item) => item.name === 'StartBtn')!
     expect(updateTag(source, start.id, { address: start.address })).toBe(source)
     expect(updateTag(source, start.id, { initial: start.initial })).toBe(source)
@@ -404,7 +404,7 @@ describe('工程操作与序列化', () => {
   })
 
   it('新增变量分配不重复地址，并联操作保留两条可用支路', () => {
-    let source = blankProgram()
+    let source = starterProgram()
     source = addTag(source, 'BOOL')
     const addresses = source.tags.map((item) => item.address)
     expect(new Set(addresses).size).toBe(addresses.length)
@@ -416,7 +416,7 @@ describe('工程操作与序列化', () => {
   })
 
   it('比较触点切换会补充 INT 变量和比较参数', () => {
-    let source = blankProgram()
+    let source = starterProgram()
     source = changeContactKind(source, source.rungs[0].id, [0], 'CMP')
     expect(source.tags.some((item) => item.kind === 'INT')).toBe(true)
     const node = source.rungs[0].nodes[0]
@@ -428,13 +428,13 @@ describe('工程操作与序列化', () => {
   })
 
   it('JSON 导入导出可以无损往返', () => {
-    const source = blankProgram()
+    const source = starterProgram()
     const restored = parseProgramText(serializeProgram(source))
     expect(restored).toEqual(source)
   })
 
   it('导入时拒绝无效档案和无效节点', () => {
-    const source = blankProgram()
+    const source = starterProgram()
     expect(() => parseProgramText(JSON.stringify({ ...source, profile: 'v99' }))).toThrow('profile 必须是 v14 或 v21')
     expect(() =>
       parseProgramText(

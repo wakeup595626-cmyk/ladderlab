@@ -284,19 +284,19 @@ const markerCounts = () => evaluate(`({
   halos: document.querySelectorAll('.ll-insert-cursor-halo').length,
 })`)
 
-/* 用户要求“点任意地方都取消”：顶栏、文档栏、变量面板、画布元件都要逐一验。 */
+/* 用户要求“点任意地方都取消”：顶栏、收藏指令标题、变量面板、画布元件都要逐一验。 */
 await clickSelector('.wb-brand')
 await pressEscape()
 const afterTopbar = await markerCounts()
 check('cursor/topbar-click-clears-marker', afterTopbar.slots === 0 && afterTopbar.halos === 0, afterTopbar)
 
 const rearmedTopbar = await rearmCursor(cursorRungId)
-const documentBarPoint = await blankPointIn('.wb-documentbar')
+const documentBarPoint = await blankPointIn('.wb-instruction-intro')
 if (documentBarPoint) await clickAt(documentBarPoint.x, documentBarPoint.y)
 await pressEscape()
 const afterDocumentBar = await markerCounts()
 check(
-  'cursor/documentbar-click-clears-marker',
+  'cursor/instruction-heading-click-clears-marker',
   Boolean(documentBarPoint)
     && rearmedTopbar.slots === 1
     && afterDocumentBar.slots === 0
@@ -304,7 +304,7 @@ check(
   { documentBarPoint, rearmedTopbar, afterDocumentBar },
 )
 
-await clickSelector('.wb-doc-action', '变量表')
+await clickSelector('[data-inspector-entry="tags"]', '变量表')
 await sleep(420)
 const rearmedInspector = await rearmCursor(cursorRungId)
 const inspectorPoint = await blankPointIn('.wb-context-panel')

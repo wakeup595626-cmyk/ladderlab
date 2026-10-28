@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { blankProgram, buildSample } from '../engine/samples'
+import { starterProgram, buildSample } from '../engine/samples'
 import {
   describeFavoriteInsertTarget,
   favoriteTargetSegmentLabel,
@@ -8,7 +8,7 @@ import {
 
 describe('收藏指令插入目标', () => {
   it('没有选择时落在第一段段末（输出前）', () => {
-    const program = blankProgram()
+    const program = starterProgram()
     const target = resolveFavoriteInsertTarget(program, null)
 
     expect(target?.rungId).toBe(program.rungs[0].id)
@@ -48,7 +48,7 @@ describe('收藏指令插入目标', () => {
   })
 
   it('选中线性触点时插在它后面', () => {
-    const program = blankProgram()
+    const program = starterProgram()
     const rung = program.rungs[0]
 
     const target = resolveFavoriteInsertTarget(program, { rungId: rung.id, path: [0] })
@@ -89,7 +89,7 @@ describe('收藏指令插入目标', () => {
   })
 
   it('失效的元件路径回退到段末而不是猜一个位置', () => {
-    const program = blankProgram()
+    const program = starterProgram()
     const rung = program.rungs[0]
 
     const target = resolveFavoriteInsertTarget(program, { rungId: rung.id, path: [9] })
@@ -99,7 +99,7 @@ describe('收藏指令插入目标', () => {
   })
 
   it('失效的线路下标也回退到段末', () => {
-    const program = blankProgram()
+    const program = starterProgram()
     const rung = program.rungs[0]
 
     const target = resolveFavoriteInsertTarget(program, {
@@ -113,7 +113,7 @@ describe('收藏指令插入目标', () => {
   })
 
   it('没有程序段时返回空目标', () => {
-    const program = blankProgram()
+    const program = starterProgram()
     const empty = { ...program, rungs: [] }
 
     expect(resolveFavoriteInsertTarget(empty, null)).toBeNull()

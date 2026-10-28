@@ -262,8 +262,6 @@ function TagsPanel({
         </div>
       </div>
 
-      <p className="panel-note">点 TRUE / FALSE 立即切换仿真输入；展开可改名称和地址。</p>
-
       <section className="tag-list" aria-label="PLC 变量表">
         {program.tags.map((tag) => {
           const usage = tagUsage(program, tag.name)
@@ -775,10 +773,9 @@ function PropertiesPanel({
       <div className="empty-inspector">
         <PointerIcon className="empty-icon" />
         <h3>选择一个元件</h3>
-        <p>点击梯形图中的触点、并联块或输出，在这里修改参数。运行时可在程序段标题栏观察回路通断。</p>
+        <p>点击梯形图中的触点、并联块或输出。</p>
         <div className="tip-card">
           <strong>当前档案：{profile}</strong>
-          <span>档案只模拟指令集差异，不导入真实 TIA 工程。</span>
         </div>
       </div>
     )
@@ -791,10 +788,6 @@ function PropertiesPanel({
           <span className="property-type">程序段</span>
           <h3>{rungCaption(program, selectedRung.id, selectedRung.label)}</h3>
           <p>{selectedRung.nodes.length} 个触点组 · {OUTPUT_NAMES[selectedRung.output.kind]} 输出</p>
-        </div>
-        <div className="tip-card">
-          <strong>整段操作</strong>
-          <span>拖动段标题可调整顺序。Ctrl+C 复制、Ctrl+X 剪切、Ctrl+V 粘贴到当前段之后，Delete 删除；右上角菜单也提供同样的操作。</span>
         </div>
       </div>
     )
@@ -974,7 +967,6 @@ function PropertiesPanel({
           </>
         )}
 
-        <p className="form-note">可前往“变量表”点击输入位，模拟按钮和开关。</p>
       </div>
     )
   }
@@ -987,7 +979,6 @@ function PropertiesPanel({
           <h3>{selectedNode.branches.length} 条支路</h3>
           <p>{rungCaption(program, selectedRung.id, selectedRung.label)}</p>
         </div>
-        <p className="form-note">任一并联支路接通，能流就会继续向右传递。</p>
         <div className="button-row">
           <button
             type="button"

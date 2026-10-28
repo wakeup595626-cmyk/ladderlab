@@ -132,7 +132,6 @@ import {
   insertRungCopies,
   makeContactNode,
   moveNode,
-  moveNodeBy,
   moveRung,
   moveRungTo,
   moveRungToBoundary,
@@ -2984,45 +2983,6 @@ export default function App() {
         onTheme={handleTheme}
       />
 
-      <div className="wb-documentbar" role="region" aria-label="程序编辑器工具栏">
-        <div className="wb-doc-tab">
-          <LadderIcon size={15} />
-          <h1>Main [OB1]</h1>
-        </div>
-        <div className="wb-doc-actions">
-          {compileResult.errors.length > 0 && (
-            <button
-              type="button"
-              className="wb-doc-errors is-error"
-              title="打开诊断并修复错误"
-              aria-label={`有 ${compileResult.errors.length} 个错误，打开诊断`}
-              onClick={() => openInspector('diagnostics')}
-            >
-              {compileResult.errors.length} 个错误
-            </button>
-          )}
-          <button
-            type="button"
-            ref={tagsButtonRef}
-            className={
-              inspectorVisible && inspectorTab === 'tags' ? 'wb-doc-action is-active' : 'wb-doc-action'
-            }
-            aria-pressed={inspectorVisible && inspectorTab === 'tags'}
-            onClick={() => {
-              if (inspectorVisible && inspectorTab === 'tags') {
-                setInspectorOpen(false)
-                setMobilePanel('none')
-                return
-              }
-              openInspector('tags')
-            }}
-          >
-            <TagIcon size={16} />
-            <span>变量表</span>
-          </button>
-        </div>
-      </div>
-
       <InstructionBar
         profile={program.profile}
         favoriteIds={favoriteInstructions}
@@ -3038,6 +2998,32 @@ export default function App() {
         onMergeBranch={mergeBranchFromBar}
         onStartDrag={drag.start}
         onOpenAll={() => setMobilePanel('instructions')}
+        inspectorAction={(
+          <button
+            type="button"
+            ref={tagsButtonRef}
+            className={
+              inspectorVisible && inspectorTab === 'tags'
+                ? 'wb-instruction-utility is-active'
+                : 'wb-instruction-utility'
+            }
+            data-inspector-entry="tags"
+            aria-pressed={inspectorVisible && inspectorTab === 'tags'}
+            aria-label="变量表"
+            title="打开或收起变量表"
+            onClick={() => {
+              if (inspectorVisible && inspectorTab === 'tags') {
+                setInspectorOpen(false)
+                setMobilePanel('none')
+                return
+              }
+              openInspector('tags')
+            }}
+          >
+            <TagIcon size={16} />
+            <span>变量表</span>
+          </button>
+        )}
       />
 
       {!coachDismissed && <CoachStrip onDismiss={dismissCoach} onStartDemo={startDemo} />}
@@ -3259,7 +3245,6 @@ export default function App() {
                 rungClipboardCount={clipboard?.kind === 'rungs' ? clipboard.rungs.length : 0}
                 onDeleteRung={removeRung}
                 onMoveRung={(rungId, delta) => commit(moveRung(program, rungId, delta))}
-                onMoveNode={(rungId, path, delta) => commit(moveNodeBy(program, rungId, path, delta))}
                 onInsertAt={insertAt}
                 onDeleteNode={removeNode}
                 onArmInsert={armInsert}

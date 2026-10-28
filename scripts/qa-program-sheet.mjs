@@ -308,8 +308,7 @@ await sleep(220)
 const keyboardReset = await sheetMetrics()
 assert(Math.abs(keyboardReset.frameWidth - 1360) <= 1, 'Home 键没有恢复默认宽度')
 
-await evaluate(`[...document.querySelectorAll('.wb-doc-action')]
-  .find((button) => button.textContent?.includes('变量表'))?.click()`)
+await evaluate(`document.querySelector('[data-inspector-entry="tags"]')?.click()`)
 await sleep(450)
 const splitView = await sheetMetrics()
 assert(splitView.paneWidth < initial.paneWidth, '打开属性栏后程序区没有让出空间')

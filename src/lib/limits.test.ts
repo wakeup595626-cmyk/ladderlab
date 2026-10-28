@@ -1,19 +1,19 @@
 import { describe, expect, it } from 'vitest'
-import { blankProgram } from '../engine/samples'
+import { starterProgram } from '../engine/samples'
 import { setProjectName, updateRungLabel, updateTag } from '../state/programOps'
 import { FIELD_LIMITS, utf8ByteLength } from './limits'
 import { MAX_IMPORT_BYTES, parseProgramText, serializeProgram } from './io'
 
 describe('工程文本字段上限', () => {
   it('工程名 64 可用，65 被拒绝且不写入程序', () => {
-    const source = blankProgram()
+    const source = starterProgram()
     const atLimit = setProjectName(source, 'P'.repeat(FIELD_LIMITS.programName))
     expect(atLimit.name).toHaveLength(FIELD_LIMITS.programName)
     expect(setProjectName(source, 'P'.repeat(FIELD_LIMITS.programName + 1))).toBe(source)
   })
 
   it('变量名 64 可用，65 被拒绝', () => {
-    const source = blankProgram()
+    const source = starterProgram()
     const tag = source.tags[0]
     const atLimit = updateTag(source, tag.id, { name: 'N'.repeat(FIELD_LIMITS.tagName) })
     expect(atLimit.tags[0].name).toHaveLength(FIELD_LIMITS.tagName)
@@ -21,7 +21,7 @@ describe('工程文本字段上限', () => {
   })
 
   it('变量注释 500 可用，501 被拒绝', () => {
-    const source = blankProgram()
+    const source = starterProgram()
     const tag = source.tags[0]
     const atLimit = updateTag(source, tag.id, { comment: 'C'.repeat(FIELD_LIMITS.tagComment) })
     expect(atLimit.tags[0].comment).toHaveLength(FIELD_LIMITS.tagComment)
@@ -29,7 +29,7 @@ describe('工程文本字段上限', () => {
   })
 
   it('程序段名称 120 可用，121 被拒绝', () => {
-    const source = blankProgram()
+    const source = starterProgram()
     const rung = source.rungs[0]
     const atLimit = updateRungLabel(source, rung.id, 'L'.repeat(FIELD_LIMITS.rungLabel))
     expect(atLimit.rungs[0].label).toHaveLength(FIELD_LIMITS.rungLabel)
@@ -37,7 +37,7 @@ describe('工程文本字段上限', () => {
   })
 
   it('即使绕过编辑函数，保存前也会拒绝非法字段，避免写出无法重开的工程', () => {
-    const source = blankProgram()
+    const source = starterProgram()
     expect(() => serializeProgram({ ...source, name: 'P'.repeat(65) })).toThrow('工程名')
     expect(() => serializeProgram({
       ...source,
@@ -76,7 +76,7 @@ describe('工程文本字段上限', () => {
   })
 
   it('导入时对地址和变量引用使用同一组上限', () => {
-    const source = blankProgram()
+    const source = starterProgram()
     const addressAtLimit = 'A'.repeat(FIELD_LIMITS.address)
     const referenceAtLimit = 'R'.repeat(FIELD_LIMITS.reference)
     const accepted = parseProgramText(JSON.stringify({

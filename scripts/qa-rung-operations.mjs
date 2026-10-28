@@ -266,6 +266,8 @@ function assert(condition, message) {
 
 await send('Page.enable')
 await send('Runtime.enable')
+// 后台标签页会把 CSS transition 冻在 0ms，悬停显影类断言会假失败。
+await send('Page.bringToFront').catch(() => {})
 await setViewport(1440, 1000)
 await reload(true)
 

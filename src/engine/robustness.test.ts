@@ -3,7 +3,7 @@ import { MAX_IMPORT_BYTES, parseProgramText, serializeProgram } from '../lib/io'
 import { addTag } from '../state/programOps'
 import { compile } from './compile'
 import { parseBitAddress, parseByteAddress } from './references'
-import { blankProgram } from './samples'
+import { starterProgram } from './samples'
 import { createRuntime, step, writeRuntimeValue } from './simulate'
 import type {
   CompareOp,
@@ -596,7 +596,7 @@ describe('工程导入边界', () => {
   })
 
   it('规范化工程名、变量地址和所有引用', () => {
-    const source = blankProgram()
+    const source = starterProgram()
     const first = source.rungs[0]
     const firstNode = first.nodes[0]
     if (firstNode.type !== 'contact') throw new Error('测试程序结构错误')
@@ -625,7 +625,7 @@ describe('工程导入边界', () => {
   })
 
   it('拒绝重复变量、程序段、输出和元件 ID', () => {
-    const source = blankProgram()
+    const source = starterProgram()
     const first = source.rungs[0]
     const expectError = (value: unknown, message: string) => {
       expect(() => parseProgramText(JSON.stringify(value))).toThrow(message)
@@ -664,7 +664,7 @@ describe('工程导入边界', () => {
   })
 
   it('拒绝普通触点沿用重复 ID，避免路径定位和编辑状态含糊', () => {
-    const source = blankProgram()
+    const source = starterProgram()
     const first = source.rungs[0]
     const data = {
       ...source,
@@ -682,7 +682,7 @@ describe('工程导入边界', () => {
   })
 
   it('拒绝过深并联和超长 PATTERN', () => {
-    const source = blankProgram()
+    const source = starterProgram()
     let deep: LadderNode = contact('deep-contact', 'NO', 'StartBtn')
     for (let depth = 0; depth < 34; depth += 1) {
       deep = { type: 'parallel', id: `deep-${depth}`, branches: [[deep]] }
@@ -704,7 +704,7 @@ describe('工程导入边界', () => {
   it('拒绝超过 5 MB 的工程文本和超长工程名、变量名、注释、程序段名', () => {
     expect(() => parseProgramText(' '.repeat(MAX_IMPORT_BYTES + 1))).toThrow('超过 5 MB')
 
-    const source = blankProgram()
+    const source = starterProgram()
     const reject = (value: unknown, message: string) => {
       expect(() => parseProgramText(JSON.stringify(value))).toThrow(message)
     }
@@ -734,7 +734,7 @@ describe('自动分配地址避让', () => {
   })
 
   it('导入后的空白工程仍然可以无损往返', () => {
-    const source = blankProgram()
+    const source = starterProgram()
     expect(parseProgramText(serializeProgram(source))).toEqual(source)
   })
 })

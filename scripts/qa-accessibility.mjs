@@ -284,10 +284,9 @@ for (const viewport of viewports) {
     check(`${label}/import-dialog-esc-focus`, importClosed.closed && importClosed.focusReturned, importClosed)
 
     const clickResult = await evaluate(`(() => {
-      const buttons = [...document.querySelectorAll('.wb-doc-action')];
-      const target = buttons.find((button) => button.textContent?.trim() === '变量表');
+      const target = document.querySelector('[data-inspector-entry="tags"]');
       if (target) target.click();
-      return { labels: buttons.map((button) => button.textContent?.trim()), clicked: Boolean(target) };
+      return { label: target?.textContent?.trim() ?? null, clicked: Boolean(target) };
     })()`)
     if (process.env.LADDERLAB_DEBUG) console.log('debug doc click', clickResult)
     await sleep(420)

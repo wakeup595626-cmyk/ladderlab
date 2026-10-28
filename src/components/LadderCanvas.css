@@ -273,25 +273,6 @@
   opacity: 0.72;
 }
 
-.ll-selected-chip {
-  max-width: 190px;
-  min-width: 0;
-  flex: 0 1 auto;
-  overflow: hidden;
-  padding-left: 8px;
-  border-left: 1px solid var(--border);
-  color: var(--muted);
-  font: 500 11.5px/1.3 var(--sans);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.ll-selected-chip.is-branch-tip {
-  border-left-color: var(--accent);
-  color: var(--accent);
-  font-weight: 600;
-}
-
 .ll-power-state {
   display: inline-flex;
   align-items: center;
@@ -326,15 +307,22 @@
 
 .ll-rung-menu > summary {
   display: grid;
-  width: 32px;
-  height: 32px;
+  width: 34px;
+  height: 34px;
   padding: 0;
   place-items: center;
-  border: 1px solid transparent;
+  border: 1px solid var(--control);
   border-radius: var(--radius-control);
-  color: var(--muted);
+  background: var(--surface);
+  box-shadow: 0 1px 2px rgba(21, 24, 22, 0.06);
+  color: var(--text);
   cursor: pointer;
   list-style: none;
+  transition:
+    background-color var(--dur-press) var(--ease-out),
+    border-color var(--dur-press) var(--ease-out),
+    color var(--dur-press) var(--ease-out),
+    box-shadow var(--dur-press) var(--ease-out);
 }
 
 .ll-rung-menu > summary::-webkit-details-marker {
@@ -344,8 +332,9 @@
 .ll-rung-menu > summary:hover,
 .ll-rung-menu > summary:focus-visible,
 .ll-rung-menu[open] > summary {
-  border-color: var(--control);
-  background: var(--surface);
+  border-color: var(--accent);
+  background: var(--accent-wash);
+  box-shadow: 0 2px 6px rgba(21, 24, 22, 0.12);
   color: var(--accent-ink);
   outline: none;
 }
@@ -927,10 +916,6 @@
 
   .ll-power-state {
     margin-left: auto;
-  }
-
-  .ll-selected-chip {
-    display: none;
   }
 
   .ll-node-name,

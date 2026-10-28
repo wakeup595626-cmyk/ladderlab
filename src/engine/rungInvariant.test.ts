@@ -7,7 +7,7 @@ import {
   isBlankRung,
   programsEqualIgnoringPlaceholder,
 } from './rungInvariant'
-import { blankProgram, buildSample } from './samples'
+import { starterProgram, buildSample } from './samples'
 import type { ContactNode, Program } from './types'
 import { parseProgramText, serializeProgram } from '../lib/io'
 import { countProgramElements } from '../lib/projectSummary'
@@ -34,7 +34,7 @@ function contact(id: string, tag = 'StartBtn'): ContactNode {
 
 describe('程序段末尾占位不变量', () => {
   it('空工程规范化为恰好一个空白占位段', () => {
-    const empty = { ...blankProgram(), rungs: [] }
+    const empty = { ...starterProgram(), rungs: [] }
 
     const normalized = ensureTrailingBlankRung(empty)
 
@@ -44,7 +44,7 @@ describe('程序段末尾占位不变量', () => {
   })
 
   it('已经有唯一末尾占位段时原对象不变，避免制造假的撤销记录', () => {
-    const program = blankProgram()
+    const program = starterProgram()
 
     expect(ensureTrailingBlankRung(program)).toBe(program)
   })
@@ -64,7 +64,7 @@ describe('程序段末尾占位不变量', () => {
   })
 
   it('多个空白段只保留一个，并移到末尾', () => {
-    const program = blankProgram()
+    const program = starterProgram()
     const content = contentRungs(program)
     const firstBlank = createBlankRung()
     const trailingBlank = createBlankRung()
@@ -81,7 +81,7 @@ describe('程序段末尾占位不变量', () => {
   })
 
   it('在占位段插入触点后自动生成下一段占位', () => {
-    const program = blankProgram()
+    const program = starterProgram()
     const placeholder = program.rungs.at(-1)!
     const inserted = insertNodeAt(
       program,
@@ -98,7 +98,7 @@ describe('程序段末尾占位不变量', () => {
   })
 
   it('给占位段填写输出或标题后，它转为内容段并补新占位', () => {
-    const program = blankProgram()
+    const program = starterProgram()
     const placeholder = program.rungs.at(-1)!
     const withOutput = ensureTrailingBlankRung(
       updateOutput(program, placeholder.id, { tag: 'Motor' }),
@@ -106,7 +106,7 @@ describe('程序段末尾占位不变量', () => {
     expect(contentRungs(withOutput)).toHaveLength(contentRungs(program).length + 1)
     expectSingleTrailingPlaceholder(withOutput)
 
-    const another = blankProgram()
+    const another = starterProgram()
     const anotherPlaceholder = another.rungs.at(-1)!
     const withTitle = ensureTrailingBlankRung(
       updateRungLabel(another, anotherPlaceholder.id, '手动补充说明'),
@@ -116,7 +116,7 @@ describe('程序段末尾占位不变量', () => {
   })
 
   it('删除最后一个内容段后仍保留可插入的新程序段', () => {
-    const program = blankProgram()
+    const program = starterProgram()
     const content = contentRungs(program)[0]
 
     const deleted = ensureTrailingBlankRung(deleteRung(program, content.id))
@@ -126,7 +126,7 @@ describe('程序段末尾占位不变量', () => {
   })
 
   it('占位段不能被复制、创建副本或移动', () => {
-    const program = blankProgram()
+    const program = starterProgram()
     const placeholder = program.rungs.at(-1)!
 
     expect(duplicateRung(program, placeholder.id)).toBe(program)

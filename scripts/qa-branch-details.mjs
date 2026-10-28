@@ -653,7 +653,7 @@ const beforeGutterClear = await evaluate(`({
   selected: document.querySelectorAll('.ll-node.is-selected').length,
   editor: !!document.querySelector('.qe-panel'),
 })`)
-await evaluate(`document.querySelector('.wb-documentbar')
+await evaluate(`document.querySelector('.wb-instruction-intro')
   ?.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0 }))`)
 await sleep(240)
 const afterHeaderClear = await evaluate(`({

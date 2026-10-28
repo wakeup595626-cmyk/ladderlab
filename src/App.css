@@ -523,14 +523,6 @@
   letter-spacing: 0.04em;
 }
 
-.instruction-favorite-hint {
-  margin: 4px 0 0;
-  padding: 0 6px;
-  color: var(--faint);
-  font-size: 11px;
-  line-height: 1.4;
-}
-
 .instruction-row-wrap {
   display: flex;
   align-items: center;
@@ -1553,13 +1545,6 @@
   opacity: 0.42;
 }
 
-.form-note {
-  margin: 0;
-  color: var(--faint);
-  font-size: 11.5px;
-  line-height: 1.5;
-}
-
 .panel-label {
   color: var(--faint);
   font-size: 11px;
@@ -1601,13 +1586,6 @@
   color: var(--text);
   font-size: 14px;
   font-weight: 600;
-}
-
-.panel-note {
-  margin: 0;
-  color: var(--muted);
-  font-size: 11.5px;
-  line-height: 1.5;
 }
 
 .tag-list {
@@ -2791,17 +2769,6 @@
   color: var(--text);
 }
 
-.qe-note {
-  margin: 0;
-  padding: 7px 9px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: var(--raised);
-  color: var(--muted);
-  font-size: 11.5px;
-  line-height: 1.5;
-}
-
 .qe-branches {
   display: grid;
   gap: 4px;
@@ -3642,8 +3609,7 @@ body[data-drag-kind] * {
 .wb-shell .tags-help,
 .wb-shell .instance-card,
 .wb-shell .diagnostic,
-.wb-shell .diagnostic-help,
-.wb-shell .qe-note {
+.wb-shell .diagnostic-help {
   border-radius: 0;
   box-shadow: none;
 }
