@@ -300,6 +300,9 @@ assert(
 )
 
 // 占位段可以插入元件，但不能被拖动、剪切、复制、移动、创建副本或删除。
+// 它的 + 默认收起，只在真正悬停插入点时显影，避免空程序段永远挂着一个小方框。
+await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 2, y: 2, button: 'none' })
+await sleep(240)
 const placeholderGuard = await evaluate(`(() => {
   const placeholder = document.querySelector('.ll-rung.is-placeholder')
   const drag = placeholder?.querySelector('.ll-rung-drag')
@@ -308,12 +311,42 @@ const placeholderGuard = await evaluate(`(() => {
   return {
     dragDisabled: drag?.disabled === true,
     dragHint: drag?.getAttribute('aria-label') ?? '',
-    plusVisible: Boolean(plus) && Number(plusStyle?.opacity) > 0 && plusStyle?.pointerEvents !== 'none',
+    plusIdleHidden: Boolean(plus)
+      && Number(plusStyle?.opacity) === 0
+      && plusStyle?.pointerEvents === 'none',
   }
 })()`)
 assert(placeholderGuard.dragDisabled, '末尾占位段仍可拖动')
 assert(placeholderGuard.dragHint.includes('自动生成'), '末尾占位段缺少不可拖动说明')
-assert(placeholderGuard.plusVisible, '末尾占位段的 + 不可见或不可点击')
+assert(placeholderGuard.plusIdleHidden, '末尾占位段的 + 在静止状态仍然可见')
+
+const placeholderPlus = await pointOf('.ll-rung.is-placeholder .ll-slot-plus')
+if (!placeholderPlus) throw new Error('末尾占位段没有渲染插入点')
+await send('Input.dispatchMouseEvent', {
+  type: 'mouseMoved',
+  x: placeholderPlus.x,
+  y: placeholderPlus.y,
+  button: 'none',
+})
+await sleep(260)
+const placeholderHover = await evaluate(`(() => {
+  const plus = document.querySelector('.ll-rung.is-placeholder .ll-slot-plus')
+  if (!plus) return null
+  const style = getComputedStyle(plus)
+  const box = plus.getBoundingClientRect()
+  const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2)
+  return {
+    opacity: Number(style.opacity),
+    pointerEvents: style.pointerEvents,
+    hit: hit?.closest('.ll-slot-plus') === plus,
+  }
+})()`)
+assert(
+  placeholderHover && placeholderHover.opacity > 0
+    && placeholderHover.pointerEvents !== 'none'
+    && placeholderHover.hit,
+  `末尾占位段的 + 悬停后仍不可见或不可点击：${JSON.stringify(placeholderHover)}`,
+)
 
 await click('.ll-rung-menu summary', ids.length - 1)
 const placeholderMenu = await evaluate(`(() => {

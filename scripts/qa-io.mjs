@@ -8,6 +8,11 @@ const APP_URL = process.env.LADDERLAB_URL ?? DEFAULT_QA_APP_URL
 const downloadDir = resolve('docs/qa/io')
 const complexFixturePath = resolve('scripts/fixtures/qa-complex.json')
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms))
+const isBlankRung = (rung) => rung?.nodes?.length === 0
+  && rung?.output?.kind === 'COIL'
+  && !String(rung?.output?.tag ?? '').trim()
+  && !String(rung?.label ?? '').trim()
+const contentRungCount = (program) => program.rungs.filter((rung) => !isBlankRung(rung)).length
 
 await mkdir(downloadDir, { recursive: true })
 for (const name of await readdir(downloadDir)) {
@@ -314,7 +319,7 @@ const savedDraft = after.saved ? JSON.parse(after.saved) : null
 const saved = savedDraft?.program ?? savedDraft
 checks['import/dialog-opens'] = dialogOpen
 checks['import/preview-matches'] = preview.name === exported.name
-  && Number(preview.metrics[0]) === exported.rungs.length
+  && Number(preview.metrics[0]) === contentRungCount(exported)
   && Number(preview.metrics[1]) === exported.tags.length
 checks['import/no-dialog-overflow'] = !preview.overflow && !preview.error
 checks['import/replaces-current-project'] = after.name === exported.name
@@ -378,8 +383,10 @@ await waitFor(() => evaluate(`!document.querySelector('.project-import-dialog')`
 await sleep(900)
 const complexProgram = await evaluate(`(() => ({
   name: document.querySelector('#project-name')?.value,
-  rungs: document.querySelectorAll('.ll-rung').length,
-  labels: [...document.querySelectorAll('.ll-rung-index')].map((item) => item.textContent),
+  rungs: document.querySelectorAll('.ll-rung:not(.is-placeholder)').length,
+  labels: [...document.querySelectorAll('.ll-rung:not(.is-placeholder) .ll-rung-index')]
+    .map((item) => item.textContent),
+  placeholders: document.querySelectorAll('.ll-rung.is-placeholder').length,
   addresses: [...document.querySelectorAll('.ll-node-address, .ll-output-address, .ll-box-external-value')].map((item) => item.textContent),
   hasMove: document.body.innerText.includes('MOVE'),
 }))()`)
@@ -387,6 +394,7 @@ checks['complex/import-preview'] = complexPreview.name === '复杂程序 · 多�
   && Number(complexPreview.metrics[0]) === 3
   && !complexPreview.error
 checks['complex/three-labelled-rungs'] = complexProgram.rungs === 3
+  && complexProgram.placeholders === 1
   && JSON.stringify(complexProgram.labels) === JSON.stringify(['程序段 1', '程序段 2', '程序段 3'])
 checks['complex/move-and-addresses-rendered'] = complexProgram.hasMove
   && complexProgram.addresses.includes('%I0.0')

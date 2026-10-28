@@ -4635,7 +4635,7 @@ body[data-drag-kind] {
 }
 
 .wb-instruction-scroll {
-  width: 40px;
+  width: 44px;
   height: 46px;
   border: 1px solid var(--control);
   border-radius: 9px;
