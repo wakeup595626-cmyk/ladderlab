@@ -365,9 +365,7 @@
   box-shadow: 0 12px 26px rgba(21, 24, 22, 0.14);
 }
 
-.ll-rung-menu-panel button,
-.ll-add-rung,
-.ll-empty-board button {
+.ll-rung-menu-panel button {
   border: 1px solid transparent;
   border-radius: var(--radius-control);
   background: transparent;
@@ -400,11 +398,7 @@
 }
 
 .ll-rung-menu-panel button:hover:not(:disabled),
-.ll-rung-menu-panel button:focus-visible:not(:disabled),
-.ll-add-rung:hover,
-.ll-add-rung:focus-visible,
-.ll-empty-board button:hover,
-.ll-empty-board button:focus-visible {
+.ll-rung-menu-panel button:focus-visible:not(:disabled) {
   border-color: var(--control);
   background: var(--accent-wash);
   color: var(--accent-ink);
@@ -892,83 +886,6 @@
   stroke-linejoin: round;
 }
 
-.ll-add-rung {
-  display: flex;
-  min-height: 40px;
-  align-items: center;
-  gap: 7px;
-  align-self: stretch;
-  padding: 8px 14px;
-  border: 1px dashed var(--control);
-  background: var(--surface);
-  color: var(--muted);
-  font-size: 12px;
-  text-align: left;
-}
-
-.ll-add-rung span {
-  display: inline-grid;
-  width: 24px;
-  height: 24px;
-  flex: 0 0 auto;
-  place-items: center;
-  border-radius: 50%;
-  background: var(--accent-wash);
-  color: var(--accent-ink);
-  font-size: 16px;
-  font-weight: 700;
-}
-
-.ll-add-rung:hover,
-.ll-add-rung:focus-visible {
-  border-style: solid;
-  border-color: var(--accent);
-}
-
-.ll-empty-board {
-  display: grid;
-  min-height: 320px;
-  padding: 36px 24px;
-  place-items: center;
-  align-content: center;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-card);
-  background: var(--surface);
-  text-align: center;
-}
-
-.ll-empty-symbol {
-  margin-bottom: 14px;
-  color: var(--accent);
-  font-family: var(--mono);
-  font-size: 25px;
-  letter-spacing: 0.08em;
-}
-
-.ll-empty-board h3 {
-  margin: 0 0 7px;
-  color: var(--text);
-  font-size: 15px;
-  font-weight: 600;
-}
-
-.ll-empty-board p {
-  max-width: 360px;
-  margin: 0 0 20px;
-  color: var(--muted);
-  font-size: 12px;
-  line-height: 1.6;
-}
-
-.ll-empty-board button {
-  min-height: 36px;
-  padding: 7px 16px;
-  border-color: var(--control);
-  background: var(--surface);
-  color: var(--accent-ink);
-  font-size: 12px;
-}
-
 @media (max-width: 720px) {
   .ll-canvas {
     gap: 9px;
@@ -1032,10 +949,6 @@
     font-size: 12px;
   }
 
-  .ll-empty-board {
-    min-height: 260px;
-    padding: 28px 18px;
-  }
 }
 
 @media (max-width: 560px) {
@@ -1070,14 +983,15 @@
     font-size: 12.5px;
   }
 
-  .ll-add-rung,
-  .ll-empty-board button {
-    min-height: 44px;
-  }
-
   .ll-node-grip {
     opacity: 0.55;
   }
+}
+
+/* 占位段通常没有选中元件，仍要让唯一的插入点常显；触屏也能直接点中。 */
+.ll-rung.is-placeholder .ll-slot-plus {
+  opacity: 1 !important;
+  pointer-events: all !important;
 }
 
 /* ── 插入点菜单 ───────────────────────────────────────────────

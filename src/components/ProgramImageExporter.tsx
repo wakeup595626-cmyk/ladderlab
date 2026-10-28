@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Program, Selection } from '../engine/types'
 import { createRuntime } from '../engine/simulate'
+import { contentRungs } from '../engine/rungInvariant'
 import LadderCanvas from './LadderCanvas'
 import './ProgramImageExporter.css'
 
@@ -423,6 +424,10 @@ export default function ProgramImageExporter({
   const documentRef = useRef<HTMLDivElement>(null)
   const [stageWidth, setStageWidth] = useState(INITIAL_STAGE_WIDTH)
   const runtime = useMemo(() => createRuntime(program), [program])
+  const exportProgram = useMemo(
+    () => ({ ...program, rungs: contentRungs(program) }),
+    [program],
+  )
   const selection: Selection | null = null
 
   useEffect(() => {
@@ -438,7 +443,7 @@ export default function ProgramImageExporter({
         if (!stage) throw new Error('无法创建图片画布')
         const diagrams = Array.from(stage.querySelectorAll<SVGSVGElement>('.ll-diagram'))
         if (diagrams.length === 0) throw new Error('当前工程没有可导出的程序段')
-        if (diagrams.length !== program.rungs.length) {
+        if (diagrams.length !== exportProgram.rungs.length) {
           throw new Error('程序段尚未完成绘制，请重试')
         }
 
@@ -457,12 +462,12 @@ export default function ProgramImageExporter({
         const prepared: PreparedRung[] = []
         const currentDiagrams = Array.from(stage.querySelectorAll<SVGSVGElement>('.ll-diagram'))
         for (const [index, svg] of currentDiagrams.entries()) {
-          const rung = program.rungs[index]
+          const rung = exportProgram.rungs[index]
           if (!rung) break
           const result = await prepareRung(svg, `程序段 ${index + 1}`, rung.label)
           if (result) prepared.push(result)
         }
-        if (prepared.length !== program.rungs.length) {
+        if (prepared.length !== exportProgram.rungs.length) {
           throw new Error('有程序段没有绘制内容，无法生成 PNG')
         }
 
@@ -491,7 +496,7 @@ export default function ProgramImageExporter({
         style={{ width: `${stageWidth}px` }}
       >
         <LadderCanvas
-          program={program}
+          program={exportProgram}
           runtime={runtime}
           selection={selection}
           onSelect={noop}
@@ -502,7 +507,6 @@ export default function ProgramImageExporter({
           onDeleteRung={noop}
           onMoveRung={noop}
           onMoveNode={noop}
-          onAddRung={noop}
         />
       </div>
     </div>

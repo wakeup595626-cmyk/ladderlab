@@ -579,6 +579,22 @@ describe('16 位仿真语义', () => {
 })
 
 describe('工程导入边界', () => {
+  it('允许 1000 个内容段带末尾占位段往返，并拒绝 1001 个内容段', () => {
+    const manyRungs = (count: number) => Array.from({ length: count }, (_, index) => rung(
+      'r' + index,
+      [],
+      output('COIL', '', { id: 'out-' + index }),
+    ))
+
+    const atLimit = program([], manyRungs(1000))
+    const roundTrip = parseProgramText(serializeProgram(atLimit))
+    expect(roundTrip.rungs).toHaveLength(1001)
+    expect(roundTrip.rungs.at(-1)).toMatchObject({ label: '', nodes: [], output: { kind: 'COIL', tag: '' } })
+    expect(roundTrip.rungs.slice(0, -1).every((item) => item.label.length > 0)).toBe(true)
+
+    expect(() => parseProgramText(JSON.stringify(program([], manyRungs(1001))))).toThrow('程序段数量超过上限 1000')
+  })
+
   it('规范化工程名、变量地址和所有引用', () => {
     const source = blankProgram()
     const first = source.rungs[0]

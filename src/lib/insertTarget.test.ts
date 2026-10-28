@@ -117,6 +117,21 @@ describe('收藏指令插入目标', () => {
     const empty = { ...program, rungs: [] }
 
     expect(resolveFavoriteInsertTarget(empty, null)).toBeNull()
-    expect(describeFavoriteInsertTarget(empty, null)).toBe('先添加程序段')
+    expect(describeFavoriteInsertTarget(empty, null)).toBe('没有可用的程序段')
+  })
+
+  it('末尾占位段使用「新程序段」而不是虚构的段号', () => {
+    const program = buildSample('sequence')
+    if (!program) throw new Error('缺少顺序启动示例')
+    const placeholder = program.rungs.at(-1)
+    if (!placeholder) throw new Error('缺少末尾占位段')
+
+    const target = resolveFavoriteInsertTarget(program, null, placeholder.id)
+
+    expect(target?.rungId).toBe(placeholder.id)
+    expect(target?.rungIndex).toBe(program.rungs.length - 1)
+    expect(target?.isPlaceholder).toBe(true)
+    expect(favoriteTargetSegmentLabel(target!)).toBe('新程序段')
+    expect(describeFavoriteInsertTarget(program, target)).toBe('段末（输出前）')
   })
 })

@@ -6,6 +6,7 @@ import type {
   ProfileId,
   TagKind,
 } from '../engine/types'
+import { contentRungs, ensureTrailingBlankRung } from '../engine/rungInvariant'
 import { FIELD_LIMITS, programTextFieldIssues, utf8ByteLength } from './limits'
 
 const CONTACT_KINDS: ContactKind[] = ['NO', 'NC', 'P', 'N', 'CMP']
@@ -98,7 +99,8 @@ export function parseProgram(input: unknown): Program {
   const rungs = data.rungs
   if (!Array.isArray(rungs)) fail('rungs 必须是数组。')
   if (tags.length > MAX_TAGS) fail(`变量数量超过上限 ${MAX_TAGS}。`)
-  if (rungs.length > MAX_RUNGS) fail(`程序段数量超过上限 ${MAX_RUNGS}。`)
+  // 保存的工程始终带一个末尾占位段，因此文件允许比内容段上限多 1 段。
+  if (rungs.length > MAX_RUNGS + 1) fail(`程序段数量超过上限 ${MAX_RUNGS}。`)
   const tagIds = new Set<string>()
   const tagNames = new Set<string>()
 
@@ -225,7 +227,7 @@ export function parseProgram(input: unknown): Program {
   }
   parsedRungs.forEach((rung) => validateNodes(rung.nodes))
 
-  return {
+  const normalized = ensureTrailingBlankRung({
     schema: 1,
     name: typeof data.name === 'string' && data.name.trim()
       ? capped(data.name.trim(), FIELD_LIMITS.programName, '工程名', 'name')
@@ -233,7 +235,11 @@ export function parseProgram(input: unknown): Program {
     profile,
     tags: parsedTags,
     rungs: parsedRungs,
+  })
+  if (contentRungs(normalized).length > MAX_RUNGS) {
+    fail(`程序段数量超过上限 ${MAX_RUNGS}。`)
   }
+  return normalized
 }
 
 export function parseProgramText(text: string): Program {

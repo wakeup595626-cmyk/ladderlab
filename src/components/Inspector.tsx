@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react'
 import { getProfile, supportsContact, supportsOutput } from '../engine/profiles'
 import { normalizeReference } from '../engine/references'
+import { contentRungs } from '../engine/rungInvariant'
 import type {
   CompileResult,
   ContactKind,
@@ -90,9 +91,9 @@ function findPath(chain: LadderNode[], nodeId: string): number[] | null {
 
 /** 与画布上的编号保持一致：属性面板永远用「程序段 N」指代当前所在的段。 */
 function rungCaption(program: Program, rungId: string, label: string): string {
-  const index = program.rungs.findIndex((item) => item.id === rungId)
+  const index = contentRungs(program).findIndex((item) => item.id === rungId)
   const title = label.trim()
-  return `程序段 ${index < 0 ? '?' : index + 1}${title ? ' · ' + title : ''}`
+  return `${index < 0 ? '新程序段' : '程序段 ' + (index + 1)}${title ? ' · ' + title : ''}`
 }
 
 function ContactProperties({
@@ -116,7 +117,7 @@ function ContactProperties({
 }) {
   const boolTags = program.tags.filter((tag) => tag.kind === 'BOOL')
   const intTags = program.tags.filter((tag) => tag.kind === 'INT')
-  const instances = program.rungs
+  const instances = contentRungs(program)
     .map((rung) => rung.output)
     .filter((output) => output.kind === 'TON' || output.kind === 'TOF' || output.kind === 'TONR' || output.kind === 'CTU')
   const boolRefs = [
@@ -237,7 +238,7 @@ function TagsPanel({
   onSetInt: (name: string, value: number) => void
 }) {
   const [expandedTag, setExpandedTag] = useState<string | null>(null)
-  const instances = program.rungs
+  const instances = contentRungs(program)
     .map((rung) => rung.output)
     .filter((output) => {
       const name = normalizeReference(output.tag)

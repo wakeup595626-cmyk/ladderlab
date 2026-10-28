@@ -4,7 +4,7 @@ import { getProfile } from '../engine/profiles'
 import type { ContactKind, OutputKind, ProfileId, Program } from '../engine/types'
 import type { DragPayload } from '../lib/dragTypes'
 import { favoriteInstructionId } from '../lib/instructionFavorites'
-import type { FavoriteInsertTarget } from '../lib/insertTarget'
+import { favoriteTargetSegmentLabel, type FavoriteInsertTarget } from '../lib/insertTarget'
 import { INSTRUCTIONS, isInstructionAllowed, type InstructionFamily } from './instructionCatalog'
 import {
   BookIcon,
@@ -14,7 +14,6 @@ import {
   GripIcon,
   HelpIcon,
   LadderIcon,
-  PlusIcon,
   SearchIcon,
   StarFilledIcon,
   StarIcon,
@@ -37,7 +36,6 @@ export interface ProjectSidebarProps {
   onInsertContact: (kind: ContactKind) => void
   onChangeOutput: (kind: OutputKind) => void
   onStartDrag: (event: React.PointerEvent<HTMLElement>, payload: DragPayload, label: string) => void
-  onAddRung: () => void
   onOpenLibrary: () => void
   onOpenTags: () => void
   onOpenGuide: () => void
@@ -60,7 +58,6 @@ export default function ProjectSidebar({
   onInsertContact,
   onChangeOutput,
   onStartDrag,
-  onAddRung,
   onOpenLibrary,
   onOpenTags,
   onOpenGuide,
@@ -68,9 +65,7 @@ export default function ProjectSidebar({
 }: ProjectSidebarProps) {
   const [query, setQuery] = useState('')
   const activeProfile = getProfile(profile)
-  const segmentLabel = insertTarget
-    ? '程序段 ' + (insertTarget.rungIndex + 1)
-    : '目标程序段'
+  const segmentLabel = insertTarget ? favoriteTargetSegmentLabel(insertTarget) : '目标程序段'
   const normalizedQuery = query.trim().toLocaleLowerCase()
   const visibleInstructions = normalizedQuery
     ? INSTRUCTIONS.filter((entry) =>
@@ -168,15 +163,6 @@ export default function ProjectSidebar({
       <section className="sidebar-instructions" aria-labelledby="instruction-heading">
         <div className="instruction-head">
           <h2 id="instruction-heading">{variant === 'instructions' ? '按分类查找' : '指令'}</h2>
-          <button
-            type="button"
-            className="icon-button sidebar-add-rung"
-            onClick={onAddRung}
-            aria-label="新增程序段"
-            title="新增程序段"
-          >
-            <PlusIcon size={17} />
-          </button>
         </div>
 
         <label className="sidebar-search">

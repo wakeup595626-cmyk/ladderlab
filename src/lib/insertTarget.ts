@@ -1,9 +1,13 @@
+import { contentRungs, isBlankRung } from '../engine/rungInvariant'
 import type { LadderNode, Program, Selection } from '../engine/types'
 
 /** 收藏指令点击时使用的明确落点：程序段、线路、下标，以及给用户看的锚点。 */
 export interface FavoriteInsertTarget {
   rungId: string
   rungIndex: number
+  /** 画布与下拉框中给用户看的编号；末尾占位段固定为「新程序段」。 */
+  segmentLabel: string
+  isPlaceholder: boolean
   chain: number[]
   index: number
   anchor:
@@ -80,9 +84,14 @@ export function resolveFavoriteInsertTarget(
   if (!rung) return null
 
   const rungIndex = program.rungs.indexOf(rung)
+  const contentIndex = contentRungs(program).findIndex((item) => item.id === rung.id)
+  const segmentLabel = contentIndex >= 0 ? '程序段 ' + (contentIndex + 1) : '新程序段'
+  const isPlaceholder = isBlankRung(rung)
   const end = (): FavoriteInsertTarget => ({
     rungId: rung.id,
     rungIndex,
+    segmentLabel,
+    isPlaceholder,
     chain: [],
     index: rung.nodes.length,
     anchor: { type: 'end' },
@@ -102,6 +111,8 @@ export function resolveFavoriteInsertTarget(
       return {
         rungId: rung.id,
         rungIndex,
+        segmentLabel,
+        isPlaceholder,
         chain: [...selection.wire.chain],
         index: wireIndex,
         anchor: { type: 'wire', index: wireIndex },
@@ -116,6 +127,8 @@ export function resolveFavoriteInsertTarget(
     return {
       rungId: rung.id,
       rungIndex,
+      segmentLabel,
+      isPlaceholder,
       chain,
       index: last + 1,
       anchor: { type: 'element', path: [...selection.path] },
@@ -130,9 +143,9 @@ export function describeFavoriteInsertTarget(
   program: Program,
   target: FavoriteInsertTarget | null,
 ): string {
-  if (!target) return '先添加程序段'
+  if (!target) return '没有可用的程序段'
   const rung = program.rungs.find((item) => item.id === target.rungId)
-  if (!rung) return '先添加程序段'
+  if (!rung) return '没有可用的程序段'
 
   const prefix = branchPrefix(target.chain)
   if (target.anchor.type === 'end') return '段末（输出前）'
@@ -151,5 +164,5 @@ export function describeFavoriteInsertTarget(
 
 /** 通知栏里统一使用「程序段 N」的编号。 */
 export function favoriteTargetSegmentLabel(target: FavoriteInsertTarget): string {
-  return '程序段 ' + (target.rungIndex + 1)
+  return target.segmentLabel
 }

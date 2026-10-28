@@ -364,11 +364,20 @@ const nestedFrameGeometry = await evaluate(`(() => {
   return [...document.querySelectorAll('.ll-parallel[data-split-inherited="true"]')].map((parallel) => ({
     nodeId: parallel.getAttribute('data-node-id'),
     frame: box(parallel.querySelector(':scope > .ll-branch-frame')),
+    untrimmedFrameHeight: Number(
+      parallel.querySelector(':scope > .ll-branch-frame')?.getAttribute('data-frame-untrimmed-height'),
+    ),
     entry: box(parallel.querySelector(':scope > [data-parallel-entry]')),
     join: box(parallel.querySelector(':scope > [data-parallel-join]')),
   }))
 })()`)
 const nestedFramePadding = 7
+const trimmedFrameRatio = 2 / 3
+const framesTrimmedToTwoThirds = nestedFrameGeometry.length > 0
+  && nestedFrameGeometry.every(({ frame, untrimmedFrameHeight }) => (
+    frame && Number.isFinite(untrimmedFrameHeight) && untrimmedFrameHeight > 0
+    && Math.abs(frame.bottom - frame.top - untrimmedFrameHeight * trimmedFrameRatio) < 0.1
+  ))
 const nestedFramesContainInheritedWires = nestedFrameGeometry.length > 0
   && nestedFrameGeometry.every(({ frame, entry, join }) => (
     frame && entry && join
@@ -377,6 +386,10 @@ const nestedFramesContainInheritedWires = nestedFrameGeometry.length > 0
   ))
 const rails = await evaluate(`(() => ({
   count: document.querySelectorAll('.ll-rail').length,
+  rungCount: document.querySelectorAll('.ll-rung').length,
+  countsPerDiagram: [...document.querySelectorAll('.ll-diagram')].map(
+    (diagram) => diagram.querySelectorAll('.ll-rail').length,
+  ),
   rightRail: [...document.querySelectorAll('.ll-rail')].filter((rail) => {
     const diagram = rail.closest('.ll-diagram')
     if (!diagram) return false
@@ -393,7 +406,14 @@ check('branch/frame-surrounds-inherited-split', nestedFramesContainInheritedWire
   nestedFrameGeometry,
   nestedFramePadding,
 })
-check('rail/only-left-power-rail', rails.count === 1 && rails.rightRail === 0, rails)
+check('branch/frame-trimmed-to-two-thirds', framesTrimmedToTwoThirds, {
+  nestedFrameGeometry,
+  trimmedFrameRatio,
+})
+check('rail/only-left-power-rail', rails.rungCount > 0
+  && rails.count === rails.rungCount
+  && rails.countsPerDiagram.every((count) => count === 1)
+  && rails.rightRail === 0, rails)
 console.log('QA branch: draft-created')
 
 // 并联虚线框只在选中或键盘聚焦时出现；悬停本身不得显框，点空白后必须消失。
@@ -728,14 +748,41 @@ const mobile = await evaluate(`(() => {
   const rung = document.querySelector('.ll-rung')
   if (!canvas || !rung) return { present: false }
   const rect = rung.getBoundingClientRect()
+  const overflowingElements = [...document.querySelectorAll('body *')]
+    .filter((element) => {
+      const box = element.getBoundingClientRect()
+      return box.right > innerWidth + 1 || box.left < -1
+    })
+    .slice(0, 12)
+    .map((element) => ({
+      tag: element.tagName,
+      cls: String(element.getAttribute('class') ?? ''),
+      left: Math.round(element.getBoundingClientRect().left * 10) / 10,
+      right: Math.round(element.getBoundingClientRect().right * 10) / 10,
+    }))
   return {
     present: true,
+    rungCount: document.querySelectorAll('.ll-rung').length,
     railCount: document.querySelectorAll('.ll-rail').length,
+    countsPerDiagram: [...document.querySelectorAll('.ll-diagram')].map(
+      (diagram) => diagram.querySelectorAll('.ll-rail').length,
+    ),
+    rightRail: [...document.querySelectorAll('.ll-rail')].filter((rail) => {
+      const diagram = rail.closest('.ll-diagram')
+      if (!diagram) return false
+      return rail.getBoundingClientRect().left > diagram.getBoundingClientRect().left + diagram.getBoundingClientRect().width * 0.75
+    }).length,
     fits: rect.left >= -1 && rect.right <= innerWidth + 1,
+    innerWidth,
+    scrollWidth: document.documentElement.scrollWidth,
     bodyOverflow: document.documentElement.scrollWidth <= innerWidth + 1,
+    overflowingElements,
   }
 })()`)
-check('mobile/branch-details-fit', mobile.present && mobile.railCount === 1
+check('mobile/branch-details-fit', mobile.present
+  && mobile.railCount === mobile.rungCount
+  && mobile.countsPerDiagram.every((count) => count === 1)
+  && mobile.rightRail === 0
   && mobile.fits && mobile.bodyOverflow, mobile)
 await screenshot('docs/qa/mobile-branch-details.png')
 

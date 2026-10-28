@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react'
+import { contentRungs } from '../engine/rungInvariant'
 import type { Program } from '../engine/types'
 import { FIELD_LIMITS } from '../lib/limits'
 import type { SaveNamedProjectResult, SavedProject } from '../lib/projectLibrary'
@@ -178,7 +179,7 @@ function SaveProjectDialogContent({
           </label>
 
           <dl className="save-project-metrics">
-            <div><dt>程序段</dt><dd>{program.rungs.length}</dd></div>
+            <div><dt>程序段</dt><dd>{contentRungs(program).length}</dd></div>
             <div><dt>变量</dt><dd>{program.tags.length}</dd></div>
             <div><dt>元件</dt><dd>{elementCount}</dd></div>
           </dl>

@@ -1,3 +1,4 @@
+import { isBlankRung } from '../engine/rungInvariant'
 import type { Rung } from '../engine/types'
 import type { FavoriteInsertTarget } from '../lib/insertTarget'
 import { ChevronDownIcon, TargetIcon } from './Icons'
@@ -23,17 +24,11 @@ export default function InsertTargetControl({
   onLocate,
   className,
 }: InsertTargetControlProps) {
-  if (rungs.length === 0) {
-    return (
-      <span
-        className={['wb-insert-target', 'is-empty', className].filter(Boolean).join(' ')}
-        title="收藏指令不会自动新建程序段"
-      >
-        <span className="wb-insert-target-kicker">插入到</span>
-        <span className="wb-insert-target-anchor">先添加程序段</span>
-      </span>
-    )
-  }
+  let contentNumber = 0
+  const options = rungs.map((rung) => ({
+    rung,
+    label: isBlankRung(rung) ? '新程序段' : '程序段 ' + (++contentNumber),
+  }))
 
   return (
     <span className={['wb-insert-target', className].filter(Boolean).join(' ')}>
@@ -44,8 +39,8 @@ export default function InsertTargetControl({
           value={insertTarget?.rungId ?? ''}
           onChange={(event) => onSelectRung(event.target.value)}
         >
-          {rungs.map((rung, index) => (
-            <option key={rung.id} value={rung.id}>程序段 {index + 1}</option>
+          {options.map(({ rung, label }) => (
+            <option key={rung.id} value={rung.id}>{label}</option>
           ))}
         </select>
         <ChevronDownIcon size={13} aria-hidden="true" />

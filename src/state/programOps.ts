@@ -12,6 +12,7 @@ import type {
 } from '../engine/types'
 import { uid } from '../lib/uid'
 import { withinFieldLimit } from '../lib/limits'
+import { isBlankRung } from '../engine/rungInvariant'
 import {
   byteAddressLength,
   normalizeBitAddress,
@@ -465,21 +466,6 @@ export function updateRungLabel(program: Program, rungId: string, label: string)
   return withRung(program, rungId, (item) => ({ ...item, label }))
 }
 
-export function addRung(program: Program): Program {
-  let next = program
-  if (!next.tags.some((tag) => tag.kind === 'BOOL')) next = addTag(next, 'BOOL')
-  if (next.tags.filter((tag) => tag.kind === 'BOOL').length < 2) next = addTag(next, 'BOOL')
-  const boolTags = next.tags.filter((tag) => tag.kind === 'BOOL')
-  const input = boolTags.find((tag) => tag.address.toUpperCase().startsWith('%I')) ?? boolTags[0]
-  const outputTag = boolTags.find((tag) => tag.address.toUpperCase().startsWith('%Q')) ?? boolTags[1] ?? boolTags[0]
-  const node: LadderNode = { type: 'contact', id: uid('c'), kind: 'NO', tag: input.name }
-  const output: OutputElement = { id: uid('o'), kind: 'COIL', tag: outputTag.name }
-  // 新程序段默认不写标题：画布上已经有「程序段 N」编号，
-  // 再塞一句默认文字会和编号重复，也让用户以为标题是必填的。
-  const rung: Rung = { id: uid('r'), label: '', nodes: [node], output }
-  return { ...next, rungs: [...next.rungs, rung] }
-}
-
 function cloneRungForProgram(program: Program, source: Rung, labelSuffix = ''): Rung {
   const cloneNode = (node: LadderNode): LadderNode =>
     node.type === 'contact'
@@ -535,11 +521,12 @@ export function insertRungCopies(
   sources: Rung[],
   boundary: number,
 ): { program: Program; rungs: Rung[] } {
-  if (sources.length === 0 || !Number.isFinite(boundary)) return { program, rungs: [] }
+  const contentSources = sources.filter((source) => !isBlankRung(source))
+  if (contentSources.length === 0 || !Number.isFinite(boundary)) return { program, rungs: [] }
   let next = program
   const at = Math.max(0, Math.min(program.rungs.length, Math.trunc(boundary)))
   const copies: Rung[] = []
-  for (const source of sources) {
+  for (const source of contentSources) {
     // 每插入一段都把新实例名放进工程再复制下一段，连续粘贴定时器不会撞名。
     const copy = cloneRungForPaste(next, source)
     const rungs = [...next.rungs]
@@ -554,6 +541,7 @@ export function duplicateRung(program: Program, rungId: string): Program {
   const index = program.rungs.findIndex((rung) => rung.id === rungId)
   if (index < 0) return program
   const source = program.rungs[index]
+  if (isBlankRung(source)) return program
   const copy = cloneRungForProgram(program, source, ' 副本')
   const rungs = [...program.rungs]
   rungs.splice(index + 1, 0, copy)
@@ -561,6 +549,8 @@ export function duplicateRung(program: Program, rungId: string): Program {
 }
 
 export function deleteRung(program: Program, rungId: string): Program {
+  const target = program.rungs.find((rung) => rung.id === rungId)
+  if (!target || isBlankRung(target)) return program
   return { ...program, rungs: program.rungs.filter((rung) => rung.id !== rungId) }
 }
 
@@ -620,6 +610,7 @@ export function moveNodeBy(program: Program, rungId: string, path: number[], del
 export function moveRungTo(program: Program, rungId: string, targetIndex: number): Program {
   const index = program.rungs.findIndex((rung) => rung.id === rungId)
   if (index < 0 || !Number.isFinite(targetIndex)) return program
+  if (isBlankRung(program.rungs[index])) return program
   const target = Math.max(0, Math.min(program.rungs.length - 1, Math.trunc(targetIndex)))
   if (target === index) return program
   const rungs = [...program.rungs]
@@ -635,6 +626,7 @@ export function moveRungTo(program: Program, rungId: string, targetIndex: number
 export function moveRungToBoundary(program: Program, rungId: string, boundary: number): Program {
   const sourceIndex = program.rungs.findIndex((rung) => rung.id === rungId)
   if (sourceIndex < 0 || !Number.isFinite(boundary)) return program
+  if (isBlankRung(program.rungs[sourceIndex])) return program
   const clamped = Math.max(0, Math.min(program.rungs.length, Math.trunc(boundary)))
   if (clamped === sourceIndex || clamped === sourceIndex + 1) return program
   const targetIndex = clamped > sourceIndex ? clamped - 1 : clamped
@@ -648,6 +640,7 @@ export function moveRung(program: Program, rungId: string, delta: -1 | 1): Progr
   const index = program.rungs.findIndex((rung) => rung.id === rungId)
   const target = index + delta
   if (index < 0 || target < 0 || target >= program.rungs.length) return program
+  if (isBlankRung(program.rungs[index])) return program
   const rungs = [...program.rungs]
   const [rung] = rungs.splice(index, 1)
   rungs.splice(target, 0, rung)

@@ -1,4 +1,5 @@
 import { getProfile, supportsContact, supportsOutput } from './profiles'
+import { contentRungs } from './rungInvariant'
 import {
   normalizeReference,
   parseBitAddress,
@@ -365,7 +366,7 @@ function validateTagTable(ctx: Ctx) {
 
 function collectInstances(ctx: Ctx) {
   const seen = new Map<string, string>()
-  for (const rung of ctx.program.rungs) {
+  for (const rung of contentRungs(ctx.program)) {
     const output = rung.output
     if (output.kind === 'TON' || output.kind === 'TOF' || output.kind === 'TONR') {
       ctx.timers.add(normalizeReference(output.tag))
@@ -697,11 +698,11 @@ export function compile(program: Program): CompileResult {
   collectInstances(ctx)
   validateIds(ctx)
 
-  if (program.rungs.length === 0) {
+  if (contentRungs(program).length === 0) {
     warning(ctx, '程序里还没有程序段，仿真不会执行任何逻辑。')
   }
 
-  for (const rung of program.rungs) {
+  for (const rung of contentRungs(program)) {
     // 无条件的程序段是合法的常通能流，MOVE、TON 和 RESET 都可能需要每扫描执行。
     walkChain(rung.nodes, (node) => {
       if (node.type === 'contact') checkContact(ctx, rung.id, node)

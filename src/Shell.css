@@ -1454,14 +1454,6 @@ body[data-drag-kind] {
   font-size: 12px;
 }
 
-.wb-shell .ll-add-rung {
-  align-self: flex-start;
-  min-height: 44px;
-  padding-right: 18px;
-  background: transparent;
-  font-size: 13px;
-}
-
 .wb-shell .toast {
   z-index: 120;
 }
@@ -1892,8 +1884,7 @@ body[data-drag-kind] {
     min-height: 44px;
   }
 
-  .sidebar-close,
-  .sidebar-add-rung {
+  .sidebar-close {
     min-width: 44px;
     min-height: 44px;
   }
@@ -2143,23 +2134,6 @@ body[data-drag-kind] {
   }
 }
 
-/* -------------------------------------------------------- add-rung row */
-
-.wb-shell .ll-add-rung {
-  align-self: stretch;
-  width: 100%;
-  justify-content: center;
-  border-style: dashed;
-  background: transparent;
-  color: var(--muted);
-}
-
-.wb-shell .ll-add-rung:hover {
-  border-color: var(--accent);
-  background: var(--accent-wash);
-  color: var(--accent-ink);
-}
-
 /* --------------------------------------------------- touch ergonomics */
 
 @media (pointer: coarse) {
@@ -2187,10 +2161,6 @@ body[data-drag-kind] {
 
   .wb-shell .ll-rung-menu-panel button {
     min-height: 44px;
-  }
-
-  .wb-shell .ll-add-rung {
-    min-height: 48px;
   }
 
   .wb-shell .delete-mini {
@@ -2260,13 +2230,11 @@ body[data-drag-kind] {
 }
 
 /* Wide rows should acknowledge the press without shrinking their text. */
-.library-item,
-.ll-add-rung {
+.library-item {
   transition: background-color var(--dur-press) linear;
 }
 
-.library-item:active,
-.ll-add-rung:active {
+.library-item:active {
   background-color: var(--active);
 }
 
@@ -2297,15 +2265,13 @@ body[data-drag-kind] {
     transform: scale(0.97);
   }
 
-  .library-item,
-  .ll-add-rung {
+  .library-item {
     transition:
       transform var(--dur-press) var(--ease-out),
       background-color var(--dur-press) linear;
   }
 
-  .library-item:active,
-  .ll-add-rung:active {
+  .library-item:active {
     transform: translateY(1px);
   }
 }
@@ -3621,46 +3587,6 @@ body[data-drag-kind] {
 .wb-shell .live-value.on:hover {
   border-color: var(--positive);
   background: var(--positive-wash);
-}
-
-/* ---------------------------------------------------- add-rung action */
-
-/* An insertion rule is the quietest possible affordance and reads exactly
-   where the next rung will land. */
-.wb-shell .ll-add-rung {
-  min-height: 36px;
-  justify-content: flex-start;
-  gap: 9px;
-  padding: 5px 4px;
-  border: 0;
-  border-top: 1px dashed var(--control);
-  border-radius: 0;
-  background: transparent;
-  color: var(--muted);
-  font-size: 12.5px;
-}
-
-.wb-shell .ll-add-rung span {
-  width: 18px;
-  height: 18px;
-  border-radius: 2px;
-  background: transparent;
-  color: var(--accent);
-  font-size: 16px;
-  font-weight: 500;
-}
-
-.wb-shell .ll-add-rung:hover,
-.wb-shell .ll-add-rung:focus-visible {
-  border-top-color: var(--accent);
-  background: transparent;
-  color: var(--accent-ink);
-}
-
-@media (pointer: coarse) {
-  .wb-shell .ll-add-rung {
-    min-height: 48px;
-  }
 }
 
 @media (max-width: 720px) {

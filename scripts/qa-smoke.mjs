@@ -116,6 +116,33 @@ async function pressKey(key, code, vk, modifiers = 0) {
   await sleep(360)
 }
 
+async function clickAt(x, y) {
+  await send('Page.bringToFront')
+  await send('Input.dispatchMouseEvent', {
+    type: 'mouseMoved',
+    x,
+    y,
+    button: 'none',
+  })
+  await send('Input.dispatchMouseEvent', {
+    type: 'mousePressed',
+    x,
+    y,
+    button: 'left',
+    buttons: 1,
+    clickCount: 1,
+  })
+  await send('Input.dispatchMouseEvent', {
+    type: 'mouseReleased',
+    x,
+    y,
+    button: 'left',
+    buttons: 0,
+    clickCount: 1,
+  })
+  await sleep(320)
+}
+
 const checks = {}
 const details = {}
 const check = (name, value, note) => {
@@ -272,6 +299,76 @@ while (Date.now() < motorDeadline) {
 check('desktop/motor-latches', motor.value === 'TRUE' && motor.powered >= 1, motor)
 await screenshot('docs/qa/desktop-1440.png')
 await screenshot('docs/screenshot.png')
+
+// 真实指针选中元件后再点图纸留白：虚线焦点框必须随选中态一起消失。
+const nodePoint = await evaluate(`(() => {
+  const node = document.querySelector('.ll-node[data-node-id]')
+  if (!node) return null
+  node.scrollIntoView({ block: 'center', inline: 'nearest' })
+  const rect = node.getBoundingClientRect()
+  return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
+})()`)
+if (nodePoint) await clickAt(nodePoint.x, nodePoint.y)
+await sleep(350)
+const editorBeforeEscape = await evaluate(`({
+  open: !!document.querySelector('.qe-panel'),
+  nodeId: document.querySelector('.ll-node.is-selected')?.getAttribute('data-node-id') ?? null,
+})`)
+await pressEscape()
+const focusAfterEscape = await evaluate(`({
+  open: !!document.querySelector('.qe-panel'),
+  activeNodeId: document.activeElement?.getAttribute?.('data-node-id') ?? null,
+})`)
+check(
+  'desktop/escape-restores-canvas-focus',
+  editorBeforeEscape.open
+    && focusAfterEscape.open === false
+    && Boolean(editorBeforeEscape.nodeId)
+    && focusAfterEscape.activeNodeId === editorBeforeEscape.nodeId,
+  { editorBeforeEscape, focusAfterEscape },
+)
+
+// 重新打开编辑器并再次聚焦元件，验证点空白会清掉键盘焦点与虚线框。
+await evaluate(`document.querySelector('.ll-node.is-selected')?.focus()`)
+const selectedByPointer = await evaluate(`({
+  activeInCanvas: document.activeElement?.closest?.('.ll-canvas') !== null,
+  selected: document.querySelectorAll('.ll-node.is-selected').length,
+  frameOpacity: (() => {
+    const box = document.querySelector('.ll-node.is-selected > .ll-selection-box')
+    return box ? Number(getComputedStyle(box).opacity) : 0
+  })(),
+})`)
+const blankPoint = await evaluate(`(() => {
+  const canvas = document.querySelector('.ll-canvas')
+  if (!canvas) return null
+  const rect = canvas.getBoundingClientRect()
+  const blocked = 'button, input, textarea, select, a, summary, [role="button"], [role="menu"], [data-node-id], [data-output-id], .ll-slot, .ll-merge-chip, .ll-node-grip, [data-drag-handle], .ll-rung-header'
+  for (let y = Math.max(0, rect.top) + 16; y < Math.min(innerHeight, rect.bottom) - 16; y += 12) {
+    for (let x = Math.max(0, rect.left) + 16; x < Math.min(innerWidth, rect.right) - 16; x += 12) {
+      const hit = document.elementFromPoint(x, y)
+      if (hit?.closest('.ll-canvas') && !hit.closest(blocked)) return { x, y }
+    }
+  }
+  return null
+})()`)
+if (blankPoint) await clickAt(blankPoint.x, blankPoint.y)
+const afterBlankClick = await evaluate(`({
+  activeInCanvas: document.activeElement?.closest?.('.ll-canvas') !== null,
+  selected: document.querySelectorAll('.ll-node.is-selected').length,
+  frameOpacities: [...document.querySelectorAll('.ll-selection-box')]
+    .map((box) => Number(getComputedStyle(box).opacity)),
+})`)
+check(
+  'desktop/blank-click-clears-selection-frame',
+  Boolean(nodePoint && blankPoint)
+    && selectedByPointer.selected >= 1
+    && selectedByPointer.activeInCanvas === true
+    && selectedByPointer.frameOpacity === 1
+    && afterBlankClick.activeInCanvas === false
+    && afterBlankClick.selected === 0
+    && afterBlankClick.frameOpacities.every((opacity) => opacity === 0),
+  { selectedByPointer, blankPoint, afterBlankClick },
+)
 
 // 点画布元件：参数编辑面板要开、插入位要显影。
 const nodeClick = await evaluate(`(() => {
@@ -1007,16 +1104,52 @@ check(
   restoredParallel,
 )
 
-// 程序段号跟着位置走：新增一段显示「程序段 2」，上移后仍是 1、2。
+// 有内容的程序段后自动保留一个「新程序段」；填满它后继续自动补下一个。
 const firstTitle = await evaluate(`document.querySelector('.ll-rung-name')?.value ?? null`)
-await evaluate(`document.querySelector('.ll-add-rung')?.click()`)
+const initialSegments = await evaluate(`({
+  labels: [...document.querySelectorAll('.ll-rung-index')].map((item) => item.textContent?.trim()),
+  rungs: document.querySelectorAll('.ll-rung').length,
+  placeholders: document.querySelectorAll('.ll-rung.is-placeholder').length,
+  lastIsPlaceholder: [...document.querySelectorAll('.ll-rung')].at(-1)?.classList.contains('is-placeholder') === true,
+})`)
+check(
+  'desktop/segment-auto-placeholder',
+  initialSegments.rungs === 2
+    && initialSegments.labels.join('|') === '程序段 1|新程序段'
+    && initialSegments.placeholders === 1
+    && initialSegments.lastIsPlaceholder,
+  initialSegments,
+)
+const openedPlaceholderMenu = await evaluate(`(() => {
+  const plus = document.querySelector('.ll-rung.is-placeholder .ll-slot-plus')
+  if (!plus) return false
+  plus.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 0 }))
+  return true
+})()`)
+await sleep(260)
+const pickedPlaceholderContact = await evaluate(`(() => {
+  const item = document.querySelector('.ll-slot-menu-item[data-kind="NO"]')
+  if (!item) return false
+  item.click(); return true
+})()`)
 await sleep(500)
 const twoSegments = await evaluate(`({
   labels: [...document.querySelectorAll('.ll-rung-index')].map((item) => item.textContent?.trim()),
   rungs: document.querySelectorAll('.ll-rung').length,
   ids: [...document.querySelectorAll('.ll-rung')].map((item) => item.getAttribute('data-rung-id')),
+  placeholders: document.querySelectorAll('.ll-rung.is-placeholder').length,
+  lastIsPlaceholder: [...document.querySelectorAll('.ll-rung')].at(-1)?.classList.contains('is-placeholder') === true,
 })`)
-check('desktop/segment-numbering-new', twoSegments.rungs === 2 && twoSegments.labels.join('|') === '程序段 1|程序段 2', twoSegments)
+check(
+  'desktop/segment-numbering-new',
+  openedPlaceholderMenu
+    && pickedPlaceholderContact
+    && twoSegments.rungs === 3
+    && twoSegments.labels.join('|') === '程序段 1|程序段 2|新程序段'
+    && twoSegments.placeholders === 1
+    && twoSegments.lastIsPlaceholder,
+  twoSegments,
+)
 await screenshot('docs/qa/desktop-segments.png')
 
 await evaluate(`document.querySelectorAll('.ll-rung')[1]?.querySelector('.ll-rung-menu summary')?.click()`)
@@ -1037,8 +1170,8 @@ const reordered = await evaluate(`({
 check(
   'desktop/segment-numbering-reorder',
   moveClicked
-    && reordered.labels.join('|') === '程序段 1|程序段 2'
-    && reordered.ids.join(',') === [twoSegments.ids[1], twoSegments.ids[0]].join(','),
+    && reordered.labels.join('|') === '程序段 1|程序段 2|新程序段'
+    && reordered.ids.join(',') === [twoSegments.ids[1], twoSegments.ids[0], twoSegments.ids[2]].join(','),
   reordered,
 )
 
@@ -1050,11 +1183,19 @@ await pressKey('y', 'KeyY', 89, 2)
 const keyboardRedo = await evaluate(`[...document.querySelectorAll('.ll-rung')].map((item) => item.getAttribute('data-rung-id'))`)
 check('desktop/ctrl-y-redo', keyboardRedo.join(',') === reordered.ids.join(','), keyboardRedo)
 
-// 收尾：撤回上移、撤回新增，让后续截图回到单程序段。
+// 收尾：撤回上移、撤回填充，让后续截图回到「一个内容段 + 新程序段」。
 await pressKey('z', 'KeyZ', 90, 2)
 await pressKey('z', 'KeyZ', 90, 2)
-const restoredRungs = await evaluate(`document.querySelectorAll('.ll-rung').length`)
-check('desktop/segments-restored', restoredRungs === 1, restoredRungs)
+const restoredRungs = await evaluate(`({
+  count: document.querySelectorAll('.ll-rung').length,
+  placeholders: document.querySelectorAll('.ll-rung.is-placeholder').length,
+  lastIsPlaceholder: [...document.querySelectorAll('.ll-rung')].at(-1)?.classList.contains('is-placeholder') === true,
+})`)
+check(
+  'desktop/segments-restored',
+  restoredRungs.count === 2 && restoredRungs.placeholders === 1 && restoredRungs.lastIsPlaceholder,
+  restoredRungs,
+)
 
 // 定时器按博途布局：IN / Q 在主功率线上，PT / ET 的值放在框外左右两侧。
 const openedLibrary = await evaluate(`(() => {

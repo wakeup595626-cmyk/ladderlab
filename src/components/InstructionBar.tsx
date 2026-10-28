@@ -7,7 +7,7 @@ import {
   favoriteInstructionEntry,
   favoriteInstructionId,
 } from '../lib/instructionFavorites'
-import type { FavoriteInsertTarget } from '../lib/insertTarget'
+import { favoriteTargetSegmentLabel, type FavoriteInsertTarget } from '../lib/insertTarget'
 import { ChevronRightIcon, GripIcon, StarFilledIcon } from './Icons'
 import InsertTargetControl from './InsertTargetControl'
 import {
@@ -78,7 +78,7 @@ export default function InstructionBar({
     .filter((entry) => entry !== undefined)
   const favoriteKeys = favorites.map((entry) => favoriteInstructionId(entry.family, entry.kind))
   const segmentLabel = insertTarget
-    ? '程序段 ' + (insertTarget.rungIndex + 1)
+    ? favoriteTargetSegmentLabel(insertTarget)
     : '目标程序段'
 
   const favoriteKey = favoriteIds.join('|')

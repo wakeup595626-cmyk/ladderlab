@@ -1,4 +1,5 @@
 import type { Program } from '../engine/types'
+import { contentRungs } from '../engine/rungInvariant'
 import type {
   SaveNamedProjectInput,
   SaveNamedProjectResult,
@@ -67,8 +68,8 @@ function canonicalize(value: unknown): unknown {
 
 /** 工程名由保存接口统一去除首尾空格并规范化，比较内容时单独忽略名称。 */
 export function programsEqualIgnoringName(left: Program, right: Program): boolean {
-  return JSON.stringify(canonicalize({ ...left, name: '' }))
-    === JSON.stringify(canonicalize({ ...right, name: '' }))
+  return JSON.stringify(canonicalize({ ...left, name: '', rungs: contentRungs(left) }))
+    === JSON.stringify(canonicalize({ ...right, name: '', rungs: contentRungs(right) }))
 }
 
 function sameNormalizedName(left: string, right: string): boolean {

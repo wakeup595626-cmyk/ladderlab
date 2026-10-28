@@ -466,6 +466,22 @@ export default function QuickEditor({
     onProgram(moveNodeBy(program, rung.id, contactPath, delta))
     onNotify(delta === -1 ? '元件已向左移动一位' : '元件已向右移动一位')
   }
+  // 桌面悬浮框不是模态层，关闭后要把焦点还给刚才编辑的画布元件；
+  // 否则按 Esc 后 document.activeElement 会掉到 body，键盘用户丢失位置。
+  const closeAndRestoreCanvasFocus = () => {
+    const rungElement = Array.from(document.querySelectorAll<HTMLElement>('.ll-rung'))
+      .find((element) => element.dataset.rungId === selection.rungId)
+    const focusTarget = selection.path
+      ? Array.from(rungElement?.querySelectorAll<SVGGraphicsElement>('[data-node-id]') ?? [])
+        .find((element) => element.dataset.nodeId === node?.id)
+      : Array.from(rungElement?.querySelectorAll<SVGGraphicsElement>('[data-output-id]') ?? [])
+        .find((element) => element.dataset.outputId === rung?.output.id)
+    onClose()
+    if (mobile) return
+    window.setTimeout(() => {
+      if (focusTarget?.isConnected) focusTarget.focus({ preventScroll: true })
+    }, 0)
+  }
 
   return createPortal(
     <>
@@ -490,14 +506,19 @@ export default function QuickEditor({
         onKeyDown={(event) => {
           if (mobile || event.key !== 'Escape') return
           event.stopPropagation()
-          onClose()
+          closeAndRestoreCanvasFocus()
         }}
       >
         <header className="qe-head">
           <div>
             <h2>{title}</h2>
           </div>
-          <button type="button" className="qe-close" onClick={onClose} aria-label="关闭参数编辑">
+          <button
+            type="button"
+            className="qe-close"
+            onClick={closeAndRestoreCanvasFocus}
+            aria-label="关闭参数编辑"
+          >
             <CloseIcon size={18} />
           </button>
         </header>

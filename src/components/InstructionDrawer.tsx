@@ -17,7 +17,6 @@ interface InstructionDrawerProps {
   onInsertContact: (kind: ContactKind) => void
   onChangeOutput: (kind: OutputKind) => void
   onStartDrag: (event: React.PointerEvent<HTMLElement>, payload: DragPayload, label: string) => void
-  onAddRung: () => void
   onOpenLibrary: () => void
   onOpenTags: () => void
   onOpenGuide: () => void
@@ -37,7 +36,6 @@ export default function InstructionDrawer({
   onInsertContact,
   onChangeOutput,
   onStartDrag,
-  onAddRung,
   onOpenLibrary,
   onOpenTags,
   onOpenGuide,
@@ -74,7 +72,6 @@ export default function InstructionDrawer({
         onInsertContact={onInsertContact}
         onChangeOutput={onChangeOutput}
         onStartDrag={onStartDrag}
-        onAddRung={onAddRung}
         onOpenLibrary={onOpenLibrary}
         onOpenTags={onOpenTags}
         onOpenGuide={onOpenGuide}

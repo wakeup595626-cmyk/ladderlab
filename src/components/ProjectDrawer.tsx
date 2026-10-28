@@ -1,6 +1,7 @@
 import { useRef } from 'react'
 import { COURSE_LABS } from '../engine/courseLabs'
 import { getProfile } from '../engine/profiles'
+import { contentRungs } from '../engine/rungInvariant'
 import type { Program } from '../engine/types'
 import type { SavedProject } from '../lib/projectLibrary'
 import { formatProjectTime } from '../lib/projectSummary'
@@ -147,7 +148,7 @@ export default function ProjectDrawer({
                         {hasNewerVersion && <span className="wb-saved-project-badge is-update">有新版本</span>}
                       </span>
                       <span className="wb-saved-project-meta">
-                        {formatProjectTime(project.savedAt)} · {project.program.rungs.length} 段 · {project.program.tags.length} 个变量
+                        {formatProjectTime(project.savedAt)} · {contentRungs(project.program).length} 段 · {project.program.tags.length} 个变量
                       </span>
                     </button>
                     <button

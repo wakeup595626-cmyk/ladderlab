@@ -243,6 +243,19 @@ async function rungIds() {
   return evaluate(`[...document.querySelectorAll('.ll-rung')].map((node) => node.dataset.rungId)`)
 }
 
+async function fillTrailingPlaceholder() {
+  await click('.ll-rung.is-placeholder .ll-slot-plus', 0)
+  const menuOpen = await evaluate(`!!document.querySelector('.ll-slot-menu-item[data-kind="NO"]')`)
+  assert(menuOpen, '新程序段的 + 没有打开插入菜单')
+  await click('.ll-slot-menu-item[data-kind="NO"]', 0)
+  await sleep(420)
+  const quickEditOpen = await evaluate(`!!document.querySelector('.qe-close')`)
+  if (quickEditOpen) {
+    await click('.qe-close', 0)
+    await sleep(220)
+  }
+}
+
 async function selectedRungId() {
   return evaluate(`document.querySelector('.ll-rung.is-whole-selected')?.dataset.rungId ?? null`)
 }
@@ -261,14 +274,62 @@ await sleep(600)
 await evaluate(`document.querySelector('.wb-context-panel button[aria-label="关闭属性面板"]')?.click()`)
 await sleep(260)
 
-// 从一段示例扩成三段，用真实按钮创建，不用测试专用状态注入。
-for (let i = 0; i < 2; i += 1) {
-  await evaluate(`document.querySelector('.ll-add-rung')?.click()`)
-  await sleep(420)
-}
-
+// 示例载入后已自动带一个末尾占位段；填满它会自动补下一段。
 let ids = await rungIds()
-assert(ids.length === 3, `准备阶段应有 3 个程序段，实际 ${ids.length}`)
+assert(ids.length === 2, `示例应为一个内容段加一个末尾占位段，实际 ${ids.length}`)
+assert(
+  await evaluate(`[...document.querySelectorAll('.ll-rung')].at(-1)?.classList.contains('is-placeholder') === true`),
+  '示例末尾没有自动占位段',
+)
+await fillTrailingPlaceholder()
+await fillTrailingPlaceholder()
+
+const prepared = await evaluate(`({
+  ids: [...document.querySelectorAll('.ll-rung')].map((node) => node.dataset.rungId),
+  labels: [...document.querySelectorAll('.ll-rung-index')].map((node) => node.textContent?.trim()),
+  placeholders: document.querySelectorAll('.ll-rung.is-placeholder').length,
+  lastIsPlaceholder: [...document.querySelectorAll('.ll-rung')].at(-1)?.classList.contains('is-placeholder') === true,
+})`)
+ids = prepared.ids
+assert(
+  ids.length === 4
+    && prepared.labels.join('|') === '程序段 1|程序段 2|程序段 3|新程序段'
+    && prepared.placeholders === 1
+    && prepared.lastIsPlaceholder,
+  `准备阶段应有三段内容和一个末尾占位段：${JSON.stringify(prepared)}`,
+)
+
+// 占位段可以插入元件，但不能被拖动、剪切、复制、移动、创建副本或删除。
+const placeholderGuard = await evaluate(`(() => {
+  const placeholder = document.querySelector('.ll-rung.is-placeholder')
+  const drag = placeholder?.querySelector('.ll-rung-drag')
+  const plus = placeholder?.querySelector('.ll-slot-plus')
+  const plusStyle = plus ? getComputedStyle(plus) : null
+  return {
+    dragDisabled: drag?.disabled === true,
+    dragHint: drag?.getAttribute('aria-label') ?? '',
+    plusVisible: Boolean(plus) && Number(plusStyle?.opacity) > 0 && plusStyle?.pointerEvents !== 'none',
+  }
+})()`)
+assert(placeholderGuard.dragDisabled, '末尾占位段仍可拖动')
+assert(placeholderGuard.dragHint.includes('自动生成'), '末尾占位段缺少不可拖动说明')
+assert(placeholderGuard.plusVisible, '末尾占位段的 + 不可见或不可点击')
+
+await click('.ll-rung-menu summary', ids.length - 1)
+const placeholderMenu = await evaluate(`(() => {
+  const panel = [...document.querySelectorAll('.ll-rung-menu-panel')]
+    .find((node) => node.closest('details')?.open)
+  if (!panel) return null
+  return Object.fromEntries([...panel.querySelectorAll('button')].map((button) => [
+    button.textContent.trim().replace(/Ctrl\\+[CXV]$/, '').trim(),
+    button.disabled,
+  ]))
+})()`)
+assert(placeholderMenu, '末尾占位段的程序段菜单没有打开')
+for (const label of ['剪切程序段', '复制程序段', '上移', '下移', '创建副本', '删除程序段']) {
+  assert(placeholderMenu[label] === true, `占位段的“${label}”没有禁用`)
+}
+await click('.ll-rung-menu summary', ids.length - 1)
 
 // 点标题栏选整段；输出线圈仍是独立选择，Delete 不得误删整段。
 await click('.ll-rung-drag', 0)
@@ -278,12 +339,12 @@ assert(await evaluate(`document.querySelectorAll('.ll-rung.is-whole-selected').l
 await click('.ll-rung [data-output-id]', 0)
 assert(await evaluate(`document.querySelectorAll('.ll-rung.is-whole-selected').length === 0`), '点输出线圈后仍保留整段选中，状态混淆')
 await pressKey('Delete', 'Delete', 46)
-assert((await rungIds()).length === 3, '选中输出线圈时 Delete 误删了整段')
+assert((await rungIds()).length === 4, '选中输出线圈时 Delete 误删了整段')
 
 // 段间插入线：第一段拖到末尾，再撤销恢复。
 await dragRungToBoundary(0, 3)
 let actual = await rungIds()
-assert(actual.join(',') === [ids[1], ids[2], ids[0]].join(','), `拖动排序结果错误：${actual.join(',')}`)
+assert(actual.join(',') === [ids[1], ids[2], ids[0], ids[3]].join(','), `拖动排序结果错误：${actual.join(',')}`)
 await pressKey('z', 'KeyZ', 90, 2)
 actual = await rungIds()
 assert(actual.join(',') === ids.join(','), `拖动后的撤销没有恢复原顺序：${actual.join(',')}`)
@@ -294,42 +355,42 @@ await pressKey('c', 'KeyC', 67, 2)
 await click('.ll-rung-drag', 1)
 await pressKey('v', 'KeyV', 86, 2)
 actual = await rungIds()
-assert(actual.length === 4, `第一次粘贴后应有 4 段，实际 ${actual.length}`)
+assert(actual.length === 5, `第一次粘贴后应有 5 段，实际 ${actual.length}`)
 let selected = await selectedRungId()
 assert(actual.indexOf(selected) === 2, '第一次粘贴没有落在选中段之后')
 await pressKey('v', 'KeyV', 86, 2)
 actual = await rungIds()
-assert(actual.length === 5, `连续粘贴后应有 5 段，实际 ${actual.length}`)
+assert(actual.length === 6, `连续粘贴后应有 6 段，实际 ${actual.length}`)
 assert(new Set(actual).size === actual.length, '连续粘贴产生了重复的程序段 ID')
 selected = await selectedRungId()
 assert(actual.indexOf(selected) === 3, '连续粘贴没有接在上一份副本之后')
 
-// 剪切最后一段，再粘到第一段之后；撤销应恢复粘贴前的四段状态。
+// 剪切最后一个内容段（不是末尾占位段），再粘到第一段之后。
 const beforeCut = await rungIds()
-const cutId = beforeCut.at(-1)
-await click('.ll-rung-drag', beforeCut.length - 1)
+const cutId = beforeCut.at(-2)
+await click('.ll-rung-drag', beforeCut.length - 2)
 assert((await selectedRungId()) === cutId, '准备剪切时没有选中最后一段')
 await pressKey('x', 'KeyX', 88, 2)
 actual = await rungIds()
-assert(actual.length === 4 && !actual.includes(cutId), 'Ctrl+X 没有移除原程序段')
+assert(actual.length === 5 && !actual.includes(cutId), 'Ctrl+X 没有移除原程序段')
 const firstAfterCut = actual[0]
 await click('.ll-rung-drag', 0)
 await pressKey('v', 'KeyV', 86, 2)
 actual = await rungIds()
-assert(actual.length === 5, `剪切粘贴后应有 5 段，实际 ${actual.length}`)
+assert(actual.length === 6, `剪切粘贴后应有 6 段，实际 ${actual.length}`)
 assert(actual[0] === firstAfterCut && actual[1] !== cutId, '剪切粘贴没有插入到当前段之后')
 await pressKey('z', 'KeyZ', 90, 2)
-assert((await rungIds()).length === 4, '撤销剪切粘贴没有恢复四段状态')
+assert((await rungIds()).length === 5, '撤销剪切粘贴没有恢复四段内容加占位段')
 
 // 整段 Delete 与 Ctrl+Z；删除选中输出时已在上方单独验证。
 await click('.ll-rung-drag', 0)
 const deletedId = await selectedRungId()
 await pressKey('Delete', 'Delete', 46)
 actual = await rungIds()
-assert(actual.length === 3 && !actual.includes(deletedId), '选中整段后 Delete 没有删除程序段')
+assert(actual.length === 4 && !actual.includes(deletedId), '选中整段后 Delete 没有删除程序段')
 await pressKey('z', 'KeyZ', 90, 2)
 actual = await rungIds()
-assert(actual.length === 4 && actual.includes(deletedId), 'Delete 后撤销没有恢复原程序段')
+assert(actual.length === 5 && actual.includes(deletedId), 'Delete 后撤销没有恢复原程序段')
 
 // 菜单必须完整暴露同类操作，并真的能执行上下移动。
 await click('.ll-rung-menu summary', 1)
@@ -394,6 +455,7 @@ console.log(JSON.stringify({
     continuousPaste: true,
     cutPaste: true,
     deleteUndo: true,
+    placeholderGuard: true,
     menuOperations: true,
     mobileLayout: true,
   },

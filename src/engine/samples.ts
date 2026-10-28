@@ -1,5 +1,6 @@
 import { uid } from '../lib/uid'
 import { buildCourseLab } from './courseLabs'
+import { ensureTrailingBlankRung } from './rungInvariant'
 import type {
   ContactKind,
   ContactNode,
@@ -39,7 +40,7 @@ function rung(label: string, nodes: LadderNode[], out: OutputElement): Rung {
 }
 
 function program(name: string, profile: Program['profile'], tags: TagDef[], rungs: Rung[]): Program {
-  return { schema: 1, name, profile, tags, rungs }
+  return ensureTrailingBlankRung({ schema: 1, name, profile, tags, rungs })
 }
 
 export function blankProgram(): Program {
@@ -192,7 +193,7 @@ export const SAMPLES: Sample[] = [
 
 export function buildSample(id: string): Program | null {
   const courseLab = buildCourseLab(id)
-  if (courseLab) return courseLab
+  if (courseLab) return ensureTrailingBlankRung(courseLab)
   const sample = SAMPLES.find((item) => item.id === id)
-  return sample ? sample.build() : null
+  return sample ? ensureTrailingBlankRung(sample.build()) : null
 }

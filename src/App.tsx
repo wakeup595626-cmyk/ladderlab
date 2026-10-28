@@ -33,6 +33,12 @@ import { instructionLabel, type InstructionFamily } from './components/instructi
 import { compile } from './engine/compile'
 import { normalizeReference } from './engine/references'
 import { blankProgram, buildSample } from './engine/samples'
+import {
+  contentRungs,
+  ensureTrailingBlankRung,
+  isBlankRung,
+  programsEqualIgnoringPlaceholder,
+} from './engine/rungInvariant'
 import { createRuntime, step, writeRuntimeValue } from './engine/simulate'
 import type {
   ContactKind,
@@ -101,7 +107,6 @@ import {
   type RecoveryBackup,
 } from './lib/storage'
 import {
-  addRung,
   changeOutputKind,
   cloneNodesForPaste,
   closeOpenBranchAt,
@@ -156,7 +161,20 @@ interface StartupState {
 }
 
 function programsEqual(left: Program, right: Program): boolean {
-  return JSON.stringify(left) === JSON.stringify(right)
+  return programsEqualIgnoringPlaceholder(left, right)
+}
+
+/** 默认操作段：优先第一个有内容的程序段，空白工程才落到末尾占位段。 */
+function preferredRung(program: Program): Rung | undefined {
+  return contentRungs(program)[0] ?? program.rungs[0]
+}
+
+/** 内容段按内容顺序编号；自动补出的末尾段永远叫「新程序段」。 */
+function rungSegmentLabel(program: Program, rungId: string): string {
+  const rung = program.rungs.find((item) => item.id === rungId)
+  if (!rung || isBlankRung(rung)) return '新程序段'
+  const index = contentRungs(program).findIndex((item) => item.id === rungId)
+  return index >= 0 ? `程序段 ${index + 1}` : '程序段'
 }
 
 /**
@@ -345,7 +363,7 @@ function runtimeSignature(program: Program): string {
     tags: program.tags.map((tag) => [
       tag.id, tag.name, tag.kind, tag.address, tag.bitOf ?? null, tag.initial,
     ]),
-    rungs: program.rungs.map((rung) => [
+    rungs: contentRungs(program).map((rung) => [
       rung.id,
       rung.nodes.map(encodeNode),
       [
@@ -420,9 +438,19 @@ function chainLengthAtPath(nodes: LadderNode[], chain: number[]): number | null 
 
 export default function App() {
   const { confirm, dialog: confirmDialog } = useConfirmDialog()
-  const [startupState] = useState<StartupState>(() =>
-    resolveStartupState(loadSavedProgram(), readProjectLibrary()),
-  )
+  const [startupState] = useState<StartupState>(() => {
+    const resolved = resolveStartupState(loadSavedProgram(), readProjectLibrary())
+    return {
+      ...resolved,
+      initialProgram: ensureTrailingBlankRung(resolved.initialProgram),
+      baselineProgram: resolved.baselineProgram
+        ? ensureTrailingBlankRung(resolved.baselineProgram)
+        : null,
+      initialConflict: resolved.initialConflict
+        ? { ...resolved.initialConflict, program: ensureTrailingBlankRung(resolved.initialConflict.program) }
+        : null,
+    }
+  })
   const startup = startupState.startup
   const startupLibrary = startupState.library
   const [initialProgram] = useState<Program>(() => startupState.initialProgram)
@@ -435,7 +463,9 @@ export default function App() {
   const [running, setRunning] = useState(false)
   const [speed, setSpeed] = useState(50)
   const [selectionState, setSelection] = useState<Selection | null>(() =>
-    initialProgram.rungs[0] ? { rungId: initialProgram.rungs[0].id, path: null } : null,
+    preferredRung(initialProgram)
+      ? { rungId: preferredRung(initialProgram)!.id, path: null }
+      : null,
   )
   const [toast, setToast] = useState<ToastState | null>(null)
   const [corruptProject, setCorruptProject] = useState<CorruptSavedProgram | null>(() =>
@@ -471,7 +501,7 @@ export default function App() {
    * 没有元件时保留这个值，连续点击收藏指令不会莫名跳回第一段。
    */
   const [favoriteTargetRungId, setFavoriteTargetRungId] = useState<string | null>(
-    () => initialProgram.rungs[0]?.id ?? null,
+    () => preferredRung(initialProgram)?.id ?? null,
   )
   // 画布上的落点高亮是“临时提示”，不是常驻装饰：换程序段或点「定位」时
   // 亮一下，约 2 秒后退回正常线路；点空白处也会立即收起。
@@ -778,10 +808,11 @@ export default function App() {
   }, [favoriteInstructions, notify])
 
   const commit = useCallback((next: Program) => {
+    const normalized = ensureTrailingBlankRung(next)
     setHistory((previous) => {
-      if (next === previous.present) return previous
+      if (normalized === previous.present) return previous
       const past = [...previous.past, previous.present].slice(-HISTORY_LIMIT)
-      return { past, present: next, future: [] }
+      return { past, present: normalized, future: [] }
     })
   }, [])
 
@@ -957,12 +988,17 @@ export default function App() {
   // 否则用户在删除后继续做的编辑会被悄悄丢掉。
   const restoreRung = useCallback((rung: Rung, index: number) => {
     setHistory((previous) => {
-      if (previous.present.rungs.some((item) => item.id === rung.id)) return previous
+      if (isBlankRung(rung) || previous.present.rungs.some((item) => item.id === rung.id)) {
+        return previous
+      }
       const rungs = [...previous.present.rungs]
-      const at = Math.max(0, Math.min(index, rungs.length))
+      const placeholderIndex = rungs.findIndex(isBlankRung)
+      const boundary = placeholderIndex >= 0 ? placeholderIndex : rungs.length
+      const at = Math.max(0, Math.min(index, boundary))
       rungs.splice(at, 0, rung)
+      const present = ensureTrailingBlankRung({ ...previous.present, rungs })
       const past = [...previous.past, previous.present].slice(-HISTORY_LIMIT)
-      return { past, present: { ...previous.present, rungs }, future: [] }
+      return { past, present, future: [] }
     })
   }, [])
 
@@ -999,9 +1035,12 @@ export default function App() {
       const previousProgram = previous.past.at(-1)
       if (!previousProgram) return previous
       return {
-        past: previous.past.slice(0, -1),
-        present: previousProgram,
-        future: [previous.present, ...previous.future].slice(0, HISTORY_LIMIT),
+        past: previous.past.slice(0, -1).map(ensureTrailingBlankRung),
+        present: ensureTrailingBlankRung(previousProgram),
+        future: [
+          ensureTrailingBlankRung(previous.present),
+          ...previous.future.map(ensureTrailingBlankRung),
+        ].slice(0, HISTORY_LIMIT),
       }
     })
   }, [])
@@ -1011,9 +1050,12 @@ export default function App() {
       const nextProgram = previous.future[0]
       if (!nextProgram) return previous
       return {
-        past: [...previous.past, previous.present].slice(-HISTORY_LIMIT),
-        present: nextProgram,
-        future: previous.future.slice(1),
+        past: [
+          ...previous.past.map(ensureTrailingBlankRung),
+          ensureTrailingBlankRung(previous.present),
+        ].slice(-HISTORY_LIMIT),
+        present: ensureTrailingBlankRung(nextProgram),
+        future: previous.future.slice(1).map(ensureTrailingBlankRung),
       }
     })
   }, [])
@@ -1022,12 +1064,21 @@ export default function App() {
   const deleteRungWithUndo = useCallback((rungId: string, message = '程序段已删除') => {
     const index = program.rungs.findIndex((rung) => rung.id === rungId)
     const removed = program.rungs[index]
+    if (!removed || isBlankRung(removed)) {
+      notify('新程序段会自动生成，不能删除')
+      return false
+    }
+    const contentIndex = contentRungs(program).findIndex((rung) => rung.id === rungId)
+    const segment = rungSegmentLabel(program, rungId)
     const next = deleteRung(program, rungId)
     if (next === program) return false
     commit(next)
-    const fallback = next.rungs[Math.max(0, index - 1)] ?? next.rungs[0]
+    const remaining = contentRungs(next)
+    const fallback = remaining[
+      Math.min(remaining.length - 1, Math.max(0, contentIndex - 1))
+    ] ?? preferredRung(next)
     setSelection(fallback ? { rungId: fallback.id, path: null, wholeRung: true } : null)
-    notify(message, {
+    notify(message === '程序段已删除' ? `${segment}已删除` : message, {
       action: {
         label: '撤销',
         run: () => {
@@ -1048,8 +1099,12 @@ export default function App() {
       notify('这段程序已经不存在')
       return
     }
+    if (isBlankRung(rung)) {
+      notify('新程序段会自动生成，不需要复制')
+      return
+    }
     setClipboard({ kind: 'rungs', rungs: [snapshotRung(rung)] })
-    notify('已复制程序段 ' + (index + 1) + '，选中目标段后按 Ctrl+V')
+    notify(`已复制${rungSegmentLabel(program, rungId)}，选中目标段后按 Ctrl+V`)
   }, [notify, program])
 
   const cutRungToClipboard = useCallback((rungId: string) => {
@@ -1059,10 +1114,14 @@ export default function App() {
       notify('这段程序已经不存在')
       return
     }
+    if (isBlankRung(rung)) {
+      notify('新程序段会自动生成，不需要剪切')
+      return
+    }
     setClipboard({ kind: 'rungs', rungs: [snapshotRung(rung)] })
     deleteRungWithUndo(
       rungId,
-      '已剪切程序段 ' + (index + 1) + '，选中目标段后按 Ctrl+V',
+      `已剪切${rungSegmentLabel(program, rungId)}，选中目标段后按 Ctrl+V`,
     )
   }, [deleteRungWithUndo, notify, program])
 
@@ -1075,7 +1134,15 @@ export default function App() {
     const index = afterRungId
       ? program.rungs.findIndex((rung) => rung.id === afterRungId)
       : -1
-    const boundary = index >= 0 ? index + 1 : program.rungs.length
+    const placeholderIndex = program.rungs.findIndex(isBlankRung)
+    const targetIsPlaceholder = index >= 0 && isBlankRung(program.rungs[index])
+    const boundary = targetIsPlaceholder
+      ? index
+      : index >= 0
+        ? index + 1
+        : placeholderIndex >= 0
+          ? placeholderIndex
+          : program.rungs.length
     const result = insertRungCopies(program, clipboard.rungs, boundary)
     if (result.rungs.length === 0) {
       notify('这里不能粘贴程序段')
@@ -1185,7 +1252,7 @@ export default function App() {
     }
     let target = slot ?? null
     if (!target) {
-      const rungId = selection?.rungId ?? program.rungs[0]?.id
+      const rungId = selection?.rungId ?? preferredRung(program)?.id
       const rung = program.rungs.find((item) => item.id === rungId)
       if (!rung || !rungId) {
         notify('先选一个程序段')
@@ -1355,7 +1422,7 @@ export default function App() {
       // 未命名草稿没有可靠的项目身份，不能被另一个标签页覆盖。
       if (!currentProjectId || draft.projectId !== currentProjectId) return
       if (draft.tabId === getDraftTabId()) return
-      const incoming = draft.program
+      const incoming = ensureTrailingBlankRung(draft.program)
 
       if (programsEqual(incoming, latestProgramRef.current)) {
         lastDraftStampRef.current = draft.savedAt
@@ -1440,9 +1507,10 @@ export default function App() {
 
   useEffect(() => {
     const keepSelection = () => setSelection((current) => {
-      if (!current) return program.rungs[0] ? { rungId: program.rungs[0].id, path: null } : null
+      const fallback = preferredRung(program)
+      if (!current) return fallback ? { rungId: fallback.id, path: null } : null
       if (program.rungs.some((rung) => rung.id === current.rungId)) return current
-      return program.rungs[0] ? { rungId: program.rungs[0].id, path: null } : null
+      return fallback ? { rungId: fallback.id, path: null } : null
     })
     const signature = runtimeSignature(program)
     if (lastRuntimeSignatureRef.current === signature) {
@@ -1706,16 +1774,12 @@ export default function App() {
       setFavoriteTargetRungId(slot.rungId)
       setQuickEdit(null)
       setMobilePanel('none')
-      const dropIndex = program.rungs.findIndex((rung) => rung.id === slot.rungId)
-      notify(
-        instructionLabel('contact', kind)
-        + (dropIndex >= 0 ? '已放置到程序段 ' + (dropIndex + 1) : '已放置'),
-      )
+      notify(instructionLabel('contact', kind) + '已放置到' + rungSegmentLabel(program, slot.rungId))
       return
     }
 
     if (!insertTarget) {
-      notify('请先添加程序段，再插入触点')
+      notify('请先选择一个程序段，再插入触点')
       return
     }
 
@@ -1868,7 +1932,7 @@ export default function App() {
 
   const changeOutput = (kind: OutputKind, targetRungId = insertTarget?.rungId ?? null) => {
     if (!targetRungId) {
-      notify('请先添加程序段，再选择输出指令')
+      notify('请先选择一个程序段，再选择输出指令')
       return
     }
 
@@ -1879,7 +1943,7 @@ export default function App() {
       return
     }
 
-    const segment = '程序段 ' + (targetIndex + 1)
+    const segment = rungSegmentLabel(program, targetRungId)
     const label = instructionLabel('output', kind)
     if (targetRung.output.kind === kind) {
       setSelection({ rungId: targetRungId, path: null })
@@ -1900,6 +1964,13 @@ export default function App() {
 
   const handleDrop = useCallback((payload: DragPayload, target: DropTarget) => {
     if (mobilePanel === 'instructions') setMobilePanel('none')
+    if (payload.type === 'rung') {
+      const source = program.rungs.find((rung) => rung.id === payload.rungId)
+      if (source && isBlankRung(source)) {
+        notify('新程序段会自动生成，不能拖动')
+        return
+      }
+    }
     if (target.type === 'rung-boundary') {
       if (payload.type !== 'rung') {
         notify('段间插入线只能放整个程序段')
@@ -2039,22 +2110,16 @@ export default function App() {
     },
   })
 
-  const insertRung = () => {
-    const next = addRung(program)
-    const rung = next.rungs.at(-1)
-    commit(next)
-    if (rung) {
-      setSelection({ rungId: rung.id, path: null })
-      setFavoriteTargetRungId(rung.id)
-    }
-    notify('已新增程序段')
-  }
-
   const removeRung = (rungId: string) => {
     deleteRungWithUndo(rungId)
   }
 
   const duplicateRungAt = (rungId: string) => {
+    const source = program.rungs.find((rung) => rung.id === rungId)
+    if (!source || isBlankRung(source)) {
+      notify('新程序段会自动生成，不能创建副本')
+      return
+    }
     const sourceIndex = program.rungs.findIndex((rung) => rung.id === rungId)
     const next = duplicateRung(program, rungId)
     const copy = sourceIndex >= 0 ? next.rungs[sourceIndex + 1] : undefined
@@ -2066,14 +2131,16 @@ export default function App() {
   const loadSample = async (id: string) => {
     const sample = buildSample(id)
     if (!sample) return false
+    const next = ensureTrailingBlankRung(sample)
     const accepted = await confirm({
       title: '载入这个实验？',
       description: '当前工程会被替换，载入后可以用撤销恢复。',
       confirmLabel: '载入',
     })
     if (!accepted) return false
-    commit(sample)
-    setSelection(sample.rungs[0] ? { rungId: sample.rungs[0].id, path: null } : null)
+    commit(next)
+    const first = preferredRung(next)
+    setSelection(first ? { rungId: first.id, path: null } : null)
     setActiveProject(null)
     notify('实验 / 示例已载入，可直接编辑和运行')
     return true
@@ -2082,9 +2149,11 @@ export default function App() {
   const startDemo = () => {
     const sample = buildSample('motor-hold')
     if (!sample) return
+    const next = ensureTrailingBlankRung(sample)
     pendingAutoRunRef.current = true
-    commit(sample)
-    setSelection(sample.rungs[0] ? { rungId: sample.rungs[0].id, path: null } : null)
+    commit(next)
+    const first = preferredRung(next)
+    setSelection(first ? { rungId: first.id, path: null } : null)
     setActiveProject(null)
     setMobilePanel('none')
     openInspector('tags')
@@ -2193,7 +2262,9 @@ export default function App() {
     setRunning(false)
     setHistory({ past: [], present: next, future: [] })
     setRuntime(createRuntime(next))
-    setSelection(next.rungs[0] ? { rungId: next.rungs[0].id, path: null } : null)
+    setSelection(preferredRung(next)
+      ? { rungId: preferredRung(next)!.id, path: null }
+      : null)
     setBackups(listRecoveryBackups())
     setRawDownloaded(false)
     setActiveProject(null)
@@ -2222,7 +2293,7 @@ export default function App() {
       notify('无法暂存本页修改，尚未切换版本；请先从工具栏导出本页 JSON', { tone: 'error' })
       return
     }
-    const incoming = remoteConflict.program
+    const incoming = ensureTrailingBlankRung(remoteConflict.program)
     const active = activeSavedProjectRef.current
     const library = active ? readProjectLibrary() : null
     const activeId = active?.id ?? null
@@ -2257,7 +2328,9 @@ export default function App() {
     latestProgramRef.current = incoming
     saveDirtyRef.current = false
     setHistory({ past: [], present: incoming, future: [] })
-    setSelection(incoming.rungs[0] ? { rungId: incoming.rungs[0].id, path: null } : null)
+    setSelection(preferredRung(incoming)
+      ? { rungId: preferredRung(incoming)!.id, path: null }
+      : null)
     setLastSavedAt(persisted.savedAt)
     setSaveError(null)
     setSavePending(false)
@@ -2304,8 +2377,11 @@ export default function App() {
       return
     }
     setBackups(listRecoveryBackups())
-    commit(restored)
-    setSelection(restored.rungs[0] ? { rungId: restored.rungs[0].id, path: null } : null)
+    const opened = ensureTrailingBlankRung(restored)
+    commit(opened)
+    setSelection(preferredRung(opened)
+      ? { rungId: preferredRung(opened)!.id, path: null }
+      : null)
     setActiveProject(null)
     notify(corruptProject
       ? '已载入恢复副本；请确认恢复横幅中的「接受当前工程」以恢复自动保存'
@@ -2336,13 +2412,14 @@ export default function App() {
 
     setBackups(listRecoveryBackups())
     setBackupsDismissed(false)
-    commit(saved.program)
-    setSelection(saved.program.rungs[0]
-      ? { rungId: saved.program.rungs[0].id, path: null }
+    const opened = ensureTrailingBlankRung(saved.program)
+    commit(opened)
+    setSelection(preferredRung(opened)
+      ? { rungId: preferredRung(opened)!.id, path: null }
       : null)
     setRunning(false)
     setMobilePanel('none')
-    setActiveProject(saved.id, saved.savedAt, saved.program)
+    setActiveProject(saved.id, saved.savedAt, opened)
     notify(`已打开「${saved.name}」`)
   }
 
@@ -2375,7 +2452,7 @@ export default function App() {
     if (!accepted) return
     const next = blankProgram()
     commit(next)
-    setSelection(next.rungs[0] ? { rungId: next.rungs[0].id, path: null } : null)
+    setSelection(preferredRung(next) ? { rungId: preferredRung(next)!.id, path: null } : null)
     setActiveProject(null)
     notify('已新建空白工程', {
       action: {
@@ -2399,14 +2476,15 @@ export default function App() {
   }
 
   const applyImportedProject = (imported: Program) => {
-    commit(imported)
-    setSelection(imported.rungs[0] ? { rungId: imported.rungs[0].id, path: null } : null)
+    const opened = ensureTrailingBlankRung(imported)
+    commit(opened)
+    setSelection(preferredRung(opened) ? { rungId: preferredRung(opened)!.id, path: null } : null)
     setActiveProject(null)
     setImportOpen(false)
     setMobilePanel('none')
     notify(corruptProject
-      ? `已导入「${imported.name}」；现在可点「接受当前工程并恢复自动保存」`
-      : `已导入「${imported.name}」`, {
+      ? `已导入「${opened.name}」；现在可点「接受当前工程并恢复自动保存」`
+      : `已导入「${opened.name}」`, {
         action: corruptProject
           ? undefined
           : {
@@ -3048,7 +3126,6 @@ export default function App() {
                 onDeleteRung={removeRung}
                 onMoveRung={(rungId, delta) => commit(moveRung(program, rungId, delta))}
                 onMoveNode={(rungId, path, delta) => commit(moveNodeBy(program, rungId, path, delta))}
-                onAddRung={insertRung}
                 onInsertAt={insertAt}
                 onDeleteNode={removeNode}
                 onOpenBranchAt={openBranchAt}
@@ -3203,7 +3280,6 @@ export default function App() {
           onInsertContact={insert}
           onChangeOutput={changeOutput}
           onStartDrag={drag.start}
-          onAddRung={insertRung}
           onOpenLibrary={() => {
             setMobilePanel('none')
             setLibraryOpen(true)

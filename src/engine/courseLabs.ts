@@ -1,4 +1,5 @@
 import { uid } from '../lib/uid'
+import { ensureTrailingBlankRung } from './rungInvariant'
 import type { CompareOp, ContactKind, LadderNode, OutputElement, OutputKind, Program, TagDef } from './types'
 
 const t = (name: string, address: string, comment: string, initial = false): TagDef =>
@@ -191,5 +192,5 @@ export const COURSE_LABS = [
 
 export function buildCourseLab(id: string): Program | null {
   const index = COURSE_LABS.findIndex((lab) => lab.id === id)
-  return index < 0 ? null : BUILDERS[index]()
+  return index < 0 ? null : ensureTrailingBlankRung(BUILDERS[index]())
 }

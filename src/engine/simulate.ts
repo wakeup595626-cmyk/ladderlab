@@ -1,5 +1,6 @@
 import type { ContactNode, LadderNode, OutputElement, Program, Runtime } from './types'
 import { normalizeReference, parseBitAddress, splitReference } from './references'
+import { contentRungs } from './rungInvariant'
 
 const INT_MAX = 32767
 
@@ -34,7 +35,7 @@ function walkNodes(program: Program, visit: (node: ContactNode) => void) {
     if (node.type === 'contact') visit(node)
     else node.branches.forEach(walk)
   })
-  program.rungs.forEach((rung) => walk(rung.nodes))
+  contentRungs(program).forEach((rung) => walk(rung.nodes))
 }
 
 /** Synchronize an explicit INT-byte / BOOL-bit alias in either direction. */
@@ -274,7 +275,7 @@ export function createRuntime(program: Program): Runtime {
   for (const tag of program.tags) {
     if (tag.kind === 'INT') syncAlias(runtime, program, tagName(tag), 'INT')
   }
-  for (const rung of program.rungs) {
+  for (const rung of contentRungs(program)) {
     const output = rung.output
     const instanceName = normalizeReference(output.tag)
     if (['TON', 'TOF', 'TONR'].includes(output.kind)) runtime.timers[instanceName] = { et: 0, q: false, prevIn: false }
@@ -302,7 +303,7 @@ export function step(program: Program, previous: Runtime, dtMs: number): Runtime
     nodePower: emptyRecord(), outputPower: emptyRecord(), rungPower: emptyRecord(),
     scanCount: previous.scanCount + 1, simTime: previous.simTime + dtMs,
   }
-  for (const rung of program.rungs) {
+  for (const rung of contentRungs(program)) {
     const power = evalChain(rung.nodes, true, runtime)
     runtime.rungPower[rung.id] = power
     runtime.outputPower[rung.output.id] = power
