@@ -107,7 +107,8 @@ export default function InstructionBar({
   const pulseFavorite = useCallback((id: string) => {
     setFlash((current) => ({ id, nonce: (current?.nonce ?? 0) + 1 }))
     if (flashTimerRef.current !== null) window.clearTimeout(flashTimerRef.current)
-    flashTimerRef.current = window.setTimeout(() => setFlash(null), 320)
+    // Let the radial confirmation finish instead of cutting it off mid-pulse.
+    flashTimerRef.current = window.setTimeout(() => setFlash(null), 460)
   }, [])
 
   const hideFollow = useCallback(() => {

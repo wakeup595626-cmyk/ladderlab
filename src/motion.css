@@ -2,8 +2,47 @@
    One vocabulary for the whole workbench: state moves, never the layout.
    Only transform and opacity animate; colour changes stay short and linear. */
 
+.wb-shell {
+  --ease-spring: cubic-bezier(0.34, 1.5, 0.64, 1);
+}
+
 .inspector-tabs {
   position: relative;
+  isolation: isolate;
+}
+
+/* A sliding fill sits behind the labels; the existing rule becomes its
+   luminous leading edge. Both move from the same data-tab state, so pointer,
+   keyboard and programme-driven tab changes all feel like one object. */
+.inspector-tabs::before {
+  position: absolute;
+  inset: 3px 3px 3px;
+  z-index: 0;
+  width: calc((100% - 6px) / 3);
+  border: 1px solid color-mix(in srgb, var(--accent) 18%, transparent);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--accent) 9%, var(--raised));
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--surface) 70%, transparent);
+  content: "";
+  pointer-events: none;
+  transform: translateX(0);
+  transition: transform 260ms var(--ease-out);
+}
+
+.inspector-tabs[data-tab="tags"]::before {
+  transform: translateX(100%);
+}
+
+.inspector-tabs[data-tab="diagnostics"]::before {
+  transform: translateX(200%);
+}
+
+.inspector-tabs button {
+  position: relative;
+  z-index: 1;
+  transition:
+    color 150ms linear,
+    background-color 150ms linear;
 }
 
 .inspector-tabs::after {
@@ -13,10 +52,11 @@
   width: calc(100% / 3);
   height: 2px;
   background: var(--accent);
+  box-shadow: 0 0 9px color-mix(in srgb, var(--accent) 52%, transparent);
   content: "";
   pointer-events: none;
   transform: translateX(0);
-  transition: transform 220ms var(--ease-in-out);
+  transition: transform 260ms var(--ease-out);
 }
 
 .inspector-tabs[data-tab="tags"]::after {
@@ -33,6 +73,42 @@
 
 .wb-tabbar.mobile-tabbar {
   position: relative;
+  isolation: isolate;
+}
+
+.wb-tabbar.mobile-tabbar::after {
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  left: 0;
+  z-index: 0;
+  width: 25%;
+  border: 1px solid color-mix(in srgb, var(--accent) 17%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 8%, var(--raised));
+  content: "";
+  opacity: 1;
+  pointer-events: none;
+  transform: translateX(0);
+  transition:
+    transform 260ms var(--ease-out),
+    opacity 140ms linear;
+}
+
+.wb-tabbar.mobile-tabbar[data-panel="instructions"]::after {
+  transform: translateX(100%);
+}
+
+.wb-tabbar.mobile-tabbar[data-panel="tags"]::after {
+  transform: translateX(200%);
+}
+
+.wb-tabbar.mobile-tabbar[data-panel="project"]::after {
+  transform: translateX(300%);
+}
+
+.wb-tabbar.mobile-tabbar[data-panel="none"]::after {
+  opacity: 0;
 }
 
 .wb-tabbar.mobile-tabbar::before {
@@ -70,6 +146,11 @@
 
 .wb-tabbar .mobile-tab-action.is-active {
   border-top-color: transparent;
+}
+
+.wb-tabbar .mobile-tab-action {
+  position: relative;
+  z-index: 1;
 }
 
 .ll-energy {
@@ -213,14 +294,76 @@
 .wb-instruction-button {
   position: relative;
   overflow: hidden;
+  isolation: isolate;
 }
 
 .wb-instruction-press {
   position: absolute;
   inset: 0;
-  background: var(--accent-wash);
+  background: radial-gradient(
+    circle at 50% 58%,
+    color-mix(in srgb, var(--accent) 36%, transparent),
+    color-mix(in srgb, var(--accent) 13%, transparent) 38%,
+    transparent 72%
+  );
+  z-index: 3;
   opacity: 0;
   pointer-events: none;
+}
+
+.wb-instruction-card {
+  position: relative;
+  transform: none;
+}
+
+.wb-instruction-card::after {
+  position: absolute;
+  inset: -1px;
+  z-index: 0;
+  background: linear-gradient(
+    108deg,
+    transparent 18%,
+    color-mix(in srgb, var(--accent) 20%, transparent) 43%,
+    color-mix(in srgb, var(--surface) 55%, transparent) 51%,
+    transparent 72%
+  );
+  content: "";
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(-125%);
+}
+
+.wb-instruction-card > * {
+  position: relative;
+  z-index: 1;
+}
+
+.wb-instruction-symbol,
+.wb-drag-mark {
+  display: inline-flex;
+  transform-origin: center;
+  transition: transform 180ms var(--ease-out);
+}
+
+.wb-instruction-star {
+  transform-origin: center;
+  transition:
+    transform 180ms var(--ease-spring),
+    color 140ms linear,
+    background-color 140ms linear;
+}
+
+.wb-construct-button svg,
+.wb-instruction-button.is-all svg,
+.wb-instruction-scroll svg {
+  transform-origin: center;
+  transition: transform 190ms var(--ease-out);
+}
+
+.wb-instruction-button.is-all .wb-all-mark {
+  display: inline-flex;
+  transform-origin: center;
+  transition: transform 200ms var(--ease-spring);
 }
 
 @media (prefers-reduced-motion: no-preference) {
@@ -229,7 +372,7 @@
   }
 
   .wb-instruction-press {
-    animation: ll-press-flash 300ms var(--ease-out) forwards;
+    animation: ll-press-flash 460ms var(--ease-out) forwards;
   }
 
   .wb-construct-button,
@@ -245,14 +388,17 @@
   .wb-instruction-card {
     animation: ll-card-enter 220ms var(--ease-out) backwards;
     transition:
-      transform 200ms var(--ease-out),
-      border-color 160ms linear,
-      box-shadow 200ms var(--ease-out);
+      border-color 170ms linear,
+      background-color 170ms linear,
+      box-shadow 220ms var(--ease-out);
   }
 
   .wb-instruction-card:active {
-    transform: scale(0.97);
-    transition-duration: 120ms;
+    transform: none;
+    border-color: color-mix(in srgb, var(--accent) 72%, var(--control));
+    box-shadow:
+      inset 0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent),
+      inset 0 1px 0 color-mix(in srgb, var(--surface) 90%, white 5%);
   }
 
   .wb-construct-button:active,
@@ -272,11 +418,59 @@
   }
 
   .wb-instruction-card:hover {
-    transform: translateY(-2px);
-    border-color: color-mix(in srgb, var(--accent) 48%, var(--control));
+    transform: none;
+    border-color: color-mix(in srgb, var(--accent) 66%, var(--control));
+    background: color-mix(in srgb, var(--accent) 4%, var(--surface));
     box-shadow:
-      0 10px 20px -14px color-mix(in srgb, var(--accent) 62%, transparent),
-      0 2px 5px rgba(18, 24, 30, 0.05);
+      inset 0 0 0 1px color-mix(in srgb, var(--accent) 13%, transparent),
+      inset 0 1px 0 color-mix(in srgb, var(--surface) 78%, white 12%),
+      0 0 16px -8px color-mix(in srgb, var(--accent) 72%, transparent);
+  }
+
+  .wb-instruction-card:hover::after,
+  .wb-instruction-card:focus-within::after {
+    animation: ll-card-sheen 520ms var(--ease-out) both;
+  }
+
+  .wb-instruction-card:hover .wb-instruction-symbol,
+  .wb-instruction-card:focus-within .wb-instruction-symbol {
+    transform: translateY(-1px) scale(1.08);
+  }
+
+  .wb-instruction-card:hover .wb-drag-mark,
+  .wb-instruction-card:focus-within .wb-drag-mark {
+    color: var(--accent);
+    transform: translateX(2px);
+  }
+
+  .wb-instruction-star:hover {
+    transform: scale(1.16) rotate(-8deg);
+  }
+
+  .wb-instruction-star:active {
+    transform: scale(0.88) rotate(3deg);
+    transition-duration: 80ms;
+  }
+
+  .wb-construct-button:hover svg {
+    transform: translateY(-1px) scale(1.12);
+  }
+
+  .wb-instruction-button.is-all:hover .wb-all-mark {
+    transform: rotate(90deg) scale(1.05);
+  }
+
+  .wb-instruction-button.is-all:hover svg,
+  .wb-instruction-scroll:hover svg {
+    transform: translateX(2px);
+  }
+
+  .wb-instruction-scroll svg.is-flipped {
+    transform: rotate(180deg);
+  }
+
+  .wb-instruction-scroll:hover svg.is-flipped {
+    transform: rotate(180deg) translateX(2px);
   }
 }
 
@@ -304,13 +498,130 @@
   }
 }
 
+@keyframes ll-card-sheen {
+  0% {
+    opacity: 0;
+    transform: translateX(-125%);
+  }
+
+  32% {
+    opacity: 1;
+  }
+
+  100% {
+    opacity: 0;
+    transform: translateX(125%);
+  }
+}
+
 @keyframes ll-press-flash {
+  0% {
+    opacity: 0.88;
+    transform: scale(0.72);
+  }
+
+  58% {
+    opacity: 0.34;
+  }
+
+  100% {
+    opacity: 0;
+    transform: scale(1.16);
+  }
+}
+
+/* ------------------------------------------------------ ladder selection */
+
+.ll-rung-header {
+  transition:
+    background-color 190ms linear,
+    box-shadow 210ms var(--ease-out),
+    outline-color 160ms linear;
+}
+
+.ll-rung.is-whole-selected > .ll-rung-header {
+  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--accent) 72%, transparent);
+}
+
+.ll-rung.is-whole-selected > .ll-rung-header .ll-rung-marker {
+  height: 18px;
+  box-shadow: 0 0 9px color-mix(in srgb, var(--accent) 54%, transparent);
+  transform: scaleY(1.42);
+  transform-origin: center;
+  transition: transform 220ms var(--ease-spring);
+}
+
+.ll-node-hit,
+.ll-slot-hit,
+.ll-drag-handle-hit {
+  transition:
+    fill 160ms linear,
+    stroke 160ms linear,
+    stroke-width 140ms linear;
+}
+
+.ll-selection-box {
+  transition:
+    opacity 170ms linear,
+    stroke-dashoffset 600ms linear;
+}
+
+.ll-node.is-selected > .ll-selection-box,
+.ll-node:focus-visible > .ll-selection-box {
+  animation: ll-selection-flow 900ms linear infinite;
+}
+
+.ll-branch-frame {
+  transition: opacity 170ms linear;
+}
+
+@keyframes ll-selection-flow {
+  to {
+    stroke-dashoffset: -14;
+  }
+}
+
+/* -------------------------------------------------------- first paint */
+
+@media (prefers-reduced-motion: no-preference) {
+  .wb-shell > .wb-topbar {
+    animation: ll-chrome-in 360ms var(--ease-out) both;
+  }
+
+  .wb-shell > .wb-instruction-strip {
+    animation: ll-chrome-in 400ms 50ms var(--ease-out) both;
+  }
+
+  .wb-shell > .wb-workbench {
+    animation: ll-workbench-in 440ms 95ms var(--ease-out) both;
+  }
+
+  .wb-shell > .wb-statusbar {
+    animation: ll-chrome-in 360ms 130ms var(--ease-out) both;
+  }
+}
+
+@keyframes ll-chrome-in {
   from {
-    opacity: 0.5;
+    opacity: 0;
+    transform: translateY(-5px);
   }
 
   to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes ll-workbench-in {
+  from {
     opacity: 0;
+    transform: translateY(7px) scale(0.995);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
   }
 }
 
@@ -505,7 +816,9 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .inspector-tabs::before,
   .inspector-tabs::after,
+  .wb-tabbar.mobile-tabbar::after,
   .wb-tabbar.mobile-tabbar::before,
   .wb-instruction-follow,
   .wb-instruction-card,
@@ -528,9 +841,19 @@
   .wb-instruction-card,
   .wb-theme-menu,
   .wb-theme-option,
+  .wb-instruction-card::after,
+  .ll-selection-box,
   .wb-shell .brand-mark::after,
   .wb-shell .wb-run-toggle::after,
-  .app-shell[data-theme-switching='true']::after {
+  .app-shell[data-theme-switching='true']::after,
+  .wb-shell > .wb-topbar,
+  .wb-shell > .wb-instruction-strip,
+  .wb-shell > .wb-workbench,
+  .wb-shell > .wb-statusbar {
     animation: none;
+  }
+
+  .ll-rung.is-whole-selected > .ll-rung-header .ll-rung-marker {
+    transform: none;
   }
 }

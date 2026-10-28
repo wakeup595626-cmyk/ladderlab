@@ -305,29 +305,18 @@ function TagsPanel({
             <article className="tag-card" key={tag.id}>
               <div className="tag-card-head">
                 <div className="tag-name-cell">
-                  <div className="tag-name-line">
-                    <span className="type-pill">{tag.kind}</span>
-                    <input
-                      key={`${tag.id}-name-${tag.name}`}
-                      className="table-input mono tag-name-input"
-                      defaultValue={tag.name}
-                      maxLength={FIELD_LIMITS.tagName}
-                      aria-label="变量名称"
-                      onBlur={(event) => {
-                        const name = event.target.value.trim()
-                        if (name && name !== tag.name) onProgram(updateTag(program, tag.id, { name }))
-                      }}
-                      spellCheck={false}
-                    />
-                  </div>
+                  <span className="type-pill">{tag.kind}</span>
                   <input
-                    key={`${tag.id}-comment-${tag.comment}`}
-                    className="comment-input"
-                    defaultValue={tag.comment}
-                    maxLength={FIELD_LIMITS.tagComment}
-                    placeholder="注释"
-                    aria-label="变量注释"
-                    onBlur={(event) => onProgram(updateTag(program, tag.id, { comment: event.target.value }))}
+                    key={`${tag.id}-name-${tag.name}`}
+                    className="table-input mono tag-name-input"
+                    defaultValue={tag.name}
+                    maxLength={FIELD_LIMITS.tagName}
+                    aria-label="变量名称"
+                    onBlur={(event) => {
+                      const name = event.target.value.trim()
+                      if (name && name !== tag.name) onProgram(updateTag(program, tag.id, { name }))
+                    }}
+                    spellCheck={false}
                   />
                 </div>
                 <div className="tag-card-fields">
@@ -402,6 +391,15 @@ function TagsPanel({
                   <CloseIcon size={13} />
                 </button>
               </div>
+              <input
+                key={`${tag.id}-comment-${tag.comment}`}
+                className="comment-input"
+                defaultValue={tag.comment}
+                maxLength={FIELD_LIMITS.tagComment}
+                placeholder="注释"
+                aria-label="变量注释"
+                onBlur={(event) => onProgram(updateTag(program, tag.id, { comment: event.target.value }))}
+              />
             </article>
           )
         })}

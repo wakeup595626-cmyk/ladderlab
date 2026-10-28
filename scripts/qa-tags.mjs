@@ -216,10 +216,12 @@ const editResult = await evaluate(`(() => {
     input.dispatchEvent(new Event('input', { bubbles: true }))
     input.dispatchEvent(new FocusEvent('focusout', { bubbles: true }))
   }
-  const inputs = card.querySelectorAll('input')
-  set(inputs[1], 'QA 变量')
-  set(inputs[0], 'QaTag')
-  set(inputs[2], '%M9.9')
+  // Keep the QA contract tied to semantic controls, not DOM order: the
+  // comment is its own full-width row now and must not be mistaken for the
+  // address field when the card layout changes again.
+  set(card.querySelector('.tag-name-input'), 'QaTag')
+  set(card.querySelector('.address-input'), '%M9.9')
+  set(card.querySelector('.comment-input'), 'QA 变量')
   return { added: true }
 })()`)
 await sleep(240)
