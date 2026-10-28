@@ -87,14 +87,15 @@ function expectReadable(tokens: ThemeTokens, label: string): void {
 }
 
 describe('主题预设', () => {
-  it('提供五套中文命名预设，原版绿排第一', () => {
-    expect(THEME_PRESETS.map((preset) => preset.id)).toEqual(['classic', 'ice', 'azure', 'mint', 'lilac'])
+  it('提供六套中文命名预设，原版绿排第一', () => {
+    expect(THEME_PRESETS.map((preset) => preset.id)).toEqual(['classic', 'ice', 'azure', 'mint', 'lilac', 'blush'])
     expect(THEME_PRESETS.map((preset) => preset.name)).toEqual([
       '原版绿',
       '冰湖青',
       '晴空蓝',
       '薄荷绿',
       '晨雾紫',
+      '樱花粉',
     ])
     expect(THEME_PRESETS.map((preset) => preset.note)).toEqual([
       '最初版本，默认',
@@ -102,6 +103,7 @@ describe('主题预设', () => {
       '干净利落，偏产品感',
       '柔和护眼，偏自然',
       '安静柔和，偏创作感',
+      '柔和粉嫩，偏温柔',
     ])
     expect(THEME_PRESETS.map((preset) => preset.swatch)).toEqual([
       '#0f6b7a',
@@ -109,6 +111,7 @@ describe('主题预设', () => {
       '#1976d2',
       '#0a8478',
       '#7a5cd6',
+      '#b8446f',
     ])
   })
 
@@ -121,7 +124,7 @@ describe('主题预设', () => {
     }
   })
 
-  it('五套预设的正文与次要文字都落在可读区间', () => {
+  it('六套预设的正文与次要文字都落在可读区间', () => {
     for (const preset of THEME_PRESETS) {
       expectReadable(preset.tokens, preset.id)
     }

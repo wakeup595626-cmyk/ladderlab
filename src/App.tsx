@@ -2874,6 +2874,19 @@ export default function App() {
     setProgramSheetWidth(PROGRAM_SHEET_DEFAULT_WIDTH)
   }
 
+  /**
+   * 插入标记只服务于“连着插几条收藏指令”。除了收藏条本身和图纸上的
+   * 目标位置，点界面任何地方（顶栏、侧栏、变量表、留白）都算这次插入结束。
+   * 用捕获阶段是因为 `.ll-slot` 会 stopPropagation，冒泡阶段收不到。
+   */
+  const clearInsertCursorOnAnyPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0 || !(event.target instanceof Element)) return
+    if (event.target.closest('[data-keep-insert-cursor="true"], .ll-slot')) return
+    if (!insertCursor && !favoriteTargetPreview) return
+    setInsertCursor(null)
+    dismissFavoriteTargetPreview()
+  }
+
   /** 点界面任意非交互留白都取消元件选中并收起落点提示；图纸内部仍由画布处理。 */
   const clearSelectionOnBlankPointerDown = (event: {
     button: number
@@ -2939,6 +2952,7 @@ export default function App() {
       data-inspector-resizing={resizingInspector ? 'true' : undefined}
       data-program-sheet-resizing={resizingProgramSheetSide ? 'true' : undefined}
       style={{ '--inspector-width': `${inspectorWidth}px`, ...themeVars } as CSSProperties}
+      onPointerDownCapture={clearInsertCursorOnAnyPointerDown}
       onPointerDown={clearSelectionOnBlankPointerDown}
     >
       <WorkspaceTopBar

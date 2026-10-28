@@ -1,5 +1,5 @@
 /**
- * 主题验收：五套预设（默认原版绿）、自定义色派生、刷新持久化、portal 弹层换肤与移动端。
+ * 主题验收：六套预设（默认原版绿）、自定义色派生、刷新持久化、portal 弹层换肤与移动端。
  *
  * 用法：先启动 preview（默认 4173）与带调试端口的浏览器（9444），
  * 然后 node scripts/qa-theme.mjs。
@@ -96,14 +96,14 @@ async function shot(path) {
 }
 
 async function openMenu() {
-  const open = await evaluate("!!document.querySelector('#topbar-more-menu')")
+  const open = await evaluate("!!document.querySelector('#topbar-theme-menu')")
   if (!open) {
     await evaluate(
-      "(() => { const button = [...document.querySelectorAll('button')].find((item) => item.getAttribute('aria-label') === '更多操作'); if (!button) return false; button.click(); return true })()",
+      "(() => { const button = document.querySelector('.wb-theme-button'); if (!button) return false; button.click(); return true })()",
     )
     await sleep(300)
   }
-  return evaluate("!!document.querySelector('#topbar-more-menu')")
+  return evaluate("!!document.querySelector('#topbar-theme-menu')")
 }
 
 async function clickPreset(name) {
@@ -171,6 +171,7 @@ const PRESETS = [
   { name: '晴空蓝', accent: '#1976d2' },
   { name: '薄荷绿', accent: '#0a8478' },
   { name: '晨雾紫', accent: '#7a5cd6' },
+  { name: '樱花粉', accent: '#b8446f' },
 ]
 
 const checks = {}
@@ -203,13 +204,13 @@ try {
   check('menu-opens', await openMenu())
   const presetCount = await evaluate("document.querySelectorAll('.wb-theme-option:not(.is-custom)').length")
   const customEntry = await evaluate("document.querySelectorAll('.wb-theme-option.is-custom').length")
-  check('presets-rendered', presetCount === 5 && customEntry === 1, { presetCount, customEntry })
+  check('presets-rendered', presetCount === 6 && customEntry === 1, { presetCount, customEntry })
 
   for (const preset of PRESETS) {
     const clicked = await clickPreset(preset.name)
     await sleep(420)
     const tokens = await evaluate(TOKENS)
-    const stillOpen = await evaluate("!!document.querySelector('#topbar-more-menu')")
+    const stillOpen = await evaluate("!!document.querySelector('#topbar-theme-menu')")
     const checked = await evaluate(
       "(() => { const button = [...document.querySelectorAll('.wb-theme-option')].find((item) => item.textContent.includes(" + JSON.stringify(preset.name) + ")); return button ? button.getAttribute('aria-checked') : null })()",
     )
@@ -284,11 +285,18 @@ try {
   await sleep(320)
   const mobileOpen = await openMenu()
   const overflow = await evaluate('document.documentElement.scrollWidth - window.innerWidth')
+  const mobileMenuBox = await evaluate(
+    "(() => { const menu = document.querySelector('#topbar-theme-menu'); if (!menu) return null; const box = menu.getBoundingClientRect(); return { left: box.left, right: box.right, width: box.width, viewport: window.innerWidth } })()",
+  )
   await clickPreset('薄荷绿')
   await sleep(420)
   const mobileTokens = await evaluate(TOKENS)
   await shot('docs/qa/theme-mobile.png')
-  check('mobile-menu', mobileOpen && overflow <= 0, { overflow })
+  check(
+    'mobile-menu',
+    mobileOpen && overflow <= 0 && !!mobileMenuBox && mobileMenuBox.left >= 0 && mobileMenuBox.right <= mobileMenuBox.viewport + 0.5,
+    { overflow, mobileMenuBox },
+  )
   check('mobile-switch', mobileTokens.accent === '#0a8478', mobileTokens.accent)
 
   check('console-errors', errors.length === 0, errors.slice(0, 5))

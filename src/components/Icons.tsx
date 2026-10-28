@@ -413,3 +413,14 @@ export function CpuIcon(props: IconProps) {
     </IconBase>
   )
 }
+
+export function PaletteIcon(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <path d="M12 3.6a8.4 8.4 0 0 0 0 16.8c1.1 0 1.9-.7 1.9-1.7 0-.5-.2-.9-.5-1.2-.3-.3-.5-.7-.5-1.1 0-.9.8-1.6 1.7-1.6h1.1a4.7 4.7 0 0 0 4.7-4.7c0-3.6-3.8-6.5-8.4-6.5Z" />
+      <circle cx="8.3" cy="9.6" r="1.15" fill="currentColor" stroke="none" />
+      <circle cx="12.1" cy="7.6" r="1.15" fill="currentColor" stroke="none" />
+      <circle cx="15.8" cy="9.7" r="1.15" fill="currentColor" stroke="none" />
+    </IconBase>
+  )
+}

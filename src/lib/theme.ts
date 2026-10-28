@@ -1,6 +1,6 @@
 /** 主题令牌与配色派生。全部是纯函数：同样的输入永远得到同样的 #rrggbb，不读写 DOM。 */
 
-export type ThemeId = 'classic' | 'ice' | 'azure' | 'mint' | 'lilac' | 'custom'
+export type ThemeId = 'classic' | 'ice' | 'azure' | 'mint' | 'lilac' | 'blush' | 'custom'
 
 export interface ThemePreference {
   preset: ThemeId
@@ -222,10 +222,42 @@ export const THEME_PRESETS: ReadonlyArray<{
       warningWash: '#fbf4e6',
     },
   },
+  {
+    id: 'blush',
+    name: '樱花粉',
+    note: '柔和粉嫩，偏温柔',
+    swatch: '#b8446f',
+    tokens: {
+      ground: '#fdf4f6',
+      workbench: '#f7e6ea',
+      surface: '#ffffff',
+      raised: '#fefafb',
+      active: '#fbe9ee',
+      frame: '#fffafb',
+      frameInk: '#2c1620',
+      border: '#f0d7de',
+      rule: '#f7e8ec',
+      control: '#d7aeba',
+      inputRule: '#b98a98',
+      text: '#2c1620',
+      muted: '#6d4a55',
+      faint: '#7d5a65',
+      accent: '#b8446f',
+      accentInk: '#8f2f52',
+      accentWash: '#fbe9ef',
+      addressInk: '#a83a63',
+      positive: '#157347',
+      positiveWash: '#e9f5ee',
+      negative: '#b3261e',
+      negativeWash: '#fbe9e7',
+      warning: '#8a5a13',
+      warningWash: '#f9f0e0',
+    },
+  },
 ]
 
 const HEX_PATTERN = /^#[0-9a-f]{6}$/i
-const THEME_IDS: ReadonlyArray<ThemeId> = ['classic', 'ice', 'azure', 'mint', 'lilac', 'custom']
+const THEME_IDS: ReadonlyArray<ThemeId> = ['classic', 'ice', 'azure', 'mint', 'lilac', 'blush', 'custom']
 
 /** 只接受 #rrggbb；简写、缺井号、非十六进制一律返回 null。 */
 export function parseHexColor(value: string): [number, number, number] | null {

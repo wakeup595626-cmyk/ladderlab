@@ -12,7 +12,7 @@
 
 ## 令牌来源
 
-颜色令牌分三层：`src/lib/theme.ts` 是唯一事实来源（4 套预设 + 自定义派生），运行时由
+颜色令牌分三层：`src/lib/theme.ts` 是唯一事实来源（6 套预设 + 自定义派生），运行时由
 `themeCssVars()` 同时写到 `.app-shell` 的行内样式与 `document.documentElement`（后者让
 portal 到 body 的快速编辑器、插入菜单一起换肤）；`src/index.css` 定义布局与字体基础变量；
 `src/Shell.css` 只负责密度、圆角与动效。新增界面直接使用语义变量，不复制十六进制值。
@@ -23,7 +23,7 @@ portal 到 body 的快速编辑器、插入菜单一起换肤）；`src/index.cs
 
 | 类别 | 来源令牌 | 使用方式 |
 | --- | --- | --- |
-| 主题预设 | classic 原版绿（默认，最初配色）、ice 冰湖青、azure 晴空蓝、mint 薄荷绿、lilac 晨雾紫、custom | 「更多操作 → 外观」切换；写入 localStorage 的 ladderlab.theme.v1，刷新后保留 |
+| 主题预设 | classic 原版绿（默认，最初配色）、ice 冰湖青、azure 晴空蓝、mint 薄荷绿、lilac 晨雾紫、blush 樱花粉、custom | 右上角「配色」按钮切换；写入 localStorage 的 ladderlab.theme.v1，刷新后保留 |
 | 框架色 | --frame、--frame-ink、--ground、--workbench | 应用外框、导航边界、工作区底色，以及图纸两侧可扩展的加深带 |
 | 纸面色 | --surface、--raised、--active | 程序纸面、工具区和选中状态 |
 | 边界 | --border、--rule、--control | 框架分隔、纸面细线和可操作控件边界 |
@@ -44,13 +44,14 @@ portal 到 body 的快速编辑器、插入菜单一起换肤）；`src/index.cs
 
 动效只解释状态，不负责装饰。统一使用 `src/motion.css` 里的 `--dur-*` 与 `--ease-*`：
 
-- 按下 120ms、hover 160ms、跟随与下划线 190–240ms、抽屉 260–320ms；曲线用 ease-out 或
+- 按下 120ms、hover 160–200ms、跟随与下划线 210–240ms、抽屉 260–320ms；曲线用 ease-out 或
   自带回弹的 `--ease-drawer`，超过 400ms 的过渡一律不做。
-- 允许的「灯光」只有三处：顶栏左上角的一层极淡 accent 径向光、运行中按钮的柔和外环、
-  通电导线上的 spark 流光。它们都必须跟随主题令牌，且不得遮挡文字。
+- 允许的「灯光」只有状态相关的几处：品牌标记的呼吸环、运行按钮的柔和外环、插入光标的
+  呼吸 halo、通电导线上的 spark 流光，以及切换预设时右上角一次 340ms 的主题光晕。
+  它们都必须跟随主题令牌，且不得遮挡文字。
 - 禁止用 `stroke-dashoffset` 做无限循环（SVG 重绘、多段并联时并发数爆炸）；通电只用
   一小段 spark，最多 8 段同屏。
-- 程序段入场只做 140ms 透明度淡入，不做位移与逐段延迟，避免编辑时整表闪烁。
+- 程序段入场做 200ms 透明度淡入加 5px 上移，不做逐段延迟，避免编辑时整表闪烁。
 - `prefers-reduced-motion: reduce` 下所有动画与主题过渡归零。
 
 ## 禁止项

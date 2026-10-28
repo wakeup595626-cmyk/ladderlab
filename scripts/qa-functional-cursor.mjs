@@ -2,7 +2,7 @@
  * 收藏指令连续插入的真实浏览器回归。
  *
  * 覆盖：空程序段无输出线圈、点 + 后游标持续存在、收藏触点顺序推进、
- * 点画布空白清除游标、收藏条的分支/合并按钮走通现有线路操作。
+ * 点顶栏/文档栏/变量面板/画布任意位置清除游标、收藏条的分支/合并按钮走通现有线路操作。
  */
 import {
   closeQaPage,
@@ -80,6 +80,54 @@ async function clickSelector(selector, text = '') {
   })()`)
   if (!point) throw new Error(`找不到可点击元素：${selector}${text ? `（${text}）` : ''}`)
   await clickAt(point.x, point.y)
+}
+
+async function pressEscape() {
+  await send('Input.dispatchKeyEvent', {
+    type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27,
+  })
+  await send('Input.dispatchKeyEvent', {
+    type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27,
+  })
+  await sleep(180)
+}
+
+async function blankPointIn(selector) {
+  return evaluate(`(() => {
+    const host = document.querySelector(${JSON.stringify(selector)})
+    if (!host) return null
+    host.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+    const rect = host.getBoundingClientRect()
+    const blocked = 'button, input, textarea, select, a, summary, [role="button"], [role="menu"], [role="radio"], [data-node-id], [data-output-id], .ll-slot, .ll-merge-chip, .ll-node-grip, [data-drag-handle]'
+    for (let y = Math.max(0, rect.top) + 8; y < Math.min(innerHeight, rect.bottom) - 8; y += 10) {
+      for (let x = Math.max(0, rect.left) + 8; x < Math.min(innerWidth, rect.right) - 8; x += 10) {
+        const hit = document.elementFromPoint(x, y)
+        if (hit && host.contains(hit) && !hit.closest(blocked)) return { x, y }
+      }
+    }
+    return null
+  })()`)
+}
+
+async function rearmCursor(rungId = '') {
+  const rungSelector = JSON.stringify(`.ll-rung[data-rung-id="${rungId}"]`)
+  const point = await evaluate(`(() => {
+    const rung = document.querySelector('.ll-rung.is-favorite-target')
+      ?? document.querySelector(${rungSelector})
+    const plus = rung?.querySelector('.ll-slot.is-favorite-target .ll-slot-plus')
+      ?? rung?.querySelector('.ll-slot-plus')
+    if (!plus) return null
+    plus.scrollIntoView({ block: 'center', inline: 'nearest' })
+    const rect = plus.getBoundingClientRect()
+    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
+  })()`)
+  if (!point) throw new Error('重新点 + 时找不到插入游标')
+  await clickAt(point.x, point.y)
+  await pressEscape()
+  return evaluate(`({
+    slots: document.querySelectorAll('.ll-slot.is-favorite-target').length,
+    halos: document.querySelectorAll('.ll-insert-cursor-halo').length,
+  })`)
 }
 
 async function reload(clearStorage = false) {
@@ -230,6 +278,59 @@ check(
 const cursorRungId = await evaluate(
   `document.querySelector('.ll-rung.is-favorite-target')?.dataset.rungId ?? null`,
 )
+
+const markerCounts = () => evaluate(`({
+  slots: document.querySelectorAll('.ll-slot.is-favorite-target').length,
+  halos: document.querySelectorAll('.ll-insert-cursor-halo').length,
+})`)
+
+/* 用户要求“点任意地方都取消”：顶栏、文档栏、变量面板、画布元件都要逐一验。 */
+await clickSelector('.wb-brand')
+await pressEscape()
+const afterTopbar = await markerCounts()
+check('cursor/topbar-click-clears-marker', afterTopbar.slots === 0 && afterTopbar.halos === 0, afterTopbar)
+
+const rearmedTopbar = await rearmCursor(cursorRungId)
+const documentBarPoint = await blankPointIn('.wb-documentbar')
+if (documentBarPoint) await clickAt(documentBarPoint.x, documentBarPoint.y)
+await pressEscape()
+const afterDocumentBar = await markerCounts()
+check(
+  'cursor/documentbar-click-clears-marker',
+  Boolean(documentBarPoint)
+    && rearmedTopbar.slots === 1
+    && afterDocumentBar.slots === 0
+    && afterDocumentBar.halos === 0,
+  { documentBarPoint, rearmedTopbar, afterDocumentBar },
+)
+
+await clickSelector('.wb-doc-action', '变量表')
+await sleep(420)
+const rearmedInspector = await rearmCursor(cursorRungId)
+const inspectorPoint = await blankPointIn('.wb-context-panel')
+if (inspectorPoint) await clickAt(inspectorPoint.x, inspectorPoint.y)
+await pressEscape()
+const afterInspector = await markerCounts()
+check(
+  'cursor/variable-panel-click-clears-marker',
+  Boolean(inspectorPoint)
+    && rearmedInspector.slots === 1
+    && afterInspector.slots === 0
+    && afterInspector.halos === 0,
+  { inspectorPoint, rearmedInspector, afterInspector },
+)
+
+const rearmedCanvas = await rearmCursor(cursorRungId)
+await clickSelector('.ll-node[data-node-id]')
+await pressEscape()
+const afterCanvasNode = await markerCounts()
+check(
+  'cursor/canvas-component-click-clears-marker',
+  rearmedCanvas.slots === 1 && afterCanvasNode.slots === 0 && afterCanvasNode.halos === 0,
+  { rearmedCanvas, afterCanvasNode },
+)
+
+await rearmCursor(cursorRungId)
 
 /* 点真正的画布留白：固定游标和光晕都应立即消失。 */
 const blankPoint = await evaluate(`(() => {

@@ -457,7 +457,7 @@ body[data-drag-kind] {
   font-weight: 600;
 }
 
-/* 五套预设 + 自定义正好排满三行两列，不留下空位。 */
+/* 预设排成两列；自定义单独占满一行，六套预设不会留下半格空位。 */
 .wb-theme-option.is-custom {
   grid-column: auto;
 }
@@ -4549,6 +4549,296 @@ body[data-drag-kind] {
   }
 
   .wb-file-compact > span {
+    display: none;
+  }
+}
+
+/* ============================================ 收藏条：独立卡片、精简落点 */
+/* 原来整条是一个 46px 的分段控件，收藏越多越像一格一格的进度条。
+   现在每条收藏、构造按钮、插入目标都各自成卡，中间留 8px，
+   扫一眼就能数清有几条，也不会把相邻按钮点串。 */
+
+.wb-instruction-tools {
+  height: auto;
+  min-height: 46px;
+  gap: 8px;
+  overflow: visible;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.wb-instruction-list {
+  height: 46px;
+  gap: 8px;
+  padding-right: 2px;
+  border-right: 0;
+}
+
+.wb-instruction-card {
+  height: 46px;
+  border: 1px solid var(--control);
+  border-radius: 9px;
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.wb-instruction-card .wb-instruction-button {
+  border-right: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.wb-instruction-card .wb-instruction-button:hover:not(:disabled) {
+  background: var(--accent-wash);
+}
+
+.wb-instruction-star {
+  border-left: 1px solid var(--rule);
+}
+
+.wb-instruction-star:hover {
+  background: var(--accent-wash);
+}
+
+.wb-instruction-list .wb-instruction-card:last-child {
+  border-right: 1px solid var(--control);
+}
+
+.wb-instruction-construct {
+  height: 46px;
+  gap: 0;
+  overflow: hidden;
+  border: 1px solid var(--control);
+  border-radius: 9px;
+  background: var(--surface);
+}
+
+.wb-construct-button {
+  height: 100%;
+  min-width: 52px;
+  border: 0;
+  border-right: 1px solid var(--rule);
+  border-radius: 0;
+  background: transparent;
+}
+
+.wb-construct-button:last-child {
+  border-right: 0;
+}
+
+.wb-instruction-button.is-all {
+  height: 46px;
+  border: 1px solid var(--control);
+  border-radius: 9px;
+  background: var(--surface);
+}
+
+.wb-instruction-scroll {
+  width: 40px;
+  height: 46px;
+  border: 1px solid var(--control);
+  border-radius: 9px;
+  background: var(--surface);
+}
+
+.wb-instruction-empty {
+  height: 46px;
+  border: 1px dashed var(--control);
+  border-radius: 9px;
+  background: var(--raised);
+}
+
+/* 插入目标只留“插入 + 程序段 + 定位图标”：段落编号和落点已经写在图纸高亮上，
+   再重复一遍只会在窄屏上把收藏挤没。 */
+.wb-insert-target {
+  height: 46px;
+  gap: 7px;
+  padding: 0 8px 0 11px;
+  border: 1px solid var(--control);
+  border-radius: 9px;
+  background: var(--surface);
+}
+
+.wb-insert-target-kicker {
+  color: var(--muted);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.wb-insert-target-select select {
+  height: 30px;
+  max-width: 104px;
+  border-color: var(--border);
+  border-radius: 6px;
+  background: var(--raised);
+}
+
+.wb-insert-target-locate {
+  display: inline-grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  padding: 0;
+  border-radius: 7px;
+  color: var(--accent-ink);
+}
+
+/* ================================================ 配色入口与外观弹层 */
+
+.wb-theme-control {
+  display: flex;
+  height: 36px;
+  flex: 0 0 auto;
+  align-items: stretch;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--surface);
+}
+
+.wb-theme-button {
+  display: inline-flex;
+  height: 100%;
+  align-items: center;
+  gap: 6px;
+  padding: 0 11px 0 9px;
+  border: 0;
+  border-radius: inherit;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.wb-theme-button:hover {
+  background: var(--active);
+  color: var(--text);
+}
+
+.wb-theme-button[aria-expanded='true'] {
+  background: var(--accent-wash);
+  color: var(--accent-ink);
+}
+
+.wb-theme-button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.wb-theme-button-icon {
+  display: inline-grid;
+  place-items: center;
+}
+
+.wb-theme-menu.topbar-menu {
+  display: block;
+  width: min(326px, calc(100vw - 24px));
+  padding: 10px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--control);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: 0 22px 48px rgba(18, 24, 30, 0.18), 0 2px 6px rgba(18, 24, 30, 0.06);
+}
+
+.wb-theme-menu-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 2px 4px 9px;
+}
+
+.wb-theme-menu-current {
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+.wb-theme-menu .wb-theme-grid {
+  gap: 6px;
+  padding: 0 0 10px;
+}
+
+.wb-theme-menu .wb-theme-option {
+  height: auto;
+  min-height: 46px;
+  gap: 9px;
+  padding: 7px 8px;
+  border-color: var(--border);
+  border-radius: 9px;
+  background: var(--raised);
+  color: var(--text);
+}
+
+.wb-theme-menu .wb-theme-option:hover {
+  border-color: var(--control);
+  background: var(--active);
+}
+
+.wb-theme-menu .wb-theme-option[aria-checked='true'] {
+  border-color: var(--accent);
+  background: var(--accent-wash);
+  color: var(--accent-ink);
+}
+
+.wb-theme-menu .wb-theme-option > .wb-theme-option-text {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+  overflow: visible;
+  white-space: normal;
+}
+
+.wb-theme-option-name {
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.wb-theme-option-note {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 10.5px;
+  font-weight: 400;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-theme-menu .wb-theme-option[aria-checked='true'] .wb-theme-option-note {
+  color: var(--accent-ink);
+  opacity: 0.82;
+}
+
+.wb-theme-menu .wb-theme-option.is-custom {
+  grid-column: 1 / -1;
+}
+
+.wb-theme-menu .wb-theme-custom {
+  gap: 6px;
+  padding: 9px 4px 2px;
+  border-top: 1px solid var(--rule);
+}
+
+.wb-shell .wb-topbar:has(.wb-theme-menu) {
+  z-index: 89;
+}
+
+@media (max-width: 900px) {
+  .wb-theme-control {
+    height: 38px;
+  }
+
+  .wb-theme-button {
+    width: 40px;
+    justify-content: center;
+    padding: 0;
+  }
+
+  .wb-theme-button-label {
     display: none;
   }
 }

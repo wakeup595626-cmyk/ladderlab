@@ -116,7 +116,7 @@ export default function InstructionBar({
     if (!host || target === null) return
     if (window.matchMedia?.('(pointer: coarse)').matches) return
     const button = target.closest<HTMLElement>(
-      '.wb-instruction-button:not(:disabled), .wb-construct-button',
+      '.wb-instruction-card, .wb-construct-button, .wb-instruction-button.is-all',
     )
     if (!button || !host.contains(button)) {
       hideFollow()
@@ -197,6 +197,7 @@ export default function InstructionBar({
       <div
         className="wb-instruction-tools"
         ref={toolsRef}
+        data-keep-insert-cursor="true"
         role="toolbar"
         aria-label="收藏的梯形图指令"
         onPointerOver={(event) => {
@@ -217,7 +218,12 @@ export default function InstructionBar({
           onSelectRung={onSelectRung}
           onLocate={onLocateTarget}
         />
-        <div className="wb-instruction-construct" role="group" aria-label="线路构造">
+        <div
+          className="wb-instruction-construct"
+          data-keep-insert-cursor="true"
+          role="group"
+          aria-label="线路构造"
+        >
           <button
             type="button"
             className="wb-construct-button"
@@ -237,7 +243,12 @@ export default function InstructionBar({
             <span>合并</span>
           </button>
         </div>
-        <div className="wb-instruction-list" ref={listRef} onScroll={hideFollow}>
+        <div
+          className="wb-instruction-list"
+          ref={listRef}
+          data-keep-insert-cursor="true"
+          onScroll={hideFollow}
+        >
           {favorites.length === 0 && (
             <div className="wb-instruction-empty">
               <span>还没有收藏指令</span>
