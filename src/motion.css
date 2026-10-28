@@ -3,7 +3,7 @@
    Only transform and opacity animate; colour changes stay short and linear. */
 
 .wb-shell {
-  --ease-spring: cubic-bezier(0.34, 1.5, 0.64, 1);
+  --ease-fluid: cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .inspector-tabs {
@@ -194,6 +194,25 @@
   opacity: 0;
 }
 
+.ll-node.is-just-inserted {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.ll-insert-flash {
+  fill: none;
+  stroke: color-mix(in srgb, var(--accent) 90%, white 10%);
+  stroke-width: 3;
+  stroke-dasharray: none;
+  opacity: 0;
+  pointer-events: none;
+  filter:
+    drop-shadow(0 0 4px color-mix(in srgb, var(--accent) 85%, transparent))
+    drop-shadow(0 0 10px color-mix(in srgb, var(--accent) 45%, transparent));
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
 @media (prefers-reduced-motion: no-preference) {
   .ll-energy-spark {
     animation: ll-energy-run 1800ms linear infinite;
@@ -209,6 +228,14 @@
 
   .ll-insert-cursor-ripple {
     animation: ll-cursor-ripple 1200ms var(--ease-out) infinite;
+  }
+
+  .ll-node.is-just-inserted {
+    animation: ll-node-insert-pop 700ms var(--ease-fluid);
+  }
+
+  .ll-insert-flash {
+    animation: ll-insert-ring 680ms var(--ease-out) forwards;
   }
 }
 
@@ -232,6 +259,43 @@
   100% {
     opacity: 0;
     transform: scale(2);
+  }
+}
+
+@keyframes ll-node-insert-pop {
+  0% {
+    opacity: 0.2;
+    transform: scale(0.68);
+  }
+
+  38% {
+    opacity: 1;
+    transform: scale(1.11);
+  }
+
+  68% {
+    transform: scale(0.985);
+  }
+
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes ll-insert-ring {
+  0% {
+    opacity: 1;
+    stroke-width: 3.5;
+    transform: scale(0.9);
+  }
+
+  58% { opacity: 0.5; }
+
+  100% {
+    opacity: 0;
+    stroke-width: 0.8;
+    transform: scale(1.52);
   }
 }
 
@@ -298,22 +362,70 @@
 }
 
 .wb-instruction-press {
+  --press-x: 50%;
+  --press-y: 50%;
   position: absolute;
   inset: 0;
-  background: radial-gradient(
-    circle at 50% 58%,
-    color-mix(in srgb, var(--accent) 36%, transparent),
-    color-mix(in srgb, var(--accent) 13%, transparent) 38%,
-    transparent 72%
-  );
   z-index: 3;
+  background: radial-gradient(
+    circle 92px at var(--press-x) var(--press-y),
+    color-mix(in srgb, var(--accent) 60%, transparent),
+    color-mix(in srgb, var(--accent) 26%, transparent) 34%,
+    transparent 74%
+  );
   opacity: 0;
   pointer-events: none;
+}
+
+.wb-instruction-press::before,
+.wb-instruction-press::after {
+  position: absolute;
+  top: var(--press-y);
+  left: var(--press-x);
+  width: 18px;
+  height: 18px;
+  margin: -9px 0 0 -9px;
+  border: 2px solid color-mix(in srgb, var(--accent) 84%, white 16%);
+  border-radius: 50%;
+  box-shadow:
+    0 0 12px color-mix(in srgb, var(--accent) 76%, transparent),
+    inset 0 0 8px color-mix(in srgb, var(--accent) 45%, transparent);
+  content: "";
+  opacity: 0;
+  pointer-events: none;
+  transform: scale(0.35);
+}
+
+.wb-instruction-press::after {
+  border-width: 1px;
+  box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 52%, transparent);
 }
 
 .wb-instruction-card {
   position: relative;
   transform: none;
+}
+
+.wb-instruction-card:focus-within {
+  border-color: color-mix(in srgb, var(--accent) 62%, var(--control));
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent),
+    inset 0 1px 0 color-mix(in srgb, var(--surface) 80%, white 20%);
+}
+
+.wb-instruction-card.is-confirmed {
+  border-color: color-mix(in srgb, var(--accent) 74%, var(--control));
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--accent) 18%, transparent),
+    0 7px 22px -10px color-mix(in srgb, var(--accent) 78%, transparent);
+}
+
+.wb-instruction-card.is-confirmed .wb-instruction-button {
+  animation: ll-favorite-press-bump 520ms var(--ease-fluid);
+}
+
+.wb-instruction-card.is-confirmed .wb-instruction-symbol {
+  animation: ll-favorite-symbol-pop 560ms var(--ease-fluid);
 }
 
 .wb-instruction-card::after {
@@ -348,7 +460,7 @@
 .wb-instruction-star {
   transform-origin: center;
   transition:
-    transform 180ms var(--ease-spring),
+    transform 180ms var(--ease-fluid),
     color 140ms linear,
     background-color 140ms linear;
 }
@@ -363,7 +475,7 @@
 .wb-instruction-button.is-all .wb-all-mark {
   display: inline-flex;
   transform-origin: center;
-  transition: transform 200ms var(--ease-spring);
+  transition: transform 200ms var(--ease-fluid);
 }
 
 @media (prefers-reduced-motion: no-preference) {
@@ -372,7 +484,15 @@
   }
 
   .wb-instruction-press {
-    animation: ll-press-flash 460ms var(--ease-out) forwards;
+    animation: ll-press-flash 680ms var(--ease-out) forwards;
+  }
+
+  .wb-instruction-press::before {
+    animation: ll-press-ring 620ms var(--ease-out) forwards;
+  }
+
+  .wb-instruction-press::after {
+    animation: ll-press-ring-soft 680ms 70ms var(--ease-out) forwards;
   }
 
   .wb-construct-button,
@@ -425,6 +545,13 @@
       inset 0 0 0 1px color-mix(in srgb, var(--accent) 13%, transparent),
       inset 0 1px 0 color-mix(in srgb, var(--surface) 78%, white 12%),
       0 0 16px -8px color-mix(in srgb, var(--accent) 72%, transparent);
+  }
+
+  .wb-instruction-card.is-confirmed:hover {
+    border-color: color-mix(in srgb, var(--accent) 74%, var(--control));
+    box-shadow:
+      0 0 0 2px color-mix(in srgb, var(--accent) 18%, transparent),
+      0 7px 22px -10px color-mix(in srgb, var(--accent) 78%, transparent);
   }
 
   .wb-instruction-card:hover::after,
@@ -515,19 +642,57 @@
 }
 
 @keyframes ll-press-flash {
+  0% { opacity: 0.94; }
+
+  48% { opacity: 0.62; }
+
+  100% { opacity: 0; }
+}
+
+@keyframes ll-press-ring {
   0% {
-    opacity: 0.88;
-    transform: scale(0.72);
+    opacity: 0.95;
+    transform: scale(0.35);
   }
 
-  58% {
-    opacity: 0.34;
+  62% { opacity: 0.42; }
+
+  100% {
+    opacity: 0;
+    transform: scale(5.4);
+  }
+}
+
+@keyframes ll-press-ring-soft {
+  0% {
+    opacity: 0.7;
+    transform: scale(0.2);
   }
 
   100% {
     opacity: 0;
-    transform: scale(1.16);
+    transform: scale(3.9);
   }
+}
+
+@keyframes ll-favorite-press-bump {
+  0% { transform: scale(1); }
+
+  26% { transform: scale(0.955); }
+
+  64% { transform: scale(1.025); }
+
+  100% { transform: scale(1); }
+}
+
+@keyframes ll-favorite-symbol-pop {
+  0% { transform: scale(1); }
+
+  32% { transform: translateY(-1px) scale(1.26) rotate(-2deg); }
+
+  70% { transform: translateY(0) scale(0.97); }
+
+  100% { transform: scale(1); }
 }
 
 /* ------------------------------------------------------ ladder selection */
@@ -548,7 +713,7 @@
   box-shadow: 0 0 9px color-mix(in srgb, var(--accent) 54%, transparent);
   transform: scaleY(1.42);
   transform-origin: center;
-  transition: transform 220ms var(--ease-spring);
+  transition: transform 220ms var(--ease-fluid);
 }
 
 .ll-node-hit,

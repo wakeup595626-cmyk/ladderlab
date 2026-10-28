@@ -141,6 +141,36 @@ const base = await evaluate(`(() => {
   const panel = document.querySelector('.tags-panel')
   const cards = [...document.querySelectorAll('.tag-card')]
   const search = document.querySelector('.tag-search')
+  const select = cards[0]?.querySelector('select.table-input')
+  const selectStyle = select ? getComputedStyle(select) : null
+  const measure = document.createElement('canvas').getContext('2d')
+  if (selectStyle) measure.font = selectStyle.fontWeight + ' ' + selectStyle.fontSize + ' ' + selectStyle.fontFamily
+  const selectTextWidth = select ? measure.measureText(select.selectedOptions[0]?.textContent ?? '').width : Infinity
+  const selectRoom = select && selectStyle
+    ? select.clientWidth - parseFloat(selectStyle.paddingLeft) - parseFloat(selectStyle.paddingRight)
+    : 0
+  const centeredControls = cards.length > 0 && cards.every((card) => {
+    const controls = [
+      card.querySelector('.tag-name-input'),
+      card.querySelector('.address-input'),
+      card.querySelector('select.table-input'),
+      card.querySelector('.live-value'),
+      card.querySelector('.comment-input'),
+    ].filter(Boolean)
+    return controls.every((control) => getComputedStyle(control).textAlign === 'center')
+  })
+  const rowCenters = cards.map((card) => {
+    const controls = [
+      card.querySelector('.tag-name-input'),
+      card.querySelector('.address-input'),
+      card.querySelector('select.table-input'),
+      card.querySelector('.live-value'),
+    ].filter(Boolean)
+    return controls.map((control) => {
+      const rect = control.getBoundingClientRect()
+      return Math.round((rect.top + rect.bottom) / 2)
+    })
+  })
   return {
     cards: cards.length,
     cardHeight: cards[0]?.getBoundingClientRect().height ?? 0,
@@ -149,6 +179,15 @@ const base = await evaluate(`(() => {
     nestedControlInLabel: !!document.querySelector('label .tag-search-clear'),
     oldMonitorPresent: !!document.querySelector('.tags-monitor'),
     overflow: panel ? panel.scrollWidth > panel.clientWidth + 1 : true,
+    centeredControls,
+    alignedRows: rowCenters.length > 0 && rowCenters.every((centers) => new Set(centers).size === 1),
+    rowCenters,
+    selectTextFits:
+      Boolean(select)
+      && selectStyle?.appearance === 'none'
+      && selectRoom >= selectTextWidth + 8,
+    selectRoom,
+    selectTextWidth,
   }
 })()`)
 check('desktop/tag-cards-present', base.cards === 3, base)
@@ -157,6 +196,9 @@ check('desktop/tag-fields-in-one-row', base.fieldsPerCard === 3, base.fieldsPerC
 check('desktop/search-is-semantic', base.searchRole === 'search' && !base.nestedControlInLabel, base)
 check('desktop/old-monitor-removed', !base.oldMonitorPresent)
 check('desktop/tag-panel-no-overflow', !base.overflow)
+check('desktop/tag-controls-centered', base.centeredControls, base)
+check('desktop/tag-controls-aligned', base.alignedRows, base.rowCenters)
+check('desktop/select-text-fits', base.selectTextFits, base)
 
 await enterSearch('Start')
 const byName = await evaluate(`({
@@ -268,6 +310,14 @@ const mobile = await evaluate(`(() => {
   const list = document.querySelector('.tag-list')
   const card = document.querySelector('.tag-card')
   const fields = card ? [...card.querySelectorAll('.tag-card-fields label')] : []
+  const select = card?.querySelector('select.table-input')
+  const selectStyle = select ? getComputedStyle(select) : null
+  const measure = document.createElement('canvas').getContext('2d')
+  if (selectStyle) measure.font = selectStyle.fontWeight + ' ' + selectStyle.fontSize + ' ' + selectStyle.fontFamily
+  const selectTextWidth = select ? measure.measureText(select.selectedOptions[0]?.textContent ?? '').width : Infinity
+  const selectRoom = select && selectStyle
+    ? select.clientWidth - parseFloat(selectStyle.paddingLeft) - parseFloat(selectStyle.paddingRight)
+    : 0
   const rect = card?.getBoundingClientRect()
   return {
     panel: !!panel,
@@ -277,13 +327,27 @@ const mobile = await evaluate(`(() => {
     cardHeight: rect?.height ?? 0,
     cardWidth: rect?.width ?? 0,
     fieldsVisible: fields.length === 3 && fields.every((item) => item.getBoundingClientRect().width > 20),
+    selectTextFits:
+      Boolean(select)
+      && selectStyle?.appearance === 'none'
+      && selectRoom >= selectTextWidth + 8,
+    selectWidth: select?.getBoundingClientRect().width ?? 0,
+    selectRoom,
+    selectTextWidth,
+    selectPadding: selectStyle ? selectStyle.padding : null,
+    selectAppearance: selectStyle?.appearance ?? null,
+    selectFont: selectStyle?.font ?? null,
     overflow: panel ? panel.scrollWidth > panel.clientWidth + 1 : true,
     documentOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
   }
 })()`)
 check('mobile/tag-list-visible', mobile.panel && mobile.listDisplay !== 'none' && mobile.listHeight > 0, mobile)
 check('mobile/tag-cards-dense', mobile.cards === 3 && mobile.cardHeight < 130, mobile)
-check('mobile/tag-fields-fit', mobile.fieldsVisible && !mobile.overflow && !mobile.documentOverflow, mobile)
+check(
+  'mobile/tag-fields-fit',
+  mobile.fieldsVisible && mobile.selectTextFits && !mobile.overflow && !mobile.documentOverflow,
+  mobile,
+)
 await screenshot('docs/qa/tags-mobile-390.png')
 
 await setViewport(320, 800, true)
@@ -293,14 +357,41 @@ const narrow = await evaluate(`(() => {
   const list = document.querySelector('.tag-list')
   const card = document.querySelector('.tag-card')
   const head = card?.querySelector('.tag-card-head')
+  const fieldLabels = card ? [...card.querySelectorAll('.tag-card-fields label > span')] : []
+  const select = card?.querySelector('select.table-input')
+  const selectStyle = select ? getComputedStyle(select) : null
+  const measure = document.createElement('canvas').getContext('2d')
+  if (selectStyle) measure.font = selectStyle.fontWeight + ' ' + selectStyle.fontSize + ' ' + selectStyle.fontFamily
+  const selectTextWidth = select ? measure.measureText(select.selectedOptions[0]?.textContent ?? '').width : Infinity
+  const selectRoom = select && selectStyle
+    ? select.clientWidth - parseFloat(selectStyle.paddingLeft) - parseFloat(selectStyle.paddingRight)
+    : 0
+  const selectTextFits =
+    Boolean(select)
+    && selectStyle?.appearance === 'none'
+    && selectRoom >= selectTextWidth + 8
+  const labelsVisible = fieldLabels.length === 3 && fieldLabels.every((label) => {
+    const rect = label.getBoundingClientRect()
+    return getComputedStyle(label).display !== 'none' && rect.width > 0 && rect.height > 0
+  })
   return {
     listVisible: !!list && getComputedStyle(list).display !== 'none' && list.getBoundingClientRect().height > 0,
     cardWidth: card?.getBoundingClientRect().width ?? 0,
     headWidth: head?.getBoundingClientRect().width ?? 0,
+    labelsVisible,
+    selectTextFits,
     overflow: panel ? panel.scrollWidth > panel.clientWidth + 1 : true,
   }
 })()`)
-check('mobile/320-no-overflow', narrow.listVisible && narrow.cardWidth > 0 && !narrow.overflow, narrow)
+check(
+  'mobile/320-labels-and-no-overflow',
+  narrow.listVisible
+    && narrow.cardWidth > 0
+    && narrow.labelsVisible
+    && narrow.selectTextFits
+    && !narrow.overflow,
+  narrow,
+)
 await screenshot('docs/qa/tags-mobile-320.png')
 
 socket.close()

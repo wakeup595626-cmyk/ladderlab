@@ -1658,6 +1658,37 @@ function collectNodeIds(nodes: LadderNode[]): string[] {
   ))
 }
 
+const insertPulseTimers = new WeakMap<SVGGraphicsElement, number>()
+
+/** 收藏指令写入画布后的确认动效：元件轻弹一次，外圈再扩散一圈。 */
+function pulseInsertedNode(node: Element) {
+  if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return
+  const graphic = node as SVGGraphicsElement
+  const previousTimer = insertPulseTimers.get(graphic)
+  if (previousTimer !== undefined) window.clearTimeout(previousTimer)
+  graphic.classList.remove('is-just-inserted')
+  // 连续快速插入同一个位置时，强制浏览器重新开始这次关键帧。
+  void graphic.getBoundingClientRect()
+  graphic.classList.add('is-just-inserted')
+  const pulseTimer = window.setTimeout(() => {
+    graphic.classList.remove('is-just-inserted')
+    insertPulseTimers.delete(graphic)
+  }, 760)
+  insertPulseTimers.set(graphic, pulseTimer)
+
+  const selection = graphic.querySelector<SVGRectElement>(':scope > .ll-selection-box')
+  if (!selection) return
+  graphic.querySelectorAll(':scope > .ll-insert-flash').forEach((ring) => ring.remove())
+  const ring = selection.cloneNode(true) as SVGRectElement
+  ring.classList.remove('ll-selection-box')
+  ring.classList.add('ll-insert-flash')
+  ring.setAttribute('aria-hidden', 'true')
+  graphic.appendChild(ring)
+  const cleanup = () => ring.remove()
+  ring.addEventListener('animationend', cleanup, { once: true })
+  window.setTimeout(cleanup, 900)
+}
+
 /** 插入后把新元件和输出一起带入视野，窄屏下不会只露出元件的一半。 */
 function revealInserted(
   container: HTMLDivElement,
@@ -1825,6 +1856,7 @@ function RungSection({
     const target = addedId ? nodes.find((node) => node.dataset.nodeId === addedId) : null
     const focus = target ?? (outputChanged ? output : null)
     if (!focus) return
+    pulseInsertedNode(focus)
     revealInserted(container, focus, output && focus !== output ? output : null)
   }, [rung.nodes, rung.output.id])
 

@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from 'react'
 import { getProfile } from '../engine/profiles'
 import type { ContactKind, OutputKind, ProfileId, Rung } from '../engine/types'
 import type { DragPayload } from '../lib/dragTypes'
@@ -89,7 +97,12 @@ export default function InstructionBar({
   const toolsRef = useRef<HTMLDivElement | null>(null)
   const flashTimerRef = useRef<number | null>(null)
   const [listScroll, setListScroll] = useState({ canScroll: false, atEnd: false })
-  const [flash, setFlash] = useState<{ id: string; nonce: number } | null>(null)
+  const [flash, setFlash] = useState<{
+    id: string
+    nonce: number
+    x: number
+    y: number
+  } | null>(null)
   const favorites = favoriteIds
     .map((id) => favoriteInstructionEntry(id))
     .filter((entry) => entry !== undefined)
@@ -104,11 +117,11 @@ export default function InstructionBar({
     if (flashTimerRef.current !== null) window.clearTimeout(flashTimerRef.current)
   }, [])
 
-  const pulseFavorite = useCallback((id: string) => {
-    setFlash((current) => ({ id, nonce: (current?.nonce ?? 0) + 1 }))
+  const pulseFavorite = useCallback((id: string, x: number, y: number) => {
+    setFlash((current) => ({ id, nonce: (current?.nonce ?? 0) + 1, x, y }))
     if (flashTimerRef.current !== null) window.clearTimeout(flashTimerRef.current)
-    // Let the radial confirmation finish instead of cutting it off mid-pulse.
-    flashTimerRef.current = window.setTimeout(() => setFlash(null), 460)
+    // 光斑、双环和卡片内侧回弹共用同一条时间轴，收尾时一起归零。
+    flashTimerRef.current = window.setTimeout(() => setFlash(null), 700)
   }, [])
 
   const hideFollow = useCallback(() => {
@@ -275,7 +288,13 @@ export default function InstructionBar({
               ? '点击替换' + segmentLabel + '的输出，也可拖动'
               : '点击插入到' + segmentLabel + '，' + targetAnchorLabel + '，也可拖动'
             return (
-              <div className="wb-instruction-card" key={id}>
+              <div
+                className={[
+                  'wb-instruction-card',
+                  flash?.id === id ? 'is-confirmed' : '',
+                ].filter(Boolean).join(' ')}
+                key={id}
+              >
                 <button
                   type="button"
                   className="wb-instruction-button"
@@ -285,11 +304,17 @@ export default function InstructionBar({
                     ? entry.detail + '。' + placement
                     : `${entry.label}在当前 ${activeProfile.shortName} 指令集中不可用`}
                   aria-label={allowed ? entry.label + '，' + placement : entry.label + ' 当前不可用'}
-                  onClick={() => {
+                  onClick={(event) => {
                     if (!allowed) return
                     if (entry.family === 'contact') onInsertContact(entry.kind as ContactKind)
                     else onChangeOutput(entry.kind as OutputKind)
-                    pulseFavorite(id)
+                    const rect = event.currentTarget.getBoundingClientRect()
+                    const keyboard = event.detail === 0
+                    pulseFavorite(
+                      id,
+                      keyboard ? rect.width / 2 : event.clientX - rect.left,
+                      keyboard ? rect.height / 2 : event.clientY - rect.top,
+                    )
                   }}
                   onPointerDown={(event) => {
                     if (!allowed) return
@@ -299,14 +324,28 @@ export default function InstructionBar({
                     onStartDrag(event, payload, shortLabel)
                   }}
                 >
-                  <span className="wb-instruction-symbol mono" aria-hidden="true">{entry.symbol}</span>
+                  <span
+                    className="wb-instruction-symbol mono"
+                    key={flash?.id === id ? flash.nonce : 0}
+                    aria-hidden="true"
+                  >
+                    {entry.symbol}
+                  </span>
                   <span className="wb-instruction-label">{shortLabel}</span>
                   {entry.family === 'output' && (
                     <span className="wb-instruction-replace">替换</span>
                   )}
                   <GripIcon size={14} className="wb-drag-mark" />
                   {flash?.id === id && (
-                    <span className="wb-instruction-press" key={flash.nonce} aria-hidden="true" />
+                    <span
+                      className="wb-instruction-press"
+                      key={flash.nonce}
+                      aria-hidden="true"
+                      style={{
+                        '--press-x': `${flash.x}px`,
+                        '--press-y': `${flash.y}px`,
+                      } as CSSProperties}
+                    />
                   )}
                 </button>
                 <button

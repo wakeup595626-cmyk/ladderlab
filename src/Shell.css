@@ -4843,7 +4843,7 @@ body[data-drag-kind] {
     grid-column: 1 / -1;
   }
 
-  .tag-card-fields label > span {
+  .wb-shell .tag-card-fields label > span {
     display: block;
     margin-bottom: 2px;
     color: var(--faint);
@@ -4922,7 +4922,15 @@ body[data-drag-kind] {
 }
 
 .tag-card select.table-input {
-  padding-inline: 15px;
+  appearance: none;
+  padding: 0 12px 0 3px;
+  background-image:
+    linear-gradient(45deg, transparent 45%, currentColor 45%, currentColor 55%, transparent 55%),
+    linear-gradient(-45deg, transparent 45%, currentColor 45%, currentColor 55%, transparent 55%);
+  background-repeat: no-repeat;
+  background-position: calc(100% - 7px) 50%, calc(100% - 3px) 50%;
+  background-size: 4px 4px;
+  text-align: center;
   text-align-last: center;
 }
 
@@ -5029,7 +5037,7 @@ body[data-drag-kind] {
     grid-column: 1 / -1;
   }
 
-  .tag-card-fields label > span {
+  .wb-shell .tag-card-fields label > span {
     display: block;
     margin-bottom: 2px;
     color: var(--faint);

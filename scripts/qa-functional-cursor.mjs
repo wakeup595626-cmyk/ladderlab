@@ -229,7 +229,6 @@ check(
 
 /* 真实点击收藏：第一次点击只应插入，不应被打开的 + 菜单吞掉。 */
 await clickSelector('.wb-instruction-card .wb-instruction-button', '常开')
-await sleep(450)
 const firstFavorite = await evaluate(`(() => {
   const rung = document.querySelector('.ll-rung.is-favorite-target')
   const cursor = rung?.querySelector('.ll-slot.is-favorite-target')
@@ -250,6 +249,45 @@ check(
     && firstFavorite.menuOpen === false,
   firstFavorite,
 )
+
+/* 点击收藏必须给出肉眼可见的反馈：真实点击位置的光斑、双扩散环、
+   卡片内侧回弹，以及画布新元件自己的入场动画。 */
+const insertFeedback = await evaluate(`(() => {
+  const press = document.querySelector('.wb-instruction-press')
+  const card = document.querySelector('.wb-instruction-card.is-confirmed')
+  const inserted = document.querySelector('.ll-node.is-just-inserted')
+  const ring = document.querySelector('.ll-insert-flash')
+  const pressStyle = press ? getComputedStyle(press) : null
+  return {
+    press: Boolean(press),
+    card: Boolean(card),
+    inserted: Boolean(inserted),
+    ring: Boolean(ring),
+    pressX: pressStyle?.getPropertyValue('--press-x').trim() ?? null,
+    pressY: pressStyle?.getPropertyValue('--press-y').trim() ?? null,
+    pressAnimation: pressStyle?.animationName ?? null,
+    ringAnimation: press ? getComputedStyle(press, '::before').animationName : null,
+    cardAnimation: card
+      ? getComputedStyle(card.querySelector('.wb-instruction-button')).animationName
+      : null,
+    nodeAnimation: inserted ? getComputedStyle(inserted).animationName : null,
+    canvasRingAnimation: ring ? getComputedStyle(ring).animationName : null,
+  }
+})()`)
+check(
+  'motion/favorite-click-has-visible-feedback',
+  Boolean(insertFeedback)
+    && /px$/.test(insertFeedback.pressX)
+    && /px$/.test(insertFeedback.pressY)
+    && insertFeedback.pressAnimation === 'll-press-flash'
+    && insertFeedback.ringAnimation === 'll-press-ring'
+    && insertFeedback.cardAnimation === 'll-favorite-press-bump'
+    && insertFeedback.nodeAnimation === 'll-node-insert-pop'
+    && insertFeedback.canvasRingAnimation === 'll-insert-ring',
+  insertFeedback,
+)
+
+await sleep(450)
 
 await clickSelector('.wb-instruction-card .wb-instruction-button', '常闭')
 await sleep(450)
@@ -273,6 +311,42 @@ check(
     && secondFavorite.cursorCount === 1
     && secondFavorite.halos === 1,
   secondFavorite,
+)
+
+/* A focused favourite is the “selected” state in the strip. The card has to
+   retain its complete perimeter inside the horizontal scroll container; an
+   overflow clip that shaves the top edge is immediately visible to the user. */
+await evaluate("document.querySelector('.wb-instruction-card .wb-instruction-button')?.focus()")
+await sleep(180)
+const selectedFavoriteFrame = await evaluate(`(() => {
+  const card = document.querySelector('.wb-instruction-card:focus-within')
+    ?? document.querySelector('.wb-instruction-card')
+  const list = card?.closest('.wb-instruction-list')
+  if (!card || !list) return null
+  const cardRect = card.getBoundingClientRect()
+  const listRect = list.getBoundingClientRect()
+  const style = getComputedStyle(card)
+  return {
+    focusWithin: card.matches(':focus-within'),
+    borderTopWidth: style.borderTopWidth,
+    borderTopStyle: style.borderTopStyle,
+    borderTopColor: style.borderTopColor,
+    cardTop: cardRect.top,
+    cardBottom: cardRect.bottom,
+    listTop: listRect.top,
+    listBottom: listRect.bottom,
+    topBorderUnclipped: cardRect.top > listRect.top && cardRect.bottom < listRect.bottom,
+    sheenAnimation: getComputedStyle(card, '::after').animationName,
+  }
+})()`)
+check(
+  'favorites/selected-card-keeps-top-border',
+  Boolean(selectedFavoriteFrame)
+    && selectedFavoriteFrame.focusWithin
+    && selectedFavoriteFrame.borderTopWidth === '1px'
+    && selectedFavoriteFrame.borderTopStyle === 'solid'
+    && selectedFavoriteFrame.topBorderUnclipped,
+  selectedFavoriteFrame,
 )
 
 const cursorRungId = await evaluate(
