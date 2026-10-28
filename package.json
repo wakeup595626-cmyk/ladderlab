@@ -24,6 +24,7 @@
     "qa:accessibility": "node scripts/qa-accessibility.mjs",
     "qa:touch": "node scripts/qa-responsive-touch.mjs",
     "qa:tags": "node scripts/qa-tags.mjs",
+    "qa:save": "node scripts/qa-save-button.mjs",
     "preview": "vite preview --strictPort"
   },
   "dependencies": {

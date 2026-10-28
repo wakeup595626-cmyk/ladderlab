@@ -254,8 +254,7 @@ function TagsPanel({
     <div className="tags-panel">
       <div className="tags-toolbar">
         <div className="tags-heading">
-          <span className="panel-label">符号与地址</span>
-          <h2>PLC 变量表 <span className="tag-count">{program.tags.length}</span></h2>
+          <h2>变量表 <span className="tag-count">{program.tags.length}</span></h2>
         </div>
         <div className="button-row compact-row">
           <button type="button" className="secondary-button" onClick={() => onProgram(addTag(program, 'BOOL'))}>
@@ -291,100 +290,117 @@ function TagsPanel({
         )}
       </div>
 
+      <div className="tag-table-head" aria-hidden="true">
+        <span>变量</span>
+        <span>地址</span>
+        <span>初值</span>
+        <span>运行值</span>
+        <span />
+      </div>
+
       <section className="tag-list" aria-label="PLC 变量表">
         {visibleTags.map((tag) => {
           const usage = tagUsage(program, tag.name)
           return (
             <article className="tag-card" key={tag.id}>
               <div className="tag-card-head">
-                <input
-                  key={`${tag.id}-name-${tag.name}`}
-                  className="table-input mono tag-name-input"
-                  defaultValue={tag.name}
-                  maxLength={FIELD_LIMITS.tagName}
-                  aria-label="变量名称"
-                  onBlur={(event) => {
-                    const name = event.target.value.trim()
-                    if (name && name !== tag.name) onProgram(updateTag(program, tag.id, { name }))
-                  }}
-                  spellCheck={false}
-                />
-                <input
-                  key={`${tag.id}-comment-${tag.comment}`}
-                  className="table-input comment-input"
-                  defaultValue={tag.comment}
-                  maxLength={FIELD_LIMITS.tagComment}
-                  placeholder="注释"
-                  aria-label="变量注释"
-                  onBlur={(event) => onProgram(updateTag(program, tag.id, { comment: event.target.value }))}
-                />
-                <span className="type-pill">{tag.kind}</span>
+                <div className="tag-name-cell">
+                  <div className="tag-name-line">
+                    <span className="type-pill">{tag.kind}</span>
+                    <input
+                      key={`${tag.id}-name-${tag.name}`}
+                      className="table-input mono tag-name-input"
+                      defaultValue={tag.name}
+                      maxLength={FIELD_LIMITS.tagName}
+                      aria-label="变量名称"
+                      onBlur={(event) => {
+                        const name = event.target.value.trim()
+                        if (name && name !== tag.name) onProgram(updateTag(program, tag.id, { name }))
+                      }}
+                      spellCheck={false}
+                    />
+                  </div>
+                  <input
+                    key={`${tag.id}-comment-${tag.comment}`}
+                    className="comment-input"
+                    defaultValue={tag.comment}
+                    maxLength={FIELD_LIMITS.tagComment}
+                    placeholder="注释"
+                    aria-label="变量注释"
+                    onBlur={(event) => onProgram(updateTag(program, tag.id, { comment: event.target.value }))}
+                  />
+                </div>
+                <div className="tag-card-fields">
+                  <label>
+                    <span>地址</span>
+                    <input
+                      key={`${tag.id}-address-${tag.address}`}
+                      className="table-input mono address-input"
+                      maxLength={FIELD_LIMITS.address}
+                      defaultValue={tag.address}
+                      aria-label={`${tag.name} 地址`}
+                      onBlur={(event) => onProgram(updateTag(program, tag.id, { address: event.target.value.toUpperCase() }))}
+                      spellCheck={false}
+                    />
+                  </label>
+                  <label>
+                    <span>初值</span>
+                    {tag.kind === 'BOOL' ? (
+                      <select
+                        className="table-input"
+                        defaultValue={tag.initial ? 'true' : 'false'}
+                        aria-label={`${tag.name} 初值`}
+                        onChange={(event) => onProgram(updateTag(program, tag.id, { initial: event.target.value === 'true' }))}
+                      >
+                        <option value="false">FALSE</option>
+                        <option value="true">TRUE</option>
+                      </select>
+                    ) : (
+                      <input
+                        key={`${tag.id}-initial-${tag.initial}`}
+                        className="table-input mono"
+                        type="number"
+                        defaultValue={Number(tag.initial)}
+                        aria-label={`${tag.name} 初值`}
+                        onBlur={(event) => onProgram(updateTag(program, tag.id, { initial: Number(event.target.value) }))}
+                      />
+                    )}
+                  </label>
+                  <label>
+                    <span>运行值</span>
+                    {tag.kind === 'BOOL' ? (
+                      <button
+                        type="button"
+                        className={runtime.bools[normalizeReference(tag.name)] ? 'live-value on' : 'live-value'}
+                        onClick={() => onToggleBool(tag.name)}
+                        title="点击切换运行值（仅浏览器仿真）"
+                        aria-label={`切换 ${tag.name} 仿真值`}
+                        aria-pressed={Boolean(runtime.bools[normalizeReference(tag.name)])}
+                      >
+                        {readDisplay(program, runtime, tag.name)}
+                      </button>
+                    ) : (
+                      <input
+                        key={`${tag.id}-runtime-${runtime.ints[normalizeReference(tag.name)] ?? 0}`}
+                        className="table-input mono runtime-input"
+                        type="number"
+                        defaultValue={runtime.ints[normalizeReference(tag.name)] ?? 0}
+                        aria-label={`${tag.name} 运行值`}
+                        onBlur={(event) => onSetInt(tag.name, Number(event.target.value) || 0)}
+                      />
+                    )}
+                  </label>
+                </div>
                 <button
                   type="button"
                   className="delete-mini"
                   disabled={usage > 0}
                   onClick={() => onProgram(deleteTag(program, tag.id))}
+                  aria-label={`删除变量 ${tag.name}`}
                   title={usage > 0 ? `被引用 ${usage} 次，不能删除` : '删除变量'}
                 >
-                  ×
+                  <CloseIcon size={13} />
                 </button>
-              </div>
-              <div className="tag-card-fields">
-                <label>
-                  <span>地址</span>
-                  <input
-                    key={`${tag.id}-address-${tag.address}`}
-                    className="table-input mono address-input"
-                    maxLength={FIELD_LIMITS.address}
-                    defaultValue={tag.address}
-                    onBlur={(event) => onProgram(updateTag(program, tag.id, { address: event.target.value.toUpperCase() }))}
-                    spellCheck={false}
-                  />
-                </label>
-                <label>
-                  <span>初值</span>
-                  {tag.kind === 'BOOL' ? (
-                    <select
-                      className="table-input"
-                      defaultValue={tag.initial ? 'true' : 'false'}
-                      onChange={(event) => onProgram(updateTag(program, tag.id, { initial: event.target.value === 'true' }))}
-                    >
-                      <option value="false">FALSE</option>
-                      <option value="true">TRUE</option>
-                    </select>
-                  ) : (
-                    <input
-                      key={`${tag.id}-initial-${tag.initial}`}
-                      className="table-input mono"
-                      type="number"
-                      defaultValue={Number(tag.initial)}
-                      onBlur={(event) => onProgram(updateTag(program, tag.id, { initial: Number(event.target.value) }))}
-                    />
-                  )}
-                </label>
-                <label>
-                  <span>运行值</span>
-                  {tag.kind === 'BOOL' ? (
-                    <button
-                      type="button"
-                      className={runtime.bools[normalizeReference(tag.name)] ? 'live-value on' : 'live-value'}
-                      onClick={() => onToggleBool(tag.name)}
-                      title="点击切换仿真值"
-                      aria-label={`切换 ${tag.name} 仿真值`}
-                      aria-pressed={Boolean(runtime.bools[normalizeReference(tag.name)])}
-                    >
-                      {readDisplay(program, runtime, tag.name)}
-                    </button>
-                  ) : (
-                    <input
-                      key={`${tag.id}-runtime-${runtime.ints[normalizeReference(tag.name)] ?? 0}`}
-                      className="table-input mono runtime-input"
-                      type="number"
-                      defaultValue={runtime.ints[normalizeReference(tag.name)] ?? 0}
-                      onBlur={(event) => onSetInt(tag.name, Number(event.target.value) || 0)}
-                    />
-                  )}
-                </label>
               </div>
             </article>
           )
@@ -396,10 +412,6 @@ function TagsPanel({
           </div>
         )}
       </section>
-
-      <div className="tags-help">
-        <strong>运行值仅用于浏览器仿真，不会写回真实 PLC</strong>
-      </div>
 
       {instances.length > 0 && (
         <section className="instance-section">
@@ -533,7 +545,7 @@ export default function Inspector({
 
   const context =
     tab === 'tags'
-      ? { label: 'PLC 变量表', value: `${program.tags.length} 个变量 · 运行值可手动切换` }
+      ? { label: 'PLC 变量表', value: `${program.tags.length} 个变量` }
       : tab === 'diagnostics'
         ? {
             label: '编译诊断',

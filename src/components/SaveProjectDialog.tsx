@@ -5,7 +5,7 @@ import { FIELD_LIMITS } from '../lib/limits'
 import type { SaveNamedProjectResult, SavedProject } from '../lib/projectLibrary'
 import { countProgramElements, formatProjectTime } from '../lib/projectSummary'
 import { useModalFocus } from '../lib/useModalFocus'
-import { CloseIcon, SaveIcon } from './Icons'
+import { CloseIcon, ExportIcon, SaveIcon } from './Icons'
 import './ProjectImportDialog.css'
 import './SaveProjectDialog.css'
 
@@ -18,6 +18,7 @@ interface SaveProjectDialogProps {
   initialError?: string | null
   onClose: () => void
   onSave: (name: string) => Promise<SaveNamedProjectResult>
+  onExportProject: () => void
 }
 
 /** 同名项目已存在时，给一个仍然清楚且不会立刻冲突的默认名称。 */
@@ -45,6 +46,7 @@ export default function SaveProjectDialog({
   initialError,
   onClose,
   onSave,
+  onExportProject,
 }: SaveProjectDialogProps) {
   if (!open) return null
   return (
@@ -56,6 +58,7 @@ export default function SaveProjectDialog({
       initialError={initialError}
       onClose={onClose}
       onSave={onSave}
+      onExportProject={onExportProject}
     />
   )
 }
@@ -68,6 +71,7 @@ function SaveProjectDialogContent({
   initialError,
   onClose,
   onSave,
+  onExportProject,
 }: Omit<SaveProjectDialogProps, 'open'>) {
   const activeProject = projects.find((project) => project.id === activeProjectId) ?? null
   const [name, setName] = useState(() => (
@@ -172,7 +176,7 @@ function SaveProjectDialogContent({
               }}
               autoComplete="off"
               spellCheck={false}
-              disabled={saving}
+              disabled={saving || Boolean(libraryError)}
               aria-invalid={error ? true : undefined}
               aria-describedby={error ? 'save-project-error' : 'save-project-hint'}
             />
@@ -209,14 +213,25 @@ function SaveProjectDialogContent({
             >
               取消
             </button>
-            <button
-              type="submit"
-              className="project-import-confirm save-project-confirm"
-              disabled={Boolean(libraryError) || saving}
-            >
-              <SaveIcon size={15} />
-              {saving ? '正在保存…' : activeProject ? '保存更改' : '保存到项目库'}
-            </button>
+            {libraryError ? (
+              <button
+                type="button"
+                className="project-import-confirm save-project-confirm"
+                onClick={onExportProject}
+              >
+                <ExportIcon size={15} />
+                导出工程 JSON
+              </button>
+            ) : (
+              <button
+                type="submit"
+                className="project-import-confirm save-project-confirm"
+                disabled={saving}
+              >
+                <SaveIcon size={15} />
+                {saving ? '正在保存…' : activeProject ? '保存更改' : '保存到项目库'}
+              </button>
+            )}
           </div>
         </form>
       </section>

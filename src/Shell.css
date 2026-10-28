@@ -242,6 +242,11 @@ body[data-drag-kind] {
   font-weight: 600;
   white-space: nowrap;
   cursor: pointer;
+  transition:
+    border-color var(--dur-press) var(--ease-out),
+    background-color var(--dur-press) var(--ease-out),
+    color var(--dur-press) var(--ease-out),
+    box-shadow var(--dur-press) var(--ease-out);
 }
 
 .wb-save-button svg {
@@ -259,10 +264,47 @@ body[data-drag-kind] {
   outline-offset: 1px;
 }
 
-.wb-save-button:disabled {
-  border-color: var(--border);
-  color: var(--faint);
-  cursor: not-allowed;
+.wb-save-button.is-saving {
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--border));
+  background: var(--accent-wash);
+  color: var(--accent-ink);
+  cursor: progress;
+}
+
+.wb-save-button.is-saved {
+  border-color: color-mix(in srgb, var(--positive) 38%, var(--border));
+  background: var(--positive-wash);
+  color: var(--positive);
+}
+
+.wb-save-button.is-saved svg {
+  color: var(--positive);
+}
+
+.wb-save-button.is-error,
+.wb-save-button.is-blocked {
+  border-color: color-mix(in srgb, var(--warning) 38%, var(--border));
+  color: color-mix(in srgb, var(--warning) 78%, var(--text));
+}
+
+.wb-save-spinner {
+  width: 13px;
+  height: 13px;
+  flex: 0 0 13px;
+  border: 2px solid color-mix(in srgb, var(--accent) 24%, transparent);
+  border-top-color: var(--accent-ink);
+  border-radius: 50%;
+  animation: wb-save-spin 700ms linear infinite;
+}
+
+@keyframes wb-save-spin {
+  to { transform: rotate(1turn); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wb-save-spinner {
+    animation-duration: 1.8s;
+  }
 }
 
 .wb-shell .wb-run-toggle {
@@ -2931,13 +2973,13 @@ body[data-drag-kind] {
 }
 
 .tag-list {
-  gap: 6px;
+  gap: 4px;
 }
 
 .tag-card {
-  padding: 7px 8px 8px;
+  padding: 6px 7px;
   border: 1px solid var(--rule);
-  border-radius: 6px;
+  border-radius: 5px;
   background: var(--raised);
   transition-property: border-color, background-color;
   transition-duration: var(--dur-press);
@@ -2949,9 +2991,14 @@ body[data-drag-kind] {
 }
 
 .tag-card-head {
-  grid-template-columns: minmax(72px, 1fr) minmax(64px, 0.8fr) auto 24px;
-  gap: 5px;
-  margin-bottom: 5px;
+  grid-template-columns:
+    minmax(0, 1.55fr)
+    minmax(0, 1.05fr)
+    minmax(0, 0.9fr)
+    minmax(0, 0.85fr)
+    24px;
+  gap: 4px;
+  margin-bottom: 0;
 }
 
 .table-input {
@@ -2967,11 +3014,12 @@ body[data-drag-kind] {
 
 .comment-input {
   min-width: 0;
-  padding-inline: 4px;
+  height: 19px;
+  padding-inline: 5px;
   border-color: transparent;
   background: transparent;
   color: var(--muted);
-  font-size: 11.5px;
+  font-size: 10.5px;
 }
 
 .comment-input:hover {
@@ -3006,22 +3054,16 @@ body[data-drag-kind] {
 }
 
 .tag-card-fields {
-  gap: 6px;
+  display: contents;
 }
 
 .tag-card-fields label {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  align-items: center;
-  gap: 4px;
+  display: block;
+  min-width: 0;
 }
 
 .wb-shell .tag-card-fields label > span {
-  color: var(--faint);
-  font-size: 10px;
-  font-weight: 500;
-  line-height: 1;
-  white-space: nowrap;
+  display: none;
 }
 
 .tag-card-fields .table-input,
@@ -3322,7 +3364,22 @@ body[data-drag-kind] {
   }
 
   .tag-card-head {
-    grid-template-columns: minmax(72px, 1fr) minmax(64px, 0.8fr) auto 40px;
+    grid-template-columns:
+      minmax(0, 1.55fr)
+      minmax(0, 1.05fr)
+      minmax(0, 0.9fr)
+      minmax(0, 0.85fr)
+      40px;
+  }
+
+  .tag-table-head {
+    grid-template-columns:
+      minmax(0, 1.55fr)
+      minmax(0, 1.05fr)
+      minmax(0, 0.9fr)
+      minmax(0, 0.85fr)
+      40px;
+    gap: 4px;
   }
 
   .delete-mini {
@@ -3331,11 +3388,7 @@ body[data-drag-kind] {
   }
 
   .tag-card-fields {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-
-  .tag-card-fields label:last-child {
-    grid-column: auto;
+    display: contents;
   }
 
   .wb-tabbar .mobile-tab-action {
@@ -3350,6 +3403,20 @@ body[data-drag-kind] {
 }
 
 @media (max-width: 400px) {
+  .tag-table-head,
+  .tag-card-head {
+    grid-template-columns:
+      minmax(0, 1.5fr)
+      minmax(0, 1fr)
+      minmax(0, 1fr)
+      minmax(0, 0.9fr)
+      40px;
+  }
+
+  .tag-card-head .type-pill {
+    display: none;
+  }
+
   .wb-history-actions {
     padding-right: 4px;
   }
@@ -4094,7 +4161,7 @@ body[data-drag-kind] {
     padding: 0;
   }
 
-  .wb-save-button span {
+  .wb-save-button .wb-save-label {
     display: none;
   }
 
@@ -4745,6 +4812,37 @@ body[data-drag-kind] {
 
   .wb-theme-button-label {
     display: none;
+  }
+}
+
+/* At the narrowest phone width, let the name use the full row and place the
+   three values beneath it. Five columns force address and TRUE/FALSE labels
+   to clip even though the panel technically has no horizontal overflow. */
+@media (max-width: 360px) {
+  .tag-table-head {
+    display: none;
+  }
+
+  .tag-card {
+    padding: 8px;
+  }
+
+  .tag-card-head {
+    grid-template-columns: repeat(3, minmax(0, 1fr)) 40px;
+    gap: 6px 8px;
+    align-items: end;
+  }
+
+  .tag-name-cell {
+    grid-column: 1 / -1;
+  }
+
+  .tag-card-fields label > span {
+    display: block;
+    margin-bottom: 2px;
+    color: var(--faint);
+    font-size: 9px;
+    font-weight: 600;
   }
 }
 

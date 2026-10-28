@@ -5,6 +5,7 @@ import type { ProfileId } from '../engine/types'
 import { FIELD_LIMITS } from '../lib/limits'
 import { THEME_PRESETS, type ThemePreference } from '../lib/theme'
 import {
+  CheckCircleIcon,
   ChevronDownIcon,
   FolderIcon,
   HelpIcon,
@@ -44,6 +45,7 @@ export interface WorkspaceTopBarProps {
   onOpenProject: () => void
   onSaveProject: () => void
   saveBlocked?: boolean
+  saveStatus?: 'idle' | 'saving' | 'saved' | 'error'
   onImportProject: () => void
   onExportProject: () => void
   onExportImage: (mode: 'complete' | 'plain') => void
@@ -73,6 +75,7 @@ export default function WorkspaceTopBar({
   onOpenProject,
   onSaveProject,
   saveBlocked = false,
+  saveStatus = 'idle',
   onImportProject,
   onExportProject,
   onExportImage,
@@ -538,15 +541,37 @@ export default function WorkspaceTopBar({
 
         <button
           type="button"
-          className="wb-save-button"
+          className={`wb-save-button is-${saveStatus}${saveBlocked ? ' is-blocked' : ''}`}
           onClick={onSaveProject}
-          disabled={saveBlocked}
           aria-label="保存到本机项目库"
+          aria-busy={saveStatus === 'saving'}
           aria-keyshortcuts="Control+S Meta+S"
-          title={saveBlocked ? '本机项目库不可用，请先导出工程 JSON' : '保存到本机项目库 (Ctrl+S)'}
+          title={
+            saveStatus === 'saving'
+              ? '正在保存工程，请稍候'
+              : saveStatus === 'saved'
+                ? '已保存到本机项目库'
+                : saveStatus === 'error'
+                  ? '保存未完成，点击查看原因'
+                  : saveBlocked
+                    ? '项目库需要处理，点击查看原因并导出备份'
+                    : '保存到本机项目库 (Ctrl+S)'
+          }
         >
-          <SaveIcon size={16} />
-          <span>保存</span>
+          {saveStatus === 'saved'
+            ? <CheckCircleIcon size={16} />
+            : saveStatus === 'saving'
+              ? <span className="wb-save-spinner" aria-hidden="true" />
+              : <SaveIcon size={16} />}
+          <span className="wb-save-label" aria-live="polite">
+            {saveStatus === 'saving'
+              ? '保存中'
+              : saveStatus === 'saved'
+                ? '已保存'
+                : saveStatus === 'error'
+                  ? '重试'
+                  : '保存'}
+          </span>
         </button>
 
         <button

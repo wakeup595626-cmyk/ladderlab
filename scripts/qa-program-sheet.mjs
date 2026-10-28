@@ -210,6 +210,9 @@ function assert(condition, message) {
 
 await send('Page.enable')
 await send('Runtime.enable')
+// Hover-dependent checks use computed styles. A background tab can keep the
+// previous pointer state in headless Chromium, so foreground this QA tab.
+await send('Page.bringToFront')
 await setViewport(1699, 935)
 await send('Page.navigate', { url: 'about:blank' })
 await sleep(250)

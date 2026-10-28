@@ -598,6 +598,8 @@ export default function App() {
   const activeSavedProjectVersion = activeSavedProject?.savedAt ?? null
   const [saveDialogOpen, setSaveDialogOpen] = useState(false)
   const [saveDialogError, setSaveDialogError] = useState<string | null>(null)
+  const [manualSaveStatus, setManualSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
+  const manualSaveStatusTimerRef = useRef<number | null>(null)
   const editorRef = useRef<HTMLElement>(null)
   const tagsButtonRef = useRef<HTMLButtonElement>(null)
   const inspectorResizePointerRef = useRef<number | null>(null)
@@ -636,6 +638,26 @@ export default function App() {
   const lastRuntimeSignatureRef = useRef<string | null>(null)
   const program = history.present
   const compileResult = useMemo(() => compile(program), [program])
+
+  const showManualSaveStatus = useCallback((status: 'idle' | 'saving' | 'saved' | 'error', resetMs?: number) => {
+    if (manualSaveStatusTimerRef.current !== null) {
+      window.clearTimeout(manualSaveStatusTimerRef.current)
+      manualSaveStatusTimerRef.current = null
+    }
+    setManualSaveStatus(status)
+    if (resetMs !== undefined) {
+      manualSaveStatusTimerRef.current = window.setTimeout(() => {
+        manualSaveStatusTimerRef.current = null
+        setManualSaveStatus('idle')
+      }, resetMs)
+    }
+  }, [])
+
+  useEffect(() => () => {
+    if (manualSaveStatusTimerRef.current !== null) {
+      window.clearTimeout(manualSaveStatusTimerRef.current)
+    }
+  }, [])
 
   // 删除支路或撤销后，旧路径可能指向已消失的元件；保留程序段选择，
   // 但清掉元件路径，避免后续插入操作落到错误位置。这里直接按当前程序派生，
@@ -907,6 +929,7 @@ export default function App() {
     if (outcome.projects) setSavedProjects(outcome.projects)
     if (outcome.status === 'saved') {
       finishNamedSave(outcome.project, true)
+      showManualSaveStatus('saved', 1600)
       return {
         ok: true,
         project: outcome.project,
@@ -955,21 +978,35 @@ export default function App() {
       : failure.message
     setSaveDialogError(message)
     return { ...failure, message }
-  }, [finishNamedSave, notify, persistLatestNamedProject, saveLatestProgram, setActiveProject, settleSupersededConflict])
+  }, [
+    finishNamedSave,
+    notify,
+    persistLatestNamedProject,
+    saveLatestProgram,
+    setActiveProject,
+    settleSupersededConflict,
+    showManualSaveStatus,
+  ])
 
   const requestSaveProject = useCallback(async () => {
     setSaveDialogError(null)
+    if (manualSavePendingRef.current) {
+      notify('正在保存，请稍候', { tone: 'info' })
+      return
+    }
     if (projectLibraryError || !activeSavedProjectId) {
+      showManualSaveStatus('idle')
       setSaveDialogOpen(true)
       return
     }
-    if (manualSavePendingRef.current) return
     manualSavePendingRef.current = true
+    showManualSaveStatus('saving')
     try {
       const outcome = await persistLatestNamedProject(latestProgramRef.current.name)
       if (outcome.projects) setSavedProjects(outcome.projects)
       if (outcome.status === 'saved') {
         finishNamedSave(outcome.project, false)
+        showManualSaveStatus('saved', 1600)
         return
       }
       if (outcome.status === 'context-changed') {
@@ -979,6 +1016,7 @@ export default function App() {
             : '保存过程中当前项目已切换，本次内容没有写回编辑区。',
           { tone: outcome.project ? 'info' : 'error' },
         )
+        showManualSaveStatus(outcome.project ? 'saved' : 'error', outcome.project ? 1600 : undefined)
         return
       }
 
@@ -989,6 +1027,7 @@ export default function App() {
         setSaveDialogError(message)
         setSaveDialogOpen(true)
         notify(message, { tone: 'error' })
+        showManualSaveStatus('error')
         return
       }
 
@@ -1008,6 +1047,15 @@ export default function App() {
         : failure.message
       setSaveDialogError(message)
       setSaveDialogOpen(true)
+      showManualSaveStatus('error')
+    } catch (error) {
+      const message = error instanceof Error
+        ? error.message
+        : '保存过程中发生未知错误，请导出工程 JSON 备份。'
+      setSaveDialogError(message)
+      setSaveDialogOpen(true)
+      notify(`保存失败：${message}`, { tone: 'error' })
+      showManualSaveStatus('error')
     } finally {
       manualSavePendingRef.current = false
     }
@@ -1020,6 +1068,7 @@ export default function App() {
     saveLatestProgram,
     setActiveProject,
     settleSupersededConflict,
+    showManualSaveStatus,
   ])
 
   // Toast 上的「撤销」只能把这一段插回当前工程，不能回滚成删除那一刻的整份快照，
@@ -2973,6 +3022,7 @@ export default function App() {
         onOpenProject={() => setMobilePanel('project')}
         onSaveProject={requestSaveProject}
         saveBlocked={Boolean(projectLibraryError)}
+        saveStatus={manualSaveStatus}
         onNewProject={() => void newProject()}
         onImportProject={() => setImportOpen(true)}
         onExportProject={exportProject}
@@ -3519,6 +3569,10 @@ export default function App() {
           setSaveDialogError(null)
         }}
         onSave={handleSaveNamedProject}
+        onExportProject={() => {
+          exportProject()
+          setSaveDialogOpen(false)
+        }}
       />
 
       <LibraryDialog
