@@ -14,10 +14,16 @@
     "lint": "oxlint",
     "check": "npm run test && npm run typecheck && npm run lint && npm run build",
     "qa": "node scripts/qa-smoke.mjs",
+    "qa:project": "node scripts/qa-project-library.mjs",
     "qa:branch": "node scripts/qa-branch-details.mjs",
     "qa:sheet": "node scripts/qa-program-sheet.mjs",
     "qa:rungs": "node scripts/qa-rung-operations.mjs",
-    "preview": "vite preview"
+    "qa:storage": "node scripts/qa-storage-tabs.mjs",
+    "qa:stress": "node scripts/qa-storage-stress.mjs",
+    "qa:hardening": "node scripts/qa-hardening.mjs",
+    "qa:accessibility": "node scripts/qa-accessibility.mjs",
+    "qa:touch": "node scripts/qa-responsive-touch.mjs",
+    "preview": "vite preview --strictPort"
   },
   "dependencies": {
     "react": "^19.3.1",
@@ -28,6 +34,7 @@
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.2",
+    "axe-core": "^4.10.3",
     "oxlint": "^1.88.0",
     "typescript": "~6.0.3",
     "vite": "^8.3.4",

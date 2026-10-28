@@ -16,7 +16,7 @@ interface SaveProjectDialogProps {
   libraryError: string | null
   initialError?: string | null
   onClose: () => void
-  onSave: (name: string) => SaveNamedProjectResult
+  onSave: (name: string) => Promise<SaveNamedProjectResult>
 }
 
 /** 同名项目已存在时，给一个仍然清楚且不会立刻冲突的默认名称。 */
@@ -73,12 +73,14 @@ function SaveProjectDialogContent({
     activeProject ? program.name : suggestName(program.name, projects, activeProjectId)
   ))
   const [error, setError] = useState<string | null>(initialError ?? null)
+  const [saving, setSaving] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
   const dialogRef = useModalFocus<HTMLElement>(true, onClose, inputRef)
   const trimmedName = name.trim()
   const elementCount = countProgramElements(program)
 
-  const submit = () => {
+  const submit = async () => {
+    if (saving) return
     if (libraryError) {
       setError(libraryError)
       return
@@ -88,11 +90,18 @@ function SaveProjectDialogContent({
       inputRef.current?.focus()
       return
     }
-    const result = onSave(trimmedName)
-    if (!result.ok) {
-      setError(result.message)
-      inputRef.current?.focus()
-      inputRef.current?.select()
+    setSaving(true)
+    try {
+      const result = await onSave(trimmedName)
+      if (!result.ok) {
+        setError(result.message)
+        inputRef.current?.focus()
+        inputRef.current?.select()
+      }
+    } catch {
+      setError('保存失败，本机项目库暂时不可用。请先导出工程 JSON 备份。')
+    } finally {
+      setSaving(false)
     }
   }
 
@@ -115,7 +124,7 @@ function SaveProjectDialogContent({
         aria-describedby="save-project-description"
         tabIndex={-1}
       >
-        <header className="project-import-head">
+        <div className="project-import-head">
           <div>
             <h2 id="save-project-title">保存工程</h2>
             <p id="save-project-description">
@@ -127,13 +136,13 @@ function SaveProjectDialogContent({
           <button type="button" className="icon-button" onClick={onClose} aria-label="关闭保存工程">
             <CloseIcon size={18} />
           </button>
-        </header>
+        </div>
 
         <form
           className="save-project-form"
           onSubmit={(event) => {
             event.preventDefault()
-            submit()
+            void submit()
           }}
         >
           <label className="save-project-field" htmlFor="save-project-name">
@@ -181,10 +190,10 @@ function SaveProjectDialogContent({
             <button
               type="submit"
               className="project-import-confirm save-project-confirm"
-              disabled={Boolean(libraryError) || !trimmedName}
+              disabled={Boolean(libraryError) || saving}
             >
               <SaveIcon size={15} />
-              {activeProject ? '保存更改' : '保存到项目库'}
+              {saving ? '正在保存…' : activeProject ? '保存更改' : '保存到项目库'}
             </button>
           </div>
         </form>

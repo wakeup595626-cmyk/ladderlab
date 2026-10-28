@@ -1,9 +1,10 @@
 /** 工程导入 / 导出与 PNG 验收：需要 preview 服务和 Edge CDP。 */
 import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
+import { DEFAULT_QA_APP_URL, DEFAULT_QA_CDP, selectExactPage } from './qa-cdp.mjs'
 
-const CDP_HTTP = process.env.LADDERLAB_CDP ?? 'http://127.0.0.1:9222'
-const APP_URL = process.env.LADDERLAB_URL ?? 'http://127.0.0.1:4173/'
+const CDP_HTTP = process.env.LADDERLAB_CDP ?? DEFAULT_QA_CDP
+const APP_URL = process.env.LADDERLAB_URL ?? DEFAULT_QA_APP_URL
 const downloadDir = resolve('docs/qa/io')
 const complexFixturePath = resolve('scripts/fixtures/qa-complex.json')
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms))
@@ -14,10 +15,7 @@ for (const name of await readdir(downloadDir)) {
 }
 
 const targets = await (await fetch(`${CDP_HTTP}/json`)).json()
-const target = targets.find((item) => item.type === 'page' && item.url === APP_URL)
-  ?? targets.find((item) => item.type === 'page' && item.url.startsWith('http://127.0.0.1:'))
-  ?? targets.find((item) => item.type === 'page')
-if (!target) throw new Error(`没有可调试页面：${CDP_HTTP}`)
+const target = selectExactPage(targets, APP_URL, CDP_HTTP)
 
 const socket = new WebSocket(target.webSocketDebuggerUrl)
 await new Promise((open, fail) => {
@@ -309,9 +307,11 @@ const after = await evaluate(`(() => ({
   name: document.querySelector('#project-name')?.value,
   rungs: document.querySelectorAll('.ll-rung').length,
   labels: [...document.querySelectorAll('.ll-rung-index')].map((item) => item.textContent),
-  saved: localStorage.getItem('ladderlab.project.v1')
+  saved: localStorage.getItem('ladderlab.project.v1.mirror.v2')
+    ?? localStorage.getItem('ladderlab.project.v1')
 }))()`)
-const saved = after.saved ? JSON.parse(after.saved) : null
+const savedDraft = after.saved ? JSON.parse(after.saved) : null
+const saved = savedDraft?.program ?? savedDraft
 checks['import/dialog-opens'] = dialogOpen
 checks['import/preview-matches'] = preview.name === exported.name
   && Number(preview.metrics[0]) === exported.rungs.length
@@ -422,7 +422,7 @@ checks['keyboard/escape-closes-export-menu'] = escapeState.closed && escapeState
 details['keyboard/export-menu'] = escapeState
 
 const responsiveTopbar = []
-for (const width of [1180, 900, 861, 860, 720, 480]) {
+for (const width of [1180, 900, 861, 860, 720, 480, 430, 400, 390, 360, 320]) {
   await setViewport(width, 900, false)
   await sleep(120)
   responsiveTopbar.push(await evaluate(`(() => {
@@ -468,6 +468,16 @@ const mobileFileUi = await evaluate(`(() => {
       left: Math.round(rect.left), right: Math.round(rect.right),
       top: Math.round(rect.top), bottom: Math.round(rect.bottom),
     } : null,
+    controls: Object.fromEntries(['.wb-project-button', '.wb-file-compact', '.wb-save-button', '.wb-run-toggle', '.wb-more .icon-button', '.wb-topbar-actions']
+      .map((selector) => {
+        const node = document.querySelector(selector)
+        const box = node?.getBoundingClientRect()
+        return [selector, box ? {
+          left: Math.round(box.left), right: Math.round(box.right),
+          top: Math.round(box.top), bottom: Math.round(box.bottom),
+          width: Math.round(box.width), display: node ? getComputedStyle(node).display : null,
+        } : null]
+      })),
     controlsInsideViewport: ['.wb-file-compact', '.wb-run-toggle', '.wb-more .icon-button']
       .every((selector) => {
         const node = document.querySelector(selector)

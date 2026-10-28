@@ -3,6 +3,21 @@ import { normalizeReference, parseBitAddress, splitReference } from './reference
 
 const INT_MAX = 32767
 
+/** Runtime dictionaries must treat every tag name as data, including names such as __proto__. */
+function emptyRecord<T>(): Record<string, T> {
+  return Object.create(null) as Record<string, T>
+}
+
+function cloneRecord<T>(source: Record<string, T>): Record<string, T> {
+  return Object.assign(emptyRecord<T>(), source)
+}
+
+function cloneStateRecord<T extends object>(source: Record<string, T>): Record<string, T> {
+  const copy = emptyRecord<T>()
+  for (const [key, value] of Object.entries(source)) copy[key] = { ...value }
+  return copy
+}
+
 /** 教学模型按 S7 INT 的 16 位补码保存结果，溢出时回绕而不是变成超范围数值。 */
 function wrapInt(value: number): number {
   if (!Number.isFinite(value)) return 0
@@ -53,8 +68,8 @@ function syncAlias(runtime: Runtime, program: Program, name: string, kind: 'BOOL
 export function writeRuntimeValue(program: Program, previous: Runtime, name: string, value: boolean | number): Runtime {
   const runtime: Runtime = {
     ...previous,
-    bools: { ...previous.bools },
-    ints: { ...previous.ints },
+    bools: cloneRecord(previous.bools),
+    ints: cloneRecord(previous.ints),
   }
   const normalized = normalizeReference(name)
   const tag = program.tags.find((item) => tagName(item) === normalized)
@@ -246,8 +261,10 @@ function applyOutput(output: OutputElement, power: boolean, runtime: Runtime, dt
 
 export function createRuntime(program: Program): Runtime {
   const runtime: Runtime = {
-    bools: {}, ints: {}, edges: {}, timers: {}, counters: {}, patterns: {},
-    nodePower: {}, outputPower: {}, rungPower: {}, scanCount: 0, simTime: 0,
+    bools: emptyRecord(), ints: emptyRecord(), edges: emptyRecord(),
+    timers: emptyRecord(), counters: emptyRecord(), patterns: emptyRecord(),
+    nodePower: emptyRecord(), outputPower: emptyRecord(), rungPower: emptyRecord(),
+    scanCount: 0, simTime: 0,
   }
   for (const tag of program.tags) {
     const name = tagName(tag)
@@ -277,11 +294,12 @@ export function step(program: Program, previous: Runtime, dtMs: number): Runtime
     throw new RangeError('扫描时间 dtMs 必须是大于等于 0 的有限毫秒数。')
   }
   const runtime: Runtime = {
-    bools: { ...previous.bools }, ints: { ...previous.ints }, edges: { ...previous.edges },
-    timers: Object.fromEntries(Object.entries(previous.timers).map(([key, value]) => [key, { ...value }])),
-    counters: Object.fromEntries(Object.entries(previous.counters).map(([key, value]) => [key, { ...value }])),
-    patterns: Object.fromEntries(Object.entries(previous.patterns).map(([key, value]) => [key, { ...value }])),
-    nodePower: {}, outputPower: {}, rungPower: {},
+    bools: cloneRecord(previous.bools), ints: cloneRecord(previous.ints),
+    edges: cloneRecord(previous.edges),
+    timers: cloneStateRecord(previous.timers),
+    counters: cloneStateRecord(previous.counters),
+    patterns: cloneStateRecord(previous.patterns),
+    nodePower: emptyRecord(), outputPower: emptyRecord(), rungPower: emptyRecord(),
     scanCount: previous.scanCount + 1, simTime: previous.simTime + dtMs,
   }
   for (const rung of program.rungs) {

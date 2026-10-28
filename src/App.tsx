@@ -46,9 +46,8 @@ import type {
 import type { DragPayload, DropTarget } from './lib/dragTypes'
 import { downloadDataUrl, downloadText, parseProgramText, serializeProgram } from './lib/io'
 import {
-  ACTIVE_PROJECT_STORAGE_KEY,
-  PROJECT_LIBRARY_STORAGE_KEY,
   deleteSavedProject as removeSavedProjectFromLibrary,
+  isProjectLibraryStorageKey,
   readActiveSavedProjectId,
   readProjectLibrary,
   saveNamedProject,
@@ -89,9 +88,10 @@ import {
 import {
   archiveRecoveryCopy,
   isRecoveryBackupIntact,
-  getLastSavedAt,
+  getDraftTabId,
   listRecoveryBackups,
   loadSavedProgram,
+  parseProgramDraft,
   PROGRAM_STORAGE_KEY,
   RECOVERY_STORAGE_KEY_PREFIX,
   readRecoveryBackup,
@@ -142,6 +142,145 @@ interface ToastState {
 }
 
 type CorruptSavedProgram = Extract<LoadSavedProgramResult, { status: 'corrupt' }>
+
+interface StartupState {
+  startup: LoadSavedProgramResult
+  library: ReturnType<typeof readProjectLibrary>
+  initialProgram: Program
+  activeProject: { id: string; savedAt: number } | null
+  /** 当前命名项目在本标签页最后一次确认过的工程库内容；未命名草稿为 null。 */
+  baselineProgram: Program | null
+  initialConflict: { program: Program; savedAt: number; baseSavedAt: number | null } | null
+  lastSavedAt: number | null
+}
+
+function programsEqual(left: Program, right: Program): boolean {
+  return JSON.stringify(left) === JSON.stringify(right)
+}
+
+/**
+ * 启动时把“草稿属于哪个项目”和“这个标签页上次在看哪个项目”对齐。
+ * 草稿内容可能来自崩溃前的自动保存；只有项目身份一致时才允许进入编辑器，
+ * 否则一个标签页会把另一个项目的内容当成当前项目继续保存。
+ */
+function resolveStartupState(
+  startup: LoadSavedProgramResult,
+  library: ReturnType<typeof readProjectLibrary>,
+): StartupState {
+  const projects = library.status === 'ok' ? library.projects : []
+  const storedId = library.status === 'ok' ? readActiveSavedProjectId() : null
+  const storedActive = storedId ? projects.find((project) => project.id === storedId) ?? null : null
+  const asActive = (project: SavedProject) => ({ id: project.id, savedAt: project.savedAt })
+
+  if (startup.status === 'corrupt') {
+    return {
+      startup,
+      library,
+      initialProgram: blankProgram(),
+      activeProject: null,
+      baselineProgram: null,
+      initialConflict: null,
+      lastSavedAt: null,
+    }
+  }
+
+  if (startup.status === 'none') {
+    return {
+      startup,
+      library,
+      initialProgram: storedActive?.program ?? blankProgram(),
+      activeProject: storedActive ? asActive(storedActive) : null,
+      baselineProgram: storedActive?.program ?? null,
+      initialConflict: null,
+      lastSavedAt: storedActive?.savedAt ?? null,
+    }
+  }
+
+  const draftProject = startup.projectId
+    ? projects.find((project) => project.id === startup.projectId) ?? null
+    : null
+
+  if (startup.projectId) {
+    // 项目已经被删除时保留草稿内容，但不再挂在不存在的项目 ID 上保存。
+    if (!draftProject) {
+      return {
+        startup,
+        library,
+        initialProgram: startup.program,
+        activeProject: null,
+        baselineProgram: null,
+        initialConflict: null,
+        lastSavedAt: startup.savedAt,
+      }
+    }
+    // 这个标签页上次打开的是另一个项目：另一项目的草稿不能替换当前编辑器。
+    if (storedActive && storedActive.id !== draftProject.id) {
+      return {
+        startup,
+        library,
+        initialProgram: storedActive.program,
+        activeProject: asActive(storedActive),
+        baselineProgram: storedActive.program,
+        initialConflict: null,
+        lastSavedAt: storedActive.savedAt,
+      }
+    }
+    const baseSavedAt = startup.baseSavedAt ?? draftProject.savedAt
+    const matchesLibrary = programsEqual(startup.program, draftProject.program)
+    const conflict = !matchesLibrary && draftProject.savedAt > baseSavedAt
+      ? { program: draftProject.program, savedAt: draftProject.savedAt, baseSavedAt }
+      : null
+    return {
+      startup,
+      library,
+      initialProgram: startup.program,
+      activeProject: {
+        id: draftProject.id,
+        savedAt: matchesLibrary ? draftProject.savedAt : baseSavedAt,
+      },
+      baselineProgram: draftProject.program,
+      initialConflict: conflict,
+      lastSavedAt: startup.savedAt,
+    }
+  }
+
+  // 旧版草稿没有项目身份；只有内容确实与当前项目一致时才迁移进去。
+  // 否则这份草稿可能来自另一个项目或另一标签页，直接绑定会把内容写错项目。
+  if (startup.source === 'legacy' && storedActive && programsEqual(startup.program, storedActive.program)) {
+    return {
+      startup,
+      library,
+      initialProgram: startup.program,
+      activeProject: asActive(storedActive),
+      baselineProgram: storedActive.program,
+      initialConflict: null,
+      lastSavedAt: startup.savedAt,
+    }
+  }
+
+  // 未命名草稿不能挂到当前命名项目上，否则会把临时内容写进项目库。
+  if (storedActive) {
+    return {
+      startup,
+      library,
+      initialProgram: storedActive.program,
+      activeProject: asActive(storedActive),
+      baselineProgram: storedActive.program,
+      initialConflict: null,
+      lastSavedAt: storedActive.savedAt,
+    }
+  }
+
+  return {
+    startup,
+    library,
+    initialProgram: startup.program,
+    activeProject: null,
+    baselineProgram: null,
+    initialConflict: null,
+    lastSavedAt: startup.savedAt,
+  }
+}
 
 /** 同一个剪贴板既能装元件，也能装整段程序，粘贴时按类型走不同分支。 */
 type DocumentClipboard =
@@ -280,11 +419,12 @@ function chainLengthAtPath(nodes: LadderNode[], chain: number[]): number | null 
 
 export default function App() {
   const { confirm, dialog: confirmDialog } = useConfirmDialog()
-  const [startup] = useState<LoadSavedProgramResult>(() => loadSavedProgram())
-  const [startupLibrary] = useState(() => readProjectLibrary())
-  const [initialProgram] = useState<Program>(() =>
-    startup.status === 'ok' ? startup.program : blankProgram(),
+  const [startupState] = useState<StartupState>(() =>
+    resolveStartupState(loadSavedProgram(), readProjectLibrary()),
   )
+  const startup = startupState.startup
+  const startupLibrary = startupState.library
+  const [initialProgram] = useState<Program>(() => startupState.initialProgram)
   const [history, setHistory] = useState<HistoryState>({
     past: [],
     present: initialProgram,
@@ -301,16 +441,18 @@ export default function App() {
     startup.status === 'corrupt' ? startup : null,
   )
   const [savingEnabled, setSavingEnabled] = useState(() => startup.status !== 'corrupt')
-  const [lastSavedAt, setLastSavedAt] = useState<number | null>(() =>
-    startup.status === 'ok' ? startup.savedAt ?? null : null,
-  )
+  const [lastSavedAt, setLastSavedAt] = useState<number | null>(startupState.lastSavedAt)
   const [savePending, setSavePending] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [backups, setBackups] = useState<RecoveryBackup[]>(() => listRecoveryBackups())
   const [backupsDismissed, setBackupsDismissed] = useState(false)
   const [rawDownloaded, setRawDownloaded] = useState(false)
-  const [remoteConflict, setRemoteConflict] = useState<{ program: Program; savedAt: number } | null>(
-    null,
+  const [remoteConflict, setRemoteConflict] = useState<{
+    program: Program
+    savedAt: number
+    baseSavedAt: number | null
+  } | null>(
+    startupState.initialConflict,
   )
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>('properties')
   const [quickEdit, setQuickEdit] = useState<QuickEditState | null>(null)
@@ -376,11 +518,14 @@ export default function App() {
   const [projectLibraryError, setProjectLibraryError] = useState<string | null>(() =>
     startupLibrary.status === 'corrupt' ? startupLibrary.message : null,
   )
-  const [activeSavedProjectId, setActiveSavedProjectId] = useState<string | null>(() => {
-    if (startupLibrary.status !== 'ok') return null
-    const id = readActiveSavedProjectId()
-    return id && startupLibrary.projects.some((project) => project.id === id) ? id : null
-  })
+  const [activeSavedProject, setActiveSavedProject] = useState<{ id: string; savedAt: number } | null>(
+    startupState.activeProject,
+  )
+  const activeSavedProjectRef = useRef(activeSavedProject)
+  const activeSavedProjectId = activeSavedProject?.id ?? null
+  // 只在本页真正打开或保存某个项目时更新；另一标签页写库后即使同步了列表，
+  // 本页仍保留旧版本号，下一次保存会提示先重新打开，避免静默覆盖新内容。
+  const activeSavedProjectVersion = activeSavedProject?.savedAt ?? null
   const [saveDialogOpen, setSaveDialogOpen] = useState(false)
   const [saveDialogError, setSaveDialogError] = useState<string | null>(null)
   const editorRef = useRef<HTMLElement>(null)
@@ -396,6 +541,7 @@ export default function App() {
   const saveTimerRef = useRef<number | null>(null)
   const saveRetryTimerRef = useRef<number | null>(null)
   const saveRetryAttemptRef = useRef(0)
+  const manualSavePendingRef = useRef(false)
   const retrySaveRef = useRef<() => void>(() => {})
   const latestProgramRef = useRef(initialProgram)
   const savingEnabledRef = useRef(startup.status !== 'corrupt')
@@ -405,8 +551,17 @@ export default function App() {
   const lastPersistedProgramRef = useRef<Program | null>(
     startup.status === 'ok' ? initialProgram : null,
   )
+  // 草稿自动落盘不等于“已提交到项目库”。判断多标签冲突必须比较当前内容
+  // 与本页最后确认过的项目版本，否则自动保存会把手改内容伪装成已同步。
+  const projectBaselineProgramRef = useRef<Program | null>(startupState.baselineProgram)
   const lastSaveFailureRef = useRef<string | null>(null)
-  const remoteConflictRef = useRef(false)
+  const remoteConflictRef = useRef(Boolean(startupState.initialConflict))
+  // 冲突横幅的完整内容也要留一份 ref：保存成功后需要在回调里同步判断
+  // 这份冲突是否已经被本次写入项目库超越，而不能只依赖渲染快照。
+  const remoteConflictDataRef = useRef(startupState.initialConflict)
+  // 本标签页见过的最新草稿时间戳。后台标签页的 storage 事件可能排队到很晚，
+  // 过期草稿不应该再把已经前进的页面拉回冲突状态。
+  const lastDraftStampRef = useRef<number | null>(startupState.lastSavedAt)
   const toastTimerRef = useRef<number | null>(null)
   const lastRuntimeSignatureRef = useRef<string | null>(null)
   const program = history.present
@@ -447,13 +602,18 @@ export default function App() {
       if (result.status === 'ok') {
         setSavedProjects(result.projects)
         setProjectLibraryError(null)
-        setActiveSavedProjectId(readActiveSavedProjectId())
+        const current = activeSavedProjectRef.current
+        if (current && !result.projects.some((project) => project.id === current.id)) {
+          activeSavedProjectRef.current = null
+          setActiveSavedProject(null)
+          writeActiveSavedProjectId(null)
+        }
       } else {
         setProjectLibraryError(result.message)
       }
     }
     const onStorage = (event: StorageEvent) => {
-      if (event.key !== PROJECT_LIBRARY_STORAGE_KEY && event.key !== ACTIVE_PROJECT_STORAGE_KEY) return
+      if (!isProjectLibraryStorageKey(event.key)) return
       syncLibrary()
     }
     window.addEventListener('storage', onStorage)
@@ -495,9 +655,21 @@ export default function App() {
     ))
   }, [])
 
-  const setActiveProject = useCallback((id: string | null) => {
-    setActiveSavedProjectId(id)
-    writeActiveSavedProjectId(id)
+  const setActiveProject = useCallback((
+    id: string | null,
+    savedAt: number | null = null,
+    baselineProgram: Program | null = null,
+  ) => {
+    const next = id && savedAt != null ? { id, savedAt } : null
+    activeSavedProjectRef.current = next
+    projectBaselineProgramRef.current = next ? baselineProgram : null
+    setActiveSavedProject(next)
+    writeActiveSavedProjectId(next?.id ?? null)
+  }, [])
+
+  // 启动推断可能修正了活动项目；把修正后的身份写回本标签页，避免刷新后再次错配草稿。
+  useEffect(() => {
+    writeActiveSavedProjectId(activeSavedProjectRef.current?.id ?? null)
   }, [])
 
   const clearSaveRetryTimer = useCallback(() => {
@@ -509,9 +681,14 @@ export default function App() {
 
   const saveLatestProgram = useCallback(() => {
     if (!savingEnabledRef.current) return false
-    const result = saveProgram(latestProgramRef.current)
+    const active = activeSavedProjectRef.current
+    const result = saveProgram(latestProgramRef.current, {
+      projectId: active?.id ?? null,
+      baseSavedAt: active?.savedAt ?? null,
+    })
     if (result.ok) {
       lastPersistedProgramRef.current = latestProgramRef.current
+      lastDraftStampRef.current = result.savedAt
       saveDirtyRef.current = false
       saveRetryAttemptRef.current = 0
       clearSaveRetryTimer()
@@ -526,7 +703,7 @@ export default function App() {
     saveDirtyRef.current = true
     setSaveError(result.error)
     if (lastSaveFailureRef.current !== result.error) {
-      notify(`自动保存失败：${result.error}。请先导出工程 JSON 备份。`, { tone: 'error' })
+      notify(`自动保存失败：${result.error}`, { tone: 'error' })
       lastSaveFailureRef.current = result.error
     }
 
@@ -540,6 +717,24 @@ export default function App() {
     }
     return false
   }, [clearSaveRetryTimer, notify])
+
+  /**
+   * 本页刚刚成功写入项目库，说明项目库版本已经前进到本页内容。
+   * 此前因另一标签页草稿而弹出的冲突横幅必然基于更旧的版本，继续保留只会
+   * 阻断保存/打开项目；把对方版本留一份恢复副本后自动解除，避免用户被
+   * 一个已经过期的提示卡死。
+   */
+  const settleSupersededConflict = useCallback((savedAt: number) => {
+    const pending = remoteConflictDataRef.current
+    if (!pending || pending.savedAt > savedAt) return 'none' as const
+    if (!archiveProgramVersion(pending.program)) return 'archive-failed' as const
+    remoteConflictRef.current = false
+    remoteConflictDataRef.current = null
+    setRemoteConflict(null)
+    setBackups(listRecoveryBackups())
+    setBackupsDismissed(false)
+    return 'cleared' as const
+  }, [])
 
   const flushPendingSave = useCallback(() => {
     if (saveTimerRef.current !== null) {
@@ -588,49 +783,122 @@ export default function App() {
     })
   }, [])
 
-  const requestSaveProject = useCallback(() => {
+  const requestSaveProject = useCallback(async () => {
     setSaveDialogError(null)
     if (projectLibraryError || !activeSavedProjectId) {
       setSaveDialogOpen(true)
       return
     }
+    if (manualSavePendingRef.current) return
 
-    const result = saveNamedProject({
-      id: activeSavedProjectId,
-      name: program.name,
-      program,
-    })
-    if (result.ok) {
-      setSavedProjects(result.projects)
-      setActiveProject(result.project.id)
-      notify(`已保存「${result.project.name}」到本机项目库`)
+    const context = activeSavedProjectRef.current
+    if (!context) {
+      setSaveDialogOpen(true)
       return
     }
+    const snapshot = latestProgramRef.current
+    manualSavePendingRef.current = true
+    try {
+      const result = await saveNamedProject({
+        id: context.id,
+        name: snapshot.name,
+        program: snapshot,
+        expectedSavedAt: context.savedAt,
+      })
+      if (result.ok) {
+        setSavedProjects(result.projects)
+        const current = activeSavedProjectRef.current
+        if (!current || current.id !== context.id || current.savedAt !== context.savedAt) {
+          notify(`已保存「${result.project.name}」，当前编辑区已切换到其他项目，因此未改动当前内容`)
+          return
+        }
+        setActiveProject(result.project.id, result.project.savedAt, result.project.program)
+        if (result.project.program.name !== latestProgramRef.current.name) {
+          commit(setProjectName(latestProgramRef.current, result.project.program.name))
+        }
+        // 项目库版本已经前进，但内容可能在上一次自动保存后没有变化。
+        // 仍需用新版本号重写本标签页草稿，storage 事件才能让其他标签页
+        // 及时跟随或进入冲突；否则对方下一次保存才会撞上过期版本。
+        saveLatestProgram()
+        const settlement = settleSupersededConflict(result.project.savedAt)
+        if (settlement === 'cleared') {
+          notify(`已保存「${result.project.name}」到本机项目库；另一标签页的版本已存为恢复副本`)
+        } else if (settlement === 'archive-failed') {
+          notify(`已保存「${result.project.name}」，但另一标签页版本暂存失败；请先导出本页工程备份`, { tone: 'error' })
+        } else {
+          notify(`已保存「${result.project.name}」到本机项目库`)
+        }
+        return
+      }
 
-    if (result.reason === 'missing-project') setActiveProject(null)
-    if (result.reason === 'corrupt-library') setProjectLibraryError(result.message)
-    setSaveDialogError(result.message)
-    setSaveDialogOpen(true)
-  }, [activeSavedProjectId, notify, program, projectLibraryError, setActiveProject])
-
-  const handleSaveNamedProject = useCallback((name: string): SaveNamedProjectResult => {
-    const result = saveNamedProject({ id: activeSavedProjectId, name, program })
-    if (!result.ok) {
-      if (result.reason === 'missing-project') setActiveProject(null)
       if (result.reason === 'corrupt-library') setProjectLibraryError(result.message)
+      if (result.reason === 'save-conflict') {
+        const latest = readProjectLibrary()
+        if (latest.status === 'ok') setSavedProjects(latest.projects)
+      }
+      const current = activeSavedProjectRef.current
+      if (!current || current.id !== context.id || current.savedAt !== context.savedAt) {
+        notify(result.message, { tone: 'error' })
+        return
+      }
+      if (result.reason === 'missing-project') {
+        setActiveProject(null)
+        const latest = readProjectLibrary()
+        if (latest.status === 'ok') setSavedProjects(latest.projects)
+      }
+      setSaveDialogError(result.message)
+      setSaveDialogOpen(true)
+    } finally {
+      manualSavePendingRef.current = false
+    }
+  }, [activeSavedProjectId, commit, notify, projectLibraryError, saveLatestProgram, setActiveProject, settleSupersededConflict])
+
+  const handleSaveNamedProject = useCallback(async (name: string): Promise<SaveNamedProjectResult> => {
+    const context = activeSavedProjectRef.current
+    const snapshot = latestProgramRef.current
+    const result = await saveNamedProject({
+      id: context?.id ?? null,
+      name,
+      program: snapshot,
+      expectedSavedAt: context?.savedAt ?? null,
+    })
+    const current = activeSavedProjectRef.current
+    const sameContext = context
+      ? current?.id === context.id && current.savedAt === context.savedAt
+      : current === null
+    if (!result.ok) {
+      if (result.reason === 'corrupt-library') setProjectLibraryError(result.message)
+      if (result.reason === 'save-conflict') {
+        const latest = readProjectLibrary()
+        if (latest.status === 'ok') setSavedProjects(latest.projects)
+      }
+      if (sameContext && result.reason === 'missing-project') setActiveProject(null)
       return result
     }
 
     setSavedProjects(result.projects)
-    setActiveProject(result.project.id)
-    if (result.project.program.name !== program.name) {
-      commit(setProjectName(program, result.project.program.name))
+    if (!sameContext) {
+      notify(`已保存「${result.project.name}」，当前编辑区已切换到其他项目，因此未改动当前内容`)
+      return result
     }
+    setActiveProject(result.project.id, result.project.savedAt, result.project.program)
+    if (result.project.program.name !== latestProgramRef.current.name) {
+      commit(setProjectName(latestProgramRef.current, result.project.program.name))
+    }
+    // 保存命名项目后同步刷新草稿信封中的版本基准，见 requestSaveProject 中的说明。
+    saveLatestProgram()
+    const settlement = settleSupersededConflict(result.project.savedAt)
     setSaveDialogOpen(false)
     setSaveDialogError(null)
-    notify(`已保存「${result.project.name}」到本机项目库`)
+    if (settlement === 'cleared') {
+      notify(`已保存「${result.project.name}」到本机项目库；另一标签页的版本已存为恢复副本`)
+    } else if (settlement === 'archive-failed') {
+      notify(`已保存「${result.project.name}」，但另一标签页版本暂存失败；请先导出本页工程备份`, { tone: 'error' })
+    } else {
+      notify(`已保存「${result.project.name}」到本机项目库`)
+    }
     return result
-  }, [activeSavedProjectId, commit, notify, program, setActiveProject])
+  }, [commit, notify, saveLatestProgram, setActiveProject, settleSupersededConflict])
 
   // Toast 上的「撤销」只能把这一段插回当前工程，不能回滚成删除那一刻的整份快照，
   // 否则用户在删除后继续做的编辑会被悄悄丢掉。
@@ -1016,27 +1284,82 @@ export default function App() {
         return
       }
       if (event.key !== PROGRAM_STORAGE_KEY || !event.newValue) return
-      let incoming: Program
+      // storage 事件可能在后台标签页排队；处理时若镜像已被更新的一笔覆盖，
+      // 旧事件不应再制造一次基于过期版本的冲突提示。
       try {
-        incoming = parseProgramText(event.newValue)
+        if (window.localStorage.getItem(PROGRAM_STORAGE_KEY) !== event.newValue) return
       } catch {
         return
       }
+      const draft = parseProgramDraft(event.newValue)
+      if (!draft) return
+      // 事件可能来自更早的一次写入；本页已经见过更新的草稿时直接丢弃，
+      // 不能让迟到的旧事件重新弹出冲突或把内容回退。
+      if (lastDraftStampRef.current !== null && draft.savedAt < lastDraftStampRef.current) return
+      const active = activeSavedProjectRef.current
+      const currentProjectId = active?.id ?? null
 
-      if (serializeProgram(incoming) === serializeProgram(latestProgramRef.current)) {
+      // 未命名草稿没有可靠的项目身份，不能被另一个标签页覆盖。
+      if (!currentProjectId || draft.projectId !== currentProjectId) return
+      if (draft.tabId === getDraftTabId()) return
+      const incoming = draft.program
+
+      if (programsEqual(incoming, latestProgramRef.current)) {
+        lastDraftStampRef.current = draft.savedAt
         lastPersistedProgramRef.current = latestProgramRef.current
+        projectBaselineProgramRef.current = incoming
         saveDirtyRef.current = false
         setSavePending(false)
-        setLastSavedAt(getLastSavedAt() ?? Date.now())
+        setLastSavedAt(draft.savedAt)
+        // 另一标签页保存的正是本页当前内容时，本页也必须把项目版本推进到
+        // 库里的最新版本；否则下一次保存仍拿旧 savedAt 去撞版本检查。
+        const library = active ? readProjectLibrary() : null
+        const activeId = active?.id ?? null
+        const latest = activeId && library?.status === 'ok'
+          ? library.projects.find((project) => project.id === activeId) ?? null
+          : null
+        if (active && latest && (
+          programsEqual(incoming, latest.program) || draft.baseSavedAt === latest.savedAt
+        )) {
+          setActiveProject(active.id, latest.savedAt, incoming)
+        }
         return
       }
 
-      const unsaved = latestProgramRef.current !== lastPersistedProgramRef.current
-      if (!unsaved && !saveDirtyRef.current) {
+      const baseline = projectBaselineProgramRef.current
+      const hasLocalProjectEdit = baseline === null
+        || !programsEqual(latestProgramRef.current, baseline)
+      const library = active ? readProjectLibrary() : null
+      const activeId = active?.id ?? null
+      const latest = activeId && library?.status === 'ok'
+        ? library.projects.find((project) => project.id === activeId) ?? null
+        : null
+      // 对方草稿若基于更旧的库版本（甚至没有版本号），它不可能代表“更新版本”。
+      // 当前页已经站在更新的库版本上时，这种迟到草稿不应反向阻断当前页；
+      // 对方回到前台后会收到自己的版本冲突提示并选择采纳。
+      const incomingBase = draft.baseSavedAt
+      const staleBase = incomingBase === null || (active !== null && incomingBase < active.savedAt)
+      if (staleBase) return
+      // 只跟随“基于当前库版本”的草稿。旧标签页的过期草稿不能把本页从
+      // 新版本悄悄拉回旧内容；这种情形继续走冲突横幅，交给用户选择。
+      const senderBasedOnCurrentVersion = draft.baseSavedAt === active?.savedAt
+        && (!latest || latest.savedAt === draft.baseSavedAt)
+      const senderSavedLatestVersion = Boolean(
+        latest && draft.baseSavedAt === latest.savedAt && programsEqual(incoming, latest.program),
+      )
+      if (!hasLocalProjectEdit && !saveDirtyRef.current && active
+        && (senderBasedOnCurrentVersion || senderSavedLatestVersion)) {
+        lastDraftStampRef.current = draft.savedAt
         lastPersistedProgramRef.current = incoming
+        projectBaselineProgramRef.current = incoming
         setHistory({ past: [], present: incoming, future: [] })
         setSavePending(false)
-        setLastSavedAt(getLastSavedAt() ?? Date.now())
+        setLastSavedAt(draft.savedAt)
+        setActiveProject(
+          active.id,
+          senderSavedLatestVersion && latest ? latest.savedAt : active.savedAt,
+          incoming,
+        )
         notify('已同步另一个标签页保存的工程')
         return
       }
@@ -1047,14 +1370,15 @@ export default function App() {
       }
       clearSaveRetryTimer()
       remoteConflictRef.current = true
-      setRemoteConflict({ program: incoming, savedAt: getLastSavedAt() ?? Date.now() })
+      remoteConflictDataRef.current = { program: incoming, savedAt: draft.savedAt, baseSavedAt: draft.baseSavedAt }
+      setRemoteConflict({ program: incoming, savedAt: draft.savedAt, baseSavedAt: draft.baseSavedAt })
       setSavePending(false)
       notify('另一个标签页保存了不同的版本，本页自动保存已暂停', { tone: 'error' })
     }
 
     window.addEventListener('storage', onStorage)
     return () => window.removeEventListener('storage', onStorage)
-  }, [clearSaveRetryTimer, notify])
+  }, [clearSaveRetryTimer, notify, setActiveProject])
 
   useEffect(() => {
     // 浏览器会在刷新后恢复内部滚动位置；恢复提示必须回到可见区域，避免被静默错过。
@@ -1180,7 +1504,7 @@ export default function App() {
       event.stopPropagation()
       if (event.repeat) return
       if (document.querySelector('[role="dialog"][aria-modal="true"]')) return
-      requestSaveProject()
+      void requestSaveProject()
     }
     window.addEventListener('keydown', onKeyDown, true)
     return () => window.removeEventListener('keydown', onKeyDown, true)
@@ -1747,23 +2071,31 @@ export default function App() {
     const stamp = downloadTimestamp()
     downloadText(`梯形实验室-损坏工程备份-${stamp}.txt`, corruptProject.raw)
     setRawDownloaded(true)
+    const downloadedCopies = (corruptProject.copies ?? []).filter((copy) => copy.raw)
+    const downloadedCopiesIntact = downloadedCopies.length > 0
+      && downloadedCopies.every((copy) => isRecoveryBackupIntact(copy.backupKey, copy.raw))
     notify(
-      isRecoveryBackupIntact(corruptProject.backupKey, corruptProject.raw)
+      downloadedCopiesIntact
         ? '损坏工程原始内容已下载，浏览器内也已保留恢复副本'
         : '损坏工程原始内容已下载；浏览器内额外备份未能建立',
     )
   }
 
   // 只有在“浏览器内备份确实还在”或“用户已经把原文下载到本机”时，才允许覆盖主工程。
-  const backupIntact = Boolean(
-    corruptProject && isRecoveryBackupIntact(corruptProject.backupKey, corruptProject.raw),
-  )
-  const originalContentKept = backupIntact || rawDownloaded
+  const corruptCopies = corruptProject?.copies ?? []
+  const recoverableCopies = corruptCopies.filter((copy) => copy.raw)
+  const backupIntact = Boolean(corruptProject)
+    && recoverableCopies.length > 0
+    && recoverableCopies.every((copy) =>
+      isRecoveryBackupIntact(copy.backupKey, copy.raw),
+    )
+  const noRecoverableCopy = Boolean(corruptProject) && recoverableCopies.length === 0
+  const originalContentKept = backupIntact || rawDownloaded || noRecoverableCopy
   const hasRecoveryCandidate = Boolean(corruptProject) && program !== initialProgram
 
   const acceptRecoveredProject = () => {
     if (!corruptProject) return
-    if (!isRecoveryBackupIntact(corruptProject.backupKey, corruptProject.raw) && !rawDownloaded) {
+    if (!backupIntact && !rawDownloaded) {
       notify('请先下载损坏工程的原始内容，再覆盖本机工程')
       return
     }
@@ -1798,12 +2130,16 @@ export default function App() {
 
   const discardCorruptProject = async () => {
     if (!corruptProject) return
-    const intact = isRecoveryBackupIntact(corruptProject.backupKey, corruptProject.raw)
+    const intact = backupIntact
     if (!intact && !rawDownloaded) {
       notify('请先下载损坏工程的原始内容，再放弃本机工程')
       return
     }
-    const keepNote = intact ? '浏览器内恢复副本会保留，' : '原始内容已下载到本机，'
+    const keepNote = intact
+      ? '浏览器内恢复副本会保留，'
+      : noRecoverableCopy
+        ? '没有可读取的原始内容，'
+        : '原始内容已下载到本机，'
     const accepted = await confirm({
       title: '放弃损坏的工程？',
       description: `将放弃当前浏览器里的损坏工程并新建空白工程。${keepNote}此操作不可撤销。`,
@@ -1844,6 +2180,7 @@ export default function App() {
       return
     }
     remoteConflictRef.current = false
+    remoteConflictDataRef.current = null
     setRemoteConflict(null)
     saveDirtyRef.current = true
     setBackups(listRecoveryBackups())
@@ -1859,19 +2196,46 @@ export default function App() {
       return
     }
     const incoming = remoteConflict.program
+    const active = activeSavedProjectRef.current
+    const library = active ? readProjectLibrary() : null
+    const activeId = active?.id ?? null
+    const latest = activeId && library?.status === 'ok'
+      ? library.projects.find((project) => project.id === activeId) ?? null
+      : null
+    // 采纳已经提交到项目库的版本时，必须把本页的项目版本号一起推进；
+    // 只更新草稿基准会让下一次保存继续使用旧版本号并被拒绝。
+    // 如果对方只是未提交草稿，则保留它真实的 baseSavedAt，不能冒充库版本。
+    const adoptedSavedAt = latest && (
+      programsEqual(incoming, latest.program) || remoteConflict.baseSavedAt === latest.savedAt
+    )
+      ? latest.savedAt
+      : remoteConflict.baseSavedAt ?? active?.savedAt ?? null
+    // 采纳另一版也必须覆盖本标签页草稿；否则刷新会从 sessionStorage
+    // 把刚被放弃的旧内容带回来。项目身份保持不变，后续保存仍写回同一项目。
+    const persisted = saveProgram(incoming, {
+      projectId: active?.id ?? null,
+      baseSavedAt: adoptedSavedAt,
+    })
+    if (!persisted.ok) {
+      notify('无法保存另一标签页版本到本机，尚未切换；请先从工具栏导出本页 JSON', { tone: 'error' })
+      return
+    }
     remoteConflictRef.current = false
+    remoteConflictDataRef.current = null
     setRemoteConflict(null)
+    if (active) setActiveProject(active.id, adoptedSavedAt, incoming)
+    lastDraftStampRef.current = persisted.savedAt
     lastPersistedProgramRef.current = incoming
+    projectBaselineProgramRef.current = incoming
     latestProgramRef.current = incoming
     saveDirtyRef.current = false
     setHistory({ past: [], present: incoming, future: [] })
     setSelection(incoming.rungs[0] ? { rungId: incoming.rungs[0].id, path: null } : null)
-    setLastSavedAt(remoteConflict.savedAt)
+    setLastSavedAt(persisted.savedAt)
     setSaveError(null)
     setSavePending(false)
     setBackups(listRecoveryBackups())
     setBackupsDismissed(false)
-    setActiveProject(null)
     notify('已载入另一标签页版本；本页修改已存为恢复副本')
   }
 
@@ -1922,7 +2286,7 @@ export default function App() {
   }
 
   const openSavedProject = async (saved: SavedProject) => {
-    if (saved.id === activeSavedProjectId) {
+    if (saved.id === activeSavedProjectId && saved.savedAt === activeSavedProjectVersion) {
       setMobilePanel('none')
       notify(`「${saved.name}」已经是当前工程`)
       return
@@ -1951,7 +2315,7 @@ export default function App() {
       : null)
     setRunning(false)
     setMobilePanel('none')
-    setActiveProject(saved.id)
+    setActiveProject(saved.id, saved.savedAt, saved.program)
     notify(`已打开「${saved.name}」`)
   }
 
@@ -1963,8 +2327,10 @@ export default function App() {
       danger: true,
     })
     if (!accepted) return
-    const result = removeSavedProjectFromLibrary(saved.id)
+    const result = await removeSavedProjectFromLibrary(saved.id, saved.savedAt)
     if (!result.ok) {
+      const latest = readProjectLibrary()
+      if (latest.status === 'ok') setSavedProjects(latest.projects)
       notify(result.message, { tone: 'error' })
       return
     }
@@ -2348,7 +2714,7 @@ export default function App() {
         onAbout={() => setAboutOpen(true)}
       />
 
-      <header className="wb-documentbar">
+      <div className="wb-documentbar" role="region" aria-label="程序编辑器工具栏">
         <div className="wb-doc-tab">
           <LadderIcon size={15} />
           <h1>Main [OB1]</h1>
@@ -2385,7 +2751,7 @@ export default function App() {
             <span>变量表</span>
           </button>
         </div>
-      </header>
+      </div>
 
       <InstructionBar
         profile={program.profile}
@@ -2476,7 +2842,9 @@ export default function App() {
                         ? ' 原始内容已保留为浏览器内恢复副本。'
                         : rawDownloaded
                           ? ' 原始内容已下载到本机。'
-                          : ' 浏览器内额外备份不可用，必须先下载原始内容。'}
+                          : noRecoverableCopy
+                            ? ' 存储中没有可读取的原始内容，可以直接重建工程。'
+                            : ' 浏览器内额外备份不可用，必须先下载原始内容。'}
                     </span>
                     <span>
                       {hasRecoveryCandidate
@@ -2738,6 +3106,7 @@ export default function App() {
         activeRungId={activeRungId}
         savedProjects={savedProjects}
         activeSavedProjectId={activeSavedProjectId}
+        activeSavedProjectVersion={activeSavedProjectVersion}
         projectLibraryError={projectLibraryError}
         onClose={() => setMobilePanel('none')}
         onOpenSavedProject={(saved) => void openSavedProject(saved)}
@@ -2792,7 +3161,11 @@ export default function App() {
       )}
 
       {(inspectorOpen || mobilePanel === 'properties') && (
-        <div className="wb-context-layer" role="presentation">
+        <div
+          className="wb-context-layer"
+          role={inspectorDocked ? 'complementary' : undefined}
+          aria-label={inspectorDocked ? '属性与变量面板' : undefined}
+        >
           <button
             type="button"
             className="wb-context-scrim"
@@ -2826,12 +3199,12 @@ export default function App() {
               onKeyDown={resizeInspectorWithKeyboard}
             />
           )}
-          <aside
+          <section
             id="wb-context-panel"
             className="wb-context-panel"
-            role={inspectorDocked ? 'complementary' : 'dialog'}
+            role={inspectorDocked ? undefined : 'dialog'}
             aria-modal={inspectorDocked ? undefined : true}
-            aria-label="属性与变量"
+            aria-label={inspectorDocked ? undefined : '属性与变量'}
           >
             <Inspector
               docked={inspectorDocked}
@@ -2854,7 +3227,7 @@ export default function App() {
                 setMobilePanel('none')
               }}
             />
-          </aside>
+          </section>
         </div>
       )}
 

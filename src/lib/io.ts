@@ -50,7 +50,12 @@ function parseNode(value: unknown, where: string, depth = 0): LadderNode {
   if (type === 'contact') {
     const kind = text(node.kind, `${where}.kind`) as ContactKind
     if (!CONTACT_KINDS.includes(kind)) fail(`${where}.kind 不是支持的触点类型。`)
-    const tag = text(node.tag, `${where}.tag`).trim()
+    const tag = capped(
+      text(node.tag, `${where}.tag`).trim(),
+      FIELD_LIMITS.reference,
+      '变量引用',
+      `${where}.tag`,
+    )
     const condition: LadderNode = { type: 'contact', id: text(node.id, `${where}.id`).trim(), kind, tag }
     if (node.compare !== undefined) {
       const compare = record(node.compare, `${where}.compare`)
@@ -66,7 +71,7 @@ function parseNode(value: unknown, where: string, depth = 0): LadderNode {
   if (type === 'parallel') {
     if (!Array.isArray(node.branches) || node.branches.length === 0) fail(`${where}.branches 必须是非空数组。`)
     const autoTagId = typeof node.autoTagId === 'string' && node.autoTagId.trim()
-      ? node.autoTagId
+      ? capped(node.autoTagId.trim(), FIELD_LIMITS.reference, '变量引用', `${where}.autoTagId`)
       : undefined
     const branches = node.branches.map((branch, index) => {
       if (!Array.isArray(branch)) fail(`${where}.branches[${index}] 必须是数组。`)
@@ -118,13 +123,25 @@ export function parseProgram(input: unknown): Program {
     return {
       id,
       name,
-      address: text(tag.address, `${where}.address`).trim(),
+      address: capped(
+        text(tag.address, `${where}.address`).trim(),
+        FIELD_LIMITS.address,
+        '变量地址',
+        `${where}.address`,
+      ),
       kind,
       initial,
       comment: typeof tag.comment === 'string'
         ? capped(tag.comment, FIELD_LIMITS.tagComment, '变量注释', `${where}.comment`)
         : '',
-      ...(tag.bitOf !== undefined ? { bitOf: text(tag.bitOf, `${where}.bitOf`).trim() } : {}),
+      ...(tag.bitOf !== undefined ? {
+        bitOf: capped(
+          text(tag.bitOf, `${where}.bitOf`).trim(),
+          FIELD_LIMITS.reference,
+          '变量引用',
+          `${where}.bitOf`,
+        ),
+      } : {}),
     }
   })
 
@@ -147,16 +164,33 @@ export function parseProgram(input: unknown): Program {
     const parsedOutput = {
       id: outputId,
       kind,
-      tag: text(output.tag, `${where}.output.tag`).trim(),
+      tag: capped(
+        text(output.tag, `${where}.output.tag`).trim(),
+        FIELD_LIMITS.reference,
+        '变量引用',
+        `${where}.output.tag`,
+      ),
       ...(output.pt !== undefined ? { pt: number(output.pt, `${where}.output.pt`) } : {}),
       ...(output.pv !== undefined ? { pv: number(output.pv, `${where}.output.pv`) } : {}),
-      ...(output.resetTag !== undefined ? { resetTag: text(output.resetTag, `${where}.output.resetTag`).trim() } : {}),
-      ...(output.qTag !== undefined ? { qTag: text(output.qTag, `${where}.output.qTag`).trim() } : {}),
-      ...(output.valueTag !== undefined ? { valueTag: text(output.valueTag, `${where}.output.valueTag`).trim() } : {}),
-      ...(output.sourceTag !== undefined ? { sourceTag: text(output.sourceTag, `${where}.output.sourceTag`).trim() } : {}),
+      ...(output.resetTag !== undefined ? {
+        resetTag: capped(text(output.resetTag, `${where}.output.resetTag`).trim(), FIELD_LIMITS.reference, '变量引用', `${where}.output.resetTag`),
+      } : {}),
+      ...(output.qTag !== undefined ? {
+        qTag: capped(text(output.qTag, `${where}.output.qTag`).trim(), FIELD_LIMITS.reference, '变量引用', `${where}.output.qTag`),
+      } : {}),
+      ...(output.valueTag !== undefined ? {
+        valueTag: capped(text(output.valueTag, `${where}.output.valueTag`).trim(), FIELD_LIMITS.reference, '变量引用', `${where}.output.valueTag`),
+      } : {}),
+      ...(output.sourceTag !== undefined ? {
+        sourceTag: capped(text(output.sourceTag, `${where}.output.sourceTag`).trim(), FIELD_LIMITS.reference, '变量引用', `${where}.output.sourceTag`),
+      } : {}),
       ...(output.value !== undefined ? { value: number(output.value, `${where}.output.value`) } : {}),
-      ...(output.pulseTag !== undefined ? { pulseTag: text(output.pulseTag, `${where}.output.pulseTag`).trim() } : {}),
-      ...(output.stepTag !== undefined ? { stepTag: text(output.stepTag, `${where}.output.stepTag`).trim() } : {}),
+      ...(output.pulseTag !== undefined ? {
+        pulseTag: capped(text(output.pulseTag, `${where}.output.pulseTag`).trim(), FIELD_LIMITS.reference, '变量引用', `${where}.output.pulseTag`),
+      } : {}),
+      ...(output.stepTag !== undefined ? {
+        stepTag: capped(text(output.stepTag, `${where}.output.stepTag`).trim(), FIELD_LIMITS.reference, '变量引用', `${where}.output.stepTag`),
+      } : {}),
       ...(output.pattern !== undefined ? {
         pattern: Array.isArray(output.pattern)
           ? output.pattern.map((value, index) => number(value, `${where}.output.pattern[${index}]`))
@@ -177,17 +211,15 @@ export function parseProgram(input: unknown): Program {
     }
   })
 
-  const edgeNodeIds = new Set<string>()
+  const nodeIds = new Set<string>()
   let nodeCount = 0
   const validateNodes = (nodes: LadderNode[]) => {
     for (const node of nodes) {
       nodeCount += 1
       if (nodeCount > MAX_NODES) fail(`节点总数超过上限 ${MAX_NODES}。`)
       if (!node.id) fail('节点 ID 不能为空。')
-      if (node.type === 'contact' && (node.kind === 'P' || node.kind === 'N')) {
-        if (edgeNodeIds.has(node.id)) fail(`边沿触点 ID“${node.id}”重复。`)
-        edgeNodeIds.add(node.id)
-      }
+      if (nodeIds.has(node.id)) fail(`元件 ID“${node.id}”重复。`)
+      nodeIds.add(node.id)
       if (node.type === 'parallel') node.branches.forEach(validateNodes)
     }
   }

@@ -15,7 +15,19 @@ const o = (kind: OutputKind, tag: string, extra: Partial<OutputElement> = {}): O
   ({ id: uid('o'), kind, tag, ...extra })
 const r = (label: string, nodes: LadderNode[], output: OutputElement) => ({ id: uid('r'), label, nodes, output })
 const p = (name: string, tags: TagDef[], rungs: Program['rungs']): Program => ({ schema: 1, name, profile: 'v14', tags, rungs })
-const resetAll = (condition: LadderNode[], label: string, names: string[]) => names.map((name) => r(`${label} · ${name}`, condition, o('RESET', name)))
+const cloneNode = (node: LadderNode): LadderNode => node.type === 'contact'
+  ? {
+    ...node,
+    id: uid('c'),
+    ...(node.compare ? { compare: { ...node.compare } } : {}),
+  }
+  : {
+    ...node,
+    id: uid('par'),
+    branches: node.branches.map((branch) => branch.map(cloneNode)),
+  }
+const resetAll = (condition: LadderNode[], label: string, names: string[]) => names.map((name) =>
+  r(`${label} · ${name}`, condition.map(cloneNode), o('RESET', name)))
 
 function quiz(): Program {
   const rungs: Program['rungs'] = [

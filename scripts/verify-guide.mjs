@@ -1,17 +1,17 @@
 /** 首次使用引导与移动端布局的浏览器验收脚本（CDP）。 */
 import { mkdir, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
+import { DEFAULT_QA_APP_URL, DEFAULT_QA_CDP, selectExactPage } from './qa-cdp.mjs'
 
-const CDP_HTTP = process.env.LADDERLAB_CDP ?? 'http://127.0.0.1:9222'
-const APP_URL = process.env.LADDERLAB_URL ?? 'http://127.0.0.1:4173/'
+const CDP_HTTP = process.env.LADDERLAB_CDP ?? DEFAULT_QA_CDP
+const APP_URL = process.env.LADDERLAB_URL ?? DEFAULT_QA_APP_URL
 const GUIDE_KEY = 'ladderlab.guide.v1'
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms))
 const QA_DIR = resolve('docs/qa')
 await mkdir(QA_DIR, { recursive: true })
 
 const targets = await (await fetch(`${CDP_HTTP}/json`)).json()
-const page = targets.find((target) => target.type === 'page')
-if (!page) throw new Error(`没有可调试页面：${CDP_HTTP}`)
+const page = selectExactPage(targets, APP_URL, CDP_HTTP)
 
 const socket = new WebSocket(page.webSocketDebuggerUrl)
 await new Promise((resolveOpen, rejectOpen) => {

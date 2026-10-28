@@ -10,7 +10,7 @@ import {
 import { compile } from './compile'
 import { supportsContact, supportsOutput } from './profiles'
 import { blankProgram } from './samples'
-import { createRuntime, step } from './simulate'
+import { createRuntime, step, writeRuntimeValue } from './simulate'
 import type {
   ContactKind,
   LadderNode,
@@ -124,6 +124,22 @@ describe('编译诊断', () => {
     expect(compile(source).errors[0].message).toContain('PT 必须大于 0')
   })
 
+  it('CTU 预设值限制在 INT 可表示的有效计数范围内', () => {
+    const atLimit = program(
+      'v14',
+      [tag('Pulse')],
+      [rung('r1', [contact('c1', 'NO', 'Pulse')], output('CTU', 'C1', { pv: 32767 }))],
+    )
+    expect(compile(atLimit).errors).toEqual([])
+
+    const tooLarge = program(
+      'v14',
+      [tag('Pulse')],
+      [rung('r1', [contact('c1', 'NO', 'Pulse')], output('CTU', 'C1', { pv: 32768 }))],
+    )
+    expect(compile(tooLarge).errors[0]?.message).toContain('1～32767')
+  })
+
   it('允许无条件 MOVE 和定时器程序段', () => {
     const source = program(
       'v14',
@@ -143,6 +159,50 @@ describe('编译诊断', () => {
 })
 
 describe('扫描仿真', () => {
+  it('把 __proto__ 当作普通变量名参与读写和比较', () => {
+    const boolSource = program(
+      'v14',
+      [tag('__proto__'), tag('Lamp')],
+      [rung('r1', [contact('c1', 'NO', '__proto__')], output('COIL', 'Lamp'))],
+    )
+    let boolRuntime = createRuntime(boolSource)
+    expect(Object.getPrototypeOf(boolRuntime.bools)).toBeNull()
+    expect(boolRuntime.bools['__proto__']).toBe(false)
+    expect(boolRuntime.rungPower.r1).toBeUndefined()
+
+    boolRuntime = writeRuntimeValue(boolSource, boolRuntime, '__proto__', true)
+    boolRuntime = step(boolSource, boolRuntime, 100)
+    expect(boolRuntime.bools['__proto__']).toBe(true)
+    expect(boolRuntime.bools.Lamp).toBe(true)
+    expect(boolRuntime.rungPower.r1).toBe(true)
+
+    const intSource = program(
+      'v14',
+      [tag('__proto__', 'INT', 5), tag('Match')],
+      [
+        rung(
+          'r1',
+          [{
+            type: 'contact',
+            id: 'c1',
+            kind: 'CMP',
+            tag: '__proto__',
+            compare: { op: '==', value: 5 },
+          }],
+          output('COIL', 'Match'),
+        ),
+      ],
+    )
+    let intRuntime = createRuntime(intSource)
+    expect(Object.getPrototypeOf(intRuntime.ints)).toBeNull()
+    expect(intRuntime.ints['__proto__']).toBe(5)
+    intRuntime = step(intSource, intRuntime, 100)
+    expect(intRuntime.bools.Match).toBe(true)
+
+    intRuntime = writeRuntimeValue(intSource, intRuntime, '__proto__', 7)
+    expect(intRuntime.ints['__proto__']).toBe(7)
+  })
+
   it('执行启保停、自锁与停止逻辑', () => {
     const source = program(
       'v14',

@@ -1,7 +1,7 @@
 import { Component } from 'react'
 import type { ErrorInfo, ReactNode } from 'react'
-import { downloadText } from '../lib/io'
-import { PROGRAM_STORAGE_KEY } from '../lib/storage'
+import { downloadText, serializeProgram } from '../lib/io'
+import { parseProgramDraft, readRawSavedProgram } from '../lib/storage'
 
 interface Props {
   children: ReactNode
@@ -25,9 +25,13 @@ export default class ErrorBoundary extends Component<Props, State> {
 
   private downloadRaw = () => {
     try {
-      const raw = window.localStorage.getItem(PROGRAM_STORAGE_KEY)
+      const raw = readRawSavedProgram()
       if (!raw) return
-      downloadText('梯形实验室-本机工程备份.txt', raw)
+      const draft = parseProgramDraft(raw)
+      downloadText(
+        '梯形实验室-本机工程备份.json',
+        draft ? serializeProgram(draft.program) : raw,
+      )
     } catch {
       // 隐私模式下读不到也保持页面可操作。
     }

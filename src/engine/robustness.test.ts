@@ -126,7 +126,7 @@ describe('状态 ID 与配置校验', () => {
     expect(compile(duplicateOutputs).errors.some((item) => item.message.includes('输出 ID“same-output”重复'))).toBe(true)
   })
 
-  it('只要求会保存运行时状态的边沿触点 ID 全局唯一', () => {
+  it('拒绝重复的触点、边沿触点和并联节点 ID', () => {
     const duplicateEdges = program(
       [tag('Pulse'), tag('A'), tag('B')],
       [
@@ -134,7 +134,7 @@ describe('状态 ID 与配置校验', () => {
         rung('r2', [contact('same-edge', 'P', 'Pulse')], output('COIL', 'B')),
       ],
     )
-    expect(compile(duplicateEdges).errors.some((item) => item.message.includes('边沿触点 ID“same-edge”重复'))).toBe(true)
+    expect(compile(duplicateEdges).errors.some((item) => item.message.includes('节点 ID“same-edge”重复'))).toBe(true)
 
     const sharedPlainIds = program(
       [tag('Pulse'), tag('A'), tag('B')],
@@ -143,7 +143,16 @@ describe('状态 ID 与配置校验', () => {
         rung('r2', [contact('shared-plain', 'NO', 'Pulse')], output('COIL', 'B')),
       ],
     )
-    expect(compile(sharedPlainIds).errors).toEqual([])
+    expect(compile(sharedPlainIds).errors.some((item) => item.message.includes('节点 ID“shared-plain”重复'))).toBe(true)
+
+    const duplicateParallels = program(
+      [tag('A'), tag('B')],
+      [
+        rung('r1', [{ type: 'parallel', id: 'same-parallel', branches: [[contact('p1', 'NO', 'A')]] }], output('COIL', 'A')),
+        rung('r2', [{ type: 'parallel', id: 'same-parallel', branches: [[contact('p2', 'NO', 'B')]] }], output('COIL', 'B')),
+      ],
+    )
+    expect(compile(duplicateParallels).errors.some((item) => item.message.includes('节点 ID“same-parallel”重复'))).toBe(true)
   })
 
   it('校验 PATTERN 输出类型、节拍和灯字上限', () => {
@@ -366,6 +375,71 @@ describe('输出驱动与定时器边界', () => {
     expect(driveWarnings).toHaveLength(2)
   })
 
+  it('守卫组合被截断后仍保留真实的写冲突告警', () => {
+    const branches: LadderNode[][] = Array.from({ length: 24 }, (_, index) =>
+      [contact(`guard-closed-${index}`, 'NC', 'X')])
+    branches.push([contact('guard-open', 'NO', 'Y')])
+    const source = program(
+      [tag('X'), tag('Y'), tag('Lamp')],
+      [
+        rung('many-branches', [{ type: 'parallel', id: 'guard-parallel', branches }], output('COIL', 'Lamp', { id: 'out-many' })),
+        rung('other-driver', [contact('guard-pulse', 'NO', 'X')], output('COIL', 'Lamp', { id: 'out-other' })),
+      ],
+    )
+
+    const result = compile(source)
+    expect(result.errors).toEqual([])
+    expect(result.warnings.some((item) => item.message.includes('被多个线圈驱动'))).toBe(true)
+  })
+
+  it('并联分支超过组合上限后仍继续扫描后续串联条件', () => {
+    const branches: LadderNode[][] = Array.from({ length: 25 }, (_, index) =>
+      [contact(`wide-${index}`, 'NO', 'A')])
+    const source = program(
+      [tag('X'), tag('A'), tag('Lamp')],
+      [
+        rung(
+          'wide-and-exclusive',
+          [
+            { type: 'parallel', id: 'wide-parallel', branches },
+            contact('wide-series-x', 'NC', 'X'),
+          ],
+          output('COIL', 'Lamp', { id: 'out-wide' }),
+        ),
+        rung('wide-other', [contact('wide-x', 'NO', 'X')], output('COIL', 'Lamp', { id: 'out-wide-other' })),
+      ],
+    )
+
+    const driveWarnings = compile(source).warnings.filter((item) => item.message.includes('被多个线圈驱动'))
+    expect(driveWarnings).toHaveLength(1)
+    expect(driveWarnings[0]?.message).toContain('扫描顺序靠后的线圈生效')
+  })
+
+  it('嵌套并联展开后的相反极性仍能正确判定互斥', () => {
+    const source = program(
+      [tag('X'), tag('Lamp')],
+      [
+        rung('nested', [{
+          type: 'parallel',
+          id: 'outer',
+          branches: [
+            [{
+              type: 'parallel',
+              id: 'inner',
+              branches: [[contact('inner-closed', 'NC', 'X')]],
+            }],
+            [contact('outer-closed', 'NC', 'X')],
+          ],
+        }], output('COIL', 'Lamp', { id: 'out-nested' })),
+        rung('nested-other', [contact('nested-open', 'NO', 'X')], output('COIL', 'Lamp', { id: 'out-nested-other' })),
+      ],
+    )
+
+    const driveWarnings = compile(source).warnings.filter((item) => item.message.includes('被多个线圈驱动'))
+    // 外层两支都等价于 NC X，和另一段的 NO X 互斥，不应误报写冲突。
+    expect(driveWarnings).toHaveLength(0)
+  })
+
   it('比较条件只在整数区间完全不重叠时才判定互斥', () => {
     const tags = [tag('Pulse'), tag('Count', 'INT', 0), tag('Lamp')]
     const cmp = (id: string, op: CompareOp, value: number): LadderNode => ({
@@ -391,6 +465,12 @@ describe('输出驱动与定时器边界', () => {
     expect(messages(cmp('a', '<', 5), cmp('b', '>', 5))).toBe('')
     expect(messages(cmp('a', '<', 5), cmp('b', '>=', 5))).toBe('')
     expect(messages(cmp('a', '<=', 5), cmp('b', '>', 5))).toBe('')
+    // 小数阈值按 INT 可达整数收拢：4.5 与 5.1 之间仍有整数 5。
+    expect(messages(cmp('a', '>', 4.5), cmp('b', '<', 5.1))).toMatch(/驱动/)
+    expect(messages(cmp('a', '>', 4), cmp('b', '<', 5.1))).toMatch(/驱动/)
+    expect(messages(cmp('a', '>', 5), cmp('b', '<', 5.1))).toBe('')
+    expect(messages(cmp('a', '>=', 4.5), cmp('b', '<=', 4.5))).toBe('')
+    expect(messages(cmp('a', '==', 4.5), cmp('b', '>=', 0))).toBe('')
   })
 })
 
@@ -486,7 +566,7 @@ describe('工程导入边界', () => {
     expect(parsed.rungs[0].output.tag).toBe(first.output.tag)
   })
 
-  it('拒绝重复变量、程序段、输出和边沿触点 ID', () => {
+  it('拒绝重复变量、程序段、输出和元件 ID', () => {
     const source = blankProgram()
     const first = source.rungs[0]
     const expectError = (value: unknown, message: string) => {
@@ -522,10 +602,10 @@ describe('工程导入边界', () => {
           output: { ...first.output, id: 'out-r2' },
         },
       ],
-    }, '边沿触点 ID')
+    }, '元件 ID')
   })
 
-  it('允许普通触点沿用旧版重复 ID，避免旧工程失去兼容性', () => {
+  it('拒绝普通触点沿用重复 ID，避免路径定位和编辑状态含糊', () => {
     const source = blankProgram()
     const first = source.rungs[0]
     const data = {
@@ -540,7 +620,7 @@ describe('工程导入边界', () => {
         },
       ],
     }
-    expect(() => parseProgramText(JSON.stringify(data))).not.toThrow()
+    expect(() => parseProgramText(JSON.stringify(data))).toThrow('元件 ID')
   })
 
   it('拒绝过深并联和超长 PATTERN', () => {

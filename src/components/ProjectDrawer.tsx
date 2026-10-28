@@ -21,6 +21,7 @@ interface ProjectDrawerProps {
   activeRungId: string | null
   savedProjects: SavedProject[]
   activeSavedProjectId: string | null
+  activeSavedProjectVersion: number | null
   projectLibraryError: string | null
   onClose: () => void
   onOpenTags: () => void
@@ -37,6 +38,7 @@ export default function ProjectDrawer({
   activeRungId,
   savedProjects,
   activeSavedProjectId,
+  activeSavedProjectVersion,
   projectLibraryError,
   onClose,
   onOpenTags,
@@ -48,7 +50,7 @@ export default function ProjectDrawer({
 }: ProjectDrawerProps) {
   const closeRef = useRef<HTMLButtonElement>(null)
   const activeProfile = getProfile(program.profile)
-  const drawerRef = useModalFocus<HTMLElement>(open, onClose, closeRef)
+  const drawerRef = useModalFocus<HTMLDivElement>(open, onClose, closeRef)
 
   if (!open) return null
 
@@ -62,14 +64,14 @@ export default function ProjectDrawer({
         onClose()
       }}
     >
-      <aside
+      <div
         ref={drawerRef}
         className="wb-project-drawer"
         role="dialog"
         aria-modal="true"
         aria-labelledby="project-drawer-title"
       >
-        <header className="wb-drawer-head">
+        <div className="wb-drawer-head">
           <div>
             <h2 id="project-drawer-title">项目</h2>
             <p>本机项目库与实验资源</p>
@@ -77,7 +79,7 @@ export default function ProjectDrawer({
           <button ref={closeRef} type="button" className="icon-button wb-drawer-close" onClick={onClose} aria-label="关闭项目">
             <CloseIcon size={19} />
           </button>
-        </header>
+        </div>
 
         <div className="wb-project-tree">
           <div className="wb-project-device">
@@ -88,7 +90,7 @@ export default function ProjectDrawer({
             </div>
           </div>
 
-          <div className="wb-project-branch" aria-label="程序块与数据">
+          <div className="wb-project-branch" role="group" aria-label="程序块与数据">
             <button type="button" className={`wb-tree-item${activeRungId ? ' is-active' : ''}`} aria-current={activeRungId ? 'page' : undefined} onClick={onClose}>
               <LadderIcon size={18} />
               <span className="wb-tree-label">Main [OB1]</span>
@@ -124,9 +126,14 @@ export default function ProjectDrawer({
           ) : (
             <ul className="wb-saved-projects">
               {savedProjects.map((project) => {
-                const current = project.id === activeSavedProjectId
+                const sameProject = project.id === activeSavedProjectId
+                const current = sameProject && project.savedAt === activeSavedProjectVersion
+                const hasNewerVersion = sameProject && !current
                 return (
-                  <li key={project.id} className={`wb-saved-project${current ? ' is-current' : ''}`}>
+                  <li
+                    key={project.id}
+                    className={`wb-saved-project${current ? ' is-current' : ''}${hasNewerVersion ? ' has-newer-version' : ''}`}
+                  >
                     <button
                       type="button"
                       className="wb-saved-project-open"
@@ -137,6 +144,7 @@ export default function ProjectDrawer({
                       <span className="wb-saved-project-name">
                         {project.name}
                         {current && <span className="wb-saved-project-badge">当前</span>}
+                        {hasNewerVersion && <span className="wb-saved-project-badge is-update">有新版本</span>}
                       </span>
                       <span className="wb-saved-project-meta">
                         {formatProjectTime(project.savedAt)} · {project.program.rungs.length} 段 · {project.program.tags.length} 个变量
@@ -169,7 +177,7 @@ export default function ProjectDrawer({
             <button type="button" onClick={onAbout}><InfoIcon size={16} />关于与数据说明</button>
           </div>
         </section>
-      </aside>
+      </div>
     </div>
   )
 }

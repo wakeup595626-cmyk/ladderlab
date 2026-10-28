@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react'
 import { getProfile, supportsContact, supportsOutput } from '../engine/profiles'
+import { normalizeReference } from '../engine/references'
 import type {
   CompileResult,
   ContactKind,
@@ -87,14 +88,6 @@ function findPath(chain: LadderNode[], nodeId: string): number[] | null {
   return null
 }
 
-function selectionPath(program: Program, nodeId: string): number[] | null {
-  for (const rung of program.rungs) {
-    const path = findPath(rung.nodes, nodeId)
-    if (path) return path
-  }
-  return null
-}
-
 /** 与画布上的编号保持一致：属性面板永远用「程序段 N」指代当前所在的段。 */
 function rungCaption(program: Program, rungId: string, label: string): string {
   const index = program.rungs.findIndex((item) => item.id === rungId)
@@ -106,6 +99,7 @@ function ContactProperties({
   program,
   selectedRung,
   node,
+  path,
   profile,
   onProgram,
   onSelect,
@@ -114,12 +108,12 @@ function ContactProperties({
   program: Program
   selectedRung: Program['rungs'][number]
   node: Extract<LadderNode, { type: 'contact' }>
+  path: number[] | null
   profile: string
   onProgram: (program: Program) => void
   onSelect: (selection: Selection | null) => void
   onNotify: (message: string) => void
 }) {
-  const path = findPath(selectedRung.nodes, node.id)
   const boolTags = program.tags.filter((tag) => tag.kind === 'BOOL')
   const intTags = program.tags.filter((tag) => tag.kind === 'INT')
   const instances = program.rungs
@@ -134,11 +128,8 @@ function ContactProperties({
     ...instances.filter((output) => output.kind === 'CTU').map((output) => `${output.tag}.CV`),
   ]
   const setKind = (kind: ContactKind) => {
-    if (kind === 'CMP' || node.kind === 'CMP') {
-      onProgram(changeContactKind(program, selectedRung.id, path!, kind))
-    } else {
-      onProgram(updateContact(program, selectedRung.id, node.id, { kind }))
-    }
+    if (!path) return
+    onProgram(changeContactKind(program, selectedRung.id, path, kind))
   }
 
   return (
@@ -164,7 +155,9 @@ function ContactProperties({
         <span>{node.kind === 'CMP' ? '比较对象' : '变量 / 实例位'}</span>
         <select
           value={node.tag}
-          onChange={(event) => onProgram(updateContact(program, selectedRung.id, node.id, { tag: event.target.value }))}
+          onChange={(event) => {
+            if (path) onProgram(updateContact(program, selectedRung.id, path, { tag: event.target.value }))
+          }}
         >
           <option value="">— 请选择 —</option>
           {(node.kind === 'CMP' ? compareRefs : boolRefs).map((ref) => (
@@ -183,7 +176,7 @@ function ContactProperties({
             <select
               value={node.compare?.op ?? '>='}
               onChange={(event) =>
-                onProgram(updateContact(program, selectedRung.id, node.id, { compareOp: event.target.value }))
+                path && onProgram(updateContact(program, selectedRung.id, path, { compareOp: event.target.value }))
               }
             >
               {['==', '<>', '>', '>=', '<', '<='].map((op) => <option key={op}>{op}</option>)}
@@ -195,7 +188,7 @@ function ContactProperties({
               type="number"
               value={node.compare?.value ?? 1}
               onChange={(event) =>
-                onProgram(updateContact(program, selectedRung.id, node.id, { compareValue: Number(event.target.value) }))
+                path && onProgram(updateContact(program, selectedRung.id, path, { compareValue: Number(event.target.value) }))
               }
             />
           </label>
@@ -207,7 +200,8 @@ function ContactProperties({
           type="button"
           className="secondary-button"
           onClick={() => {
-            onProgram(wrapInParallel(program, selectedRung.id, path!))
+            if (!path) return
+            onProgram(wrapInParallel(program, selectedRung.id, path))
             onNotify('已创建并联分支')
           }}
         >
@@ -245,14 +239,17 @@ function TagsPanel({
   const [expandedTag, setExpandedTag] = useState<string | null>(null)
   const instances = program.rungs
     .map((rung) => rung.output)
-    .filter((output) => runtime.timers[output.tag] || runtime.counters[output.tag])
+    .filter((output) => {
+      const name = normalizeReference(output.tag)
+      return runtime.timers[name] || runtime.counters[name]
+    })
 
   return (
     <div className="tags-panel">
       <div className="tags-toolbar">
         <div>
           <span className="panel-label">符号与地址</span>
-          <h3>PLC 变量表</h3>
+          <h2>PLC 变量表</h2>
         </div>
         <div className="button-row compact-row">
           <button type="button" className="secondary-button" onClick={() => onProgram(addTag(program, 'BOOL'))}>
@@ -266,7 +263,7 @@ function TagsPanel({
 
       <p className="panel-note">点 TRUE / FALSE 立即切换仿真输入；展开可改名称和地址。</p>
 
-      <div className="tag-list" aria-label="PLC 变量表">
+      <section className="tag-list" aria-label="PLC 变量表">
         {program.tags.map((tag) => {
           const usage = tagUsage(program, tag.name)
           return (
@@ -310,6 +307,7 @@ function TagsPanel({
                   <input
                     key={`${tag.id}-address-${tag.address}`}
                     className="table-input mono address-input"
+                    maxLength={FIELD_LIMITS.address}
                     defaultValue={tag.address}
                     onBlur={(event) => onProgram(updateTag(program, tag.id, { address: event.target.value.toUpperCase() }))}
                     spellCheck={false}
@@ -341,7 +339,7 @@ function TagsPanel({
                   {tag.kind === 'BOOL' ? (
                     <button
                       type="button"
-                      className={runtime.bools[tag.name] ? 'live-value on' : 'live-value'}
+                      className={runtime.bools[normalizeReference(tag.name)] ? 'live-value on' : 'live-value'}
                       onClick={() => onToggleBool(tag.name)}
                       title="点击切换仿真值"
                       aria-label={`切换 ${tag.name} 仿真值`}
@@ -350,10 +348,10 @@ function TagsPanel({
                     </button>
                   ) : (
                     <input
-                      key={`${tag.id}-runtime-${runtime.ints[tag.name] ?? 0}`}
+                      key={`${tag.id}-runtime-${runtime.ints[normalizeReference(tag.name)] ?? 0}`}
                       className="table-input mono runtime-input"
                       type="number"
-                      defaultValue={runtime.ints[tag.name] ?? 0}
+                      defaultValue={runtime.ints[normalizeReference(tag.name)] ?? 0}
                       onBlur={(event) => onSetInt(tag.name, Number(event.target.value) || 0)}
                     />
                   )}
@@ -362,9 +360,9 @@ function TagsPanel({
             </article>
           )
         })}
-      </div>
+      </section>
 
-      <div className="tags-monitor" aria-label="PLC 变量监视">
+      <section className="tags-monitor" aria-label="PLC 变量监视">
         {program.tags.map((tag) => {
           const usage = tagUsage(program, tag.name)
           const expanded = expandedTag === tag.id
@@ -379,19 +377,19 @@ function TagsPanel({
                 {tag.kind === 'BOOL' ? (
                   <button
                     type="button"
-                    className={runtime.bools[tag.name] ? 'live-value on' : 'live-value'}
+                    className={runtime.bools[normalizeReference(tag.name)] ? 'live-value on' : 'live-value'}
                     onClick={() => onToggleBool(tag.name)}
-                    aria-pressed={Boolean(runtime.bools[tag.name])}
+                    aria-pressed={Boolean(runtime.bools[normalizeReference(tag.name)])}
                     aria-label={`切换 ${tag.name} 仿真值，当前 ${readDisplay(program, runtime, tag.name)}`}
                   >
                     {readDisplay(program, runtime, tag.name)}
                   </button>
                 ) : (
                   <input
-                    key={`${tag.id}-monitor-runtime-${runtime.ints[tag.name] ?? 0}`}
+                    key={`${tag.id}-monitor-runtime-${runtime.ints[normalizeReference(tag.name)] ?? 0}`}
                     className="table-input mono tag-monitor-int"
                     type="number"
-                    defaultValue={runtime.ints[tag.name] ?? 0}
+                    defaultValue={runtime.ints[normalizeReference(tag.name)] ?? 0}
                     aria-label={`${tag.name} 运行值`}
                     onBlur={(event) => onSetInt(tag.name, Number(event.target.value) || 0)}
                   />
@@ -429,6 +427,7 @@ function TagsPanel({
                     <input
                       key={`${tag.id}-monitor-address-${tag.address}`}
                       className="table-input mono"
+                      maxLength={FIELD_LIMITS.address}
                       defaultValue={tag.address}
                       onBlur={(event) => onProgram(updateTag(program, tag.id, { address: event.target.value.toUpperCase() }))}
                       spellCheck={false}
@@ -482,7 +481,7 @@ function TagsPanel({
             </article>
           )
         })}
-      </div>
+      </section>
 
       <div className="tags-help">
         <strong>运行值不会写回真实 PLC</strong>
@@ -494,8 +493,9 @@ function TagsPanel({
           <h3>指令实例</h3>
           <div className="instance-list">
             {instances.map((output) => {
-              const timer = runtime.timers[output.tag]
-              const counter = runtime.counters[output.tag]
+              const name = normalizeReference(output.tag)
+              const timer = runtime.timers[name]
+              const counter = runtime.counters[name]
               return (
                 <div className="instance-card" key={output.id}>
                   <strong className="mono">{output.tag}</strong>
@@ -579,9 +579,10 @@ function DiagnosticsPanel({
 }
 
 function readDisplay(program: Program, runtime: Runtime, name: string): string {
-  const tag = program.tags.find((item) => item.name === name)
-  if (tag?.kind === 'INT') return String(runtime.ints[name] ?? 0)
-  return runtime.bools[name] ? 'TRUE' : 'FALSE'
+  const key = normalizeReference(name)
+  const tag = program.tags.find((item) => normalizeReference(item.name) === key)
+  if (tag?.kind === 'INT') return String(runtime.ints[key] ?? 0)
+  return runtime.bools[key] ? 'TRUE' : 'FALSE'
 }
 
 export default function Inspector({
@@ -601,7 +602,7 @@ export default function Inspector({
 }: InspectorProps) {
   const closeRef = useRef<HTMLButtonElement>(null)
   // A docked panel is part of the page, so it must not trap focus or steal it.
-  const dialogRef = useModalFocus<HTMLElement>(!docked, onClose, closeRef)
+  const dialogRef = useModalFocus<HTMLDivElement>(!docked, onClose, closeRef)
   const rung = selection ? program.rungs.find((item) => item.id === selection.rungId) : undefined
   const node = selection?.path ? getNodeAtPath(program, selection.rungId, selection.path) : null
   const activeProfile = getProfile(program.profile)
@@ -628,7 +629,7 @@ export default function Inspector({
         : { label: '正在编辑', value: editingLabel }
 
   return (
-    <aside className="inspector" ref={dialogRef} tabIndex={-1}>
+    <div className="inspector" ref={dialogRef} tabIndex={-1}>
       <div className="inspector-mobile-head">
         <strong>属性与变量</strong>
         {onClose && (
@@ -710,6 +711,7 @@ export default function Inspector({
             runtime={runtime}
             selectedRung={rung}
             selectedNode={node}
+            selectedPath={selection?.path ?? null}
             isOutput={Boolean(selection && selection.path === null && !selection.wholeRung)}
             isWholeRung={Boolean(selection?.wholeRung)}
             profile={activeProfile.shortName}
@@ -735,7 +737,7 @@ export default function Inspector({
           />
         )}
       </div>
-    </aside>
+    </div>
   )
 }
 
@@ -744,6 +746,7 @@ interface PropertiesPanelProps {
   runtime: Runtime
   selectedRung: Program['rungs'][number] | undefined
   selectedNode: LadderNode | null
+  selectedPath: number[] | null
   isOutput: boolean
   isWholeRung: boolean
   profile: string
@@ -757,6 +760,7 @@ function PropertiesPanel({
   runtime,
   selectedRung,
   selectedNode,
+  selectedPath,
   isOutput,
   isWholeRung,
   profile,
@@ -863,7 +867,7 @@ function PropertiesPanel({
                 <option key={tag.id} value={tag.name}>{tag.name} · {tag.address}</option>
               ))}
             </select>
-            <small className="mono">当前值：{runtime.ints[output.tag] ?? 0}</small>
+            <small className="mono">当前值：{runtime.ints[normalizeReference(output.tag)] ?? 0}</small>
           </label>
         ) : (
           <label className="field">
@@ -907,9 +911,10 @@ function PropertiesPanel({
               <input
                 type="number"
                 min={1}
+                max={32767}
                 step={1}
                 value={output.pv ?? 5}
-                onChange={(event) => setOutput({ pv: Math.max(1, Math.round(Number(event.target.value))) })}
+                onChange={(event) => setOutput({ pv: Math.max(1, Math.min(32767, Math.round(Number(event.target.value)))) })}
               />
             </label>
             <label className="field">
@@ -986,7 +991,8 @@ function PropertiesPanel({
             type="button"
             className="secondary-button"
             onClick={() => {
-              onProgram(wrapInParallel(program, selectedRung.id, selectionPath(program, selectedNode.id)!))
+              if (!selectedPath) return
+              onProgram(wrapInParallel(program, selectedRung.id, selectedPath))
               onNotify('已添加一条并联支路')
             }}
           >
@@ -996,7 +1002,8 @@ function PropertiesPanel({
             type="button"
             className="secondary-button danger"
             onClick={() => {
-              onProgram(collapseParallel(program, selectedRung.id, selectionPath(program, selectedNode.id)!))
+              if (!selectedPath) return
+              onProgram(collapseParallel(program, selectedRung.id, selectedPath))
               onNotify('已只保留第一条支路')
             }}
           >
@@ -1012,6 +1019,7 @@ function PropertiesPanel({
       program={program}
       selectedRung={selectedRung}
       node={selectedNode}
+      path={selectedPath}
       profile={profile}
       onProgram={onProgram}
       onSelect={onSelect}

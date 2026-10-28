@@ -2,14 +2,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { blankProgram } from '../engine/samples'
 import {
   archiveRecoveryCopy,
+  getDraftTabId,
   getLastSavedAt,
   isRecoveryBackupIntact,
   listRecoveryBackups,
   loadSavedProgram,
+  parseProgramDraft,
+  readRawSavedProgram,
   saveProgram,
 } from './storage'
 
-const STORAGE_KEY = 'ladderlab.project.v1'
+const LEGACY_STORAGE_KEY = 'ladderlab.project.v1'
+const MIRROR_STORAGE_KEY = 'ladderlab.project.v1.mirror.v2'
+const SESSION_STORAGE_KEY = 'ladderlab.project.v1.tab.v2'
 const SAVED_AT_KEY = 'ladderlab.project.v1.savedAt'
 const RECOVERY_KEY_PREFIX = 'ladderlab.project.v1.recovery.'
 
@@ -42,6 +47,7 @@ class MemoryStorage implements Storage {
 }
 
 let storage: MemoryStorage
+let session: MemoryStorage
 
 function recoveryKeys(): string[] {
   return Array.from({ length: storage.length }, (_, index) => storage.key(index)).filter(
@@ -51,7 +57,8 @@ function recoveryKeys(): string[] {
 
 beforeEach(() => {
   storage = new MemoryStorage()
-  vi.stubGlobal('window', { localStorage: storage })
+  session = new MemoryStorage()
+  vi.stubGlobal('window', { localStorage: storage, sessionStorage: session })
 })
 
 afterEach(() => {
@@ -68,7 +75,7 @@ describe('storage', () => {
   it('round-trips a project and its saved time', () => {
     const program = blankProgram()
 
-    const result = saveProgram(program)
+    const result = saveProgram(program, { projectId: 'project-1', baseSavedAt: 1234 })
     expect(result.ok).toBe(true)
     if (!result.ok) throw new Error('expected a successful save')
     expect(result.savedAt).toBeTypeOf('number')
@@ -81,11 +88,20 @@ describe('storage', () => {
     expect(loaded.savedAt).toBeTypeOf('number')
     expect(loaded.savedAt).toBe(getLastSavedAt())
     expect(loaded.savedAt).toBe(result.savedAt)
+    expect(loaded.source).toBe('tab')
+    expect(loaded.projectId).toBe('project-1')
+    expect(loaded.baseSavedAt).toBe(1234)
+    expect(loaded.tabId).toBe(getDraftTabId())
+
+    const tabEnvelope = JSON.parse(session.getItem(SESSION_STORAGE_KEY) ?? 'null') as Record<string, unknown>
+    const mirrorEnvelope = JSON.parse(storage.getItem(MIRROR_STORAGE_KEY) ?? 'null') as Record<string, unknown>
+    expect(tabEnvelope).toMatchObject({ schema: 2, projectId: 'project-1', baseSavedAt: 1234, savedAt: result.savedAt })
+    expect(mirrorEnvelope).toMatchObject({ schema: 2, projectId: 'project-1', baseSavedAt: 1234, savedAt: result.savedAt })
   })
 
   it('backs up malformed data without overwriting the primary key', () => {
     const raw = '{"schema":1,'
-    storage.setItem(STORAGE_KEY, raw)
+    storage.setItem(LEGACY_STORAGE_KEY, raw)
 
     const loaded = loadSavedProgram()
     expect(loaded.status).toBe('corrupt')
@@ -96,7 +112,7 @@ describe('storage', () => {
     expect(loaded.backupKey).toBeTruthy()
     if (!loaded.backupKey) throw new Error('expected a recovery backup')
 
-    expect(storage.getItem(STORAGE_KEY)).toBe(raw)
+    expect(storage.getItem(LEGACY_STORAGE_KEY)).toBe(raw)
     expect(storage.getItem(loaded.backupKey)).toBe(raw)
     expect(recoveryKeys()).toEqual([loaded.backupKey])
   })
@@ -106,7 +122,7 @@ describe('storage', () => {
       (year) => `${RECOVERY_KEY_PREFIX}${year}-01-01T00:00:00.000Z`,
     )
     oldKeys.forEach((key) => storage.setItem(key, key))
-    storage.setItem(STORAGE_KEY, 'not json')
+    storage.setItem(LEGACY_STORAGE_KEY, 'not json')
 
     expect(loadSavedProgram().status).toBe('corrupt')
 
@@ -120,7 +136,7 @@ describe('storage', () => {
 
   it('reuses the same recovery backup when malformed data is loaded again', () => {
     const raw = '{"schema":1,'
-    storage.setItem(STORAGE_KEY, raw)
+    storage.setItem(LEGACY_STORAGE_KEY, raw)
 
     const first = loadSavedProgram()
     const second = loadSavedProgram()
@@ -136,29 +152,173 @@ describe('storage', () => {
 
   it('returns an explicit error when storage rejects a write', () => {
     vi.spyOn(storage, 'setItem').mockImplementation(() => {
-      throw new Error('QuotaExceededError')
+      throw new Error('The quota has been exceeded.')
     })
 
     const result = saveProgram(blankProgram())
     expect(result.ok).toBe(false)
     if (result.ok) throw new Error('expected a write failure')
-    expect(result.error).toContain('QuotaExceededError')
+    expect(result.error).toContain('The quota has been exceeded')
+    expect(result.error).toContain('请先导出工程 JSON 备份')
+    expect(result.error).not.toMatch(/\.。|。。/)
   })
 
-  it('keeps the project saved when only the timestamp write fails', () => {
+  it('prefers the tab draft and falls back to the last committed mirror', () => {
     const program = blankProgram()
-    const originalSetItem = storage.setItem.bind(storage)
-    vi.spyOn(storage, 'setItem').mockImplementation((key, value) => {
-      if (key === SAVED_AT_KEY) throw new Error('timestamp write failed')
-      originalSetItem(key, value)
-    })
-
     const result = saveProgram(program)
-    expect(result.ok).toBe(true)
-    if (!result.ok) throw new Error('expected the project itself to save')
-    expect(result.savedAt).toBeTypeOf('number')
-    expect(storage.getItem(STORAGE_KEY)).toBeTruthy()
-    expect(getLastSavedAt()).toBeNull()
+    if (!result.ok) throw new Error('expected a successful save')
+
+    const envelope = JSON.parse(storage.getItem(MIRROR_STORAGE_KEY) ?? 'null') as Record<string, unknown>
+    storage.setItem(MIRROR_STORAGE_KEY, JSON.stringify({
+      ...envelope,
+      tabId: 'another-tab',
+      program: { ...program, name: '镜像版本' },
+    }))
+
+    const tabLoaded = loadSavedProgram()
+    expect(tabLoaded.status).toBe('ok')
+    if (tabLoaded.status !== 'ok') throw new Error('expected the tab draft')
+    expect(tabLoaded.source).toBe('tab')
+    expect(tabLoaded.program.name).toBe(program.name)
+
+    session.clear()
+    const mirrorLoaded = loadSavedProgram()
+    expect(mirrorLoaded.status).toBe('ok')
+    if (mirrorLoaded.status !== 'ok') throw new Error('expected the mirror draft')
+    expect(mirrorLoaded.source).toBe('mirror')
+    expect(mirrorLoaded.tabId).toBe('another-tab')
+    expect(mirrorLoaded.program.name).toBe('镜像版本')
+  })
+
+  it('falls back past malformed tab drafts without hiding a valid mirror', () => {
+    const program = blankProgram()
+    const saved = saveProgram(program)
+    if (!saved.ok) throw new Error('expected a successful save')
+    session.setItem(SESSION_STORAGE_KEY, '{"schema":2,"program":{')
+
+    const loaded = loadSavedProgram()
+    expect(loaded.status).toBe('ok')
+    if (loaded.status !== 'ok') throw new Error('expected the mirror draft')
+    expect(loaded.source).toBe('mirror')
+    expect(loaded.program).toEqual(program)
+  })
+
+  it('keeps both originals when the tab and mirror drafts are corrupt', () => {
+    const tabRaw = '{"schema":2,"program":{"rungs":['
+    const mirrorRaw = '{"schema":2,"program":{"broken":true}}'
+    session.setItem(SESSION_STORAGE_KEY, tabRaw)
+    storage.setItem(MIRROR_STORAGE_KEY, mirrorRaw)
+
+    const loaded = loadSavedProgram()
+    expect(loaded.status).toBe('corrupt')
+    if (loaded.status !== 'corrupt') throw new Error('expected a corrupt result')
+
+    expect(loaded.copies).toHaveLength(2)
+    expect(loaded.copies.map((copy) => copy.source)).toEqual(['tab', 'mirror'])
+    expect(loaded.raw).toContain(tabRaw)
+    expect(loaded.raw).toContain(mirrorRaw)
+    for (const copy of loaded.copies) {
+      expect(copy.backupKey).toBeTruthy()
+      if (!copy.backupKey) throw new Error('expected a recovery backup')
+      expect(storage.getItem(copy.backupKey)).toBe(copy.raw)
+    }
+    expect(recoveryKeys()).toHaveLength(2)
+  })
+
+  it('reuses both recovery copies when a double corruption is reloaded', () => {
+    const tabRaw = '{"schema":2,"program":{"rungs":['
+    const mirrorRaw = '{"schema":2,"program":{"broken":true}}'
+    session.setItem(SESSION_STORAGE_KEY, tabRaw)
+    storage.setItem(MIRROR_STORAGE_KEY, mirrorRaw)
+
+    const first = loadSavedProgram()
+    const second = loadSavedProgram()
+    expect(first.status).toBe('corrupt')
+    expect(second.status).toBe('corrupt')
+    if (first.status !== 'corrupt' || second.status !== 'corrupt') {
+      throw new Error('expected corrupt results')
+    }
+
+    expect(second.copies.map((copy) => copy.backupKey)).toEqual(
+      first.copies.map((copy) => copy.backupKey),
+    )
+    expect(recoveryKeys()).toHaveLength(2)
+  })
+
+  it('archives a corrupt tab draft when a valid mirror can still start the app', () => {
+    const program = blankProgram()
+    const saved = saveProgram(program)
+    if (!saved.ok) throw new Error('expected a successful save')
+    const brokenTab = '{"schema":2,"program":{"rungs":['
+    session.setItem(SESSION_STORAGE_KEY, brokenTab)
+
+    const loaded = loadSavedProgram()
+    expect(loaded.status).toBe('ok')
+    if (loaded.status !== 'ok') throw new Error('expected the mirror draft')
+    expect(loaded.source).toBe('mirror')
+    expect(recoveryKeys()).toHaveLength(1)
+    expect(storage.getItem(recoveryKeys()[0])).toBe(brokenTab)
+  })
+
+  it('keeps legacy projects readable and backs up malformed legacy data', () => {
+    const program = blankProgram()
+    storage.setItem(LEGACY_STORAGE_KEY, JSON.stringify(program))
+    storage.setItem(SAVED_AT_KEY, '1700000000000')
+
+    const loaded = loadSavedProgram()
+    expect(loaded.status).toBe('ok')
+    if (loaded.status !== 'ok') throw new Error('expected the legacy project')
+    expect(loaded.source).toBe('legacy')
+    expect(loaded.savedAt).toBe(1700000000000)
+    expect(loaded.program).toEqual(program)
+  })
+
+  it('parses and rejects schema 2 drafts based on their actual project contents', () => {
+    const program = blankProgram()
+    const snapshot = parseProgramDraft(JSON.stringify({
+      schema: 2,
+      tabId: 'tab-a',
+      projectId: 'project-a',
+      baseSavedAt: 99,
+      savedAt: 100,
+      program,
+    }))
+    expect(snapshot).toMatchObject({
+      tabId: 'tab-a',
+      projectId: 'project-a',
+      baseSavedAt: 99,
+      savedAt: 100,
+    })
+    expect(snapshot?.program).toEqual(program)
+    expect(parseProgramDraft(JSON.stringify({ schema: 2, program: {} }))).toBeNull()
+  })
+
+  it('does not trust draft timestamps far beyond the local clock', () => {
+    const program = blankProgram()
+    const now = Date.now()
+    const snapshot = parseProgramDraft(JSON.stringify({
+      schema: 2,
+      tabId: 'tab-future',
+      projectId: 'project-future',
+      baseSavedAt: now + 48 * 60 * 60 * 1000,
+      savedAt: now + 48 * 60 * 60 * 1000,
+      program,
+    }))
+
+    expect(snapshot).not.toBeNull()
+    expect(snapshot?.baseSavedAt).toBeNull()
+    expect(snapshot?.savedAt).toBeGreaterThanOrEqual(now)
+    expect(snapshot?.savedAt).toBeLessThanOrEqual(Date.now() + 1000)
+  })
+
+  it('reads the most local raw draft through the crash-recovery path', () => {
+    storage.setItem(LEGACY_STORAGE_KEY, 'legacy')
+    storage.setItem(MIRROR_STORAGE_KEY, 'mirror')
+    session.setItem(SESSION_STORAGE_KEY, 'tab')
+    expect(readRawSavedProgram()).toBe('tab')
+
+    session.clear()
+    expect(readRawSavedProgram()).toBe('mirror')
   })
 
   it('ignores unusable saved timestamps', () => {
@@ -217,6 +377,7 @@ describe('storage', () => {
     if (loaded.status !== 'corrupt') throw new Error('expected a corrupt result')
     expect(loaded.raw).toBe('')
     expect(loaded.backupKey).toBeUndefined()
+    expect(loaded.copies).toEqual([])
     expect(loaded.message).toContain('SecurityError')
   })
 })

@@ -181,7 +181,7 @@ function AddressField({
       <input
         className="qe-input mono"
         value={draft}
-        maxLength={12}
+        maxLength={FIELD_LIMITS.address}
         spellCheck={false}
         autoComplete="off"
         aria-invalid={error ? true : undefined}
@@ -330,7 +330,9 @@ export default function QuickEditor({
       const id = node ? node.id : rung?.output.id
       if (!id) return anchor
       for (const element of document.querySelectorAll<HTMLElement>('[' + attribute + ']')) {
-        if (element.dataset[key] === id) return element.getBoundingClientRect()
+        if (element.dataset[key] !== id) continue
+        if (node && element.dataset.nodePath !== selection.path?.join('.')) continue
+        return element.getBoundingClientRect()
       }
       return anchor
     }
@@ -362,6 +364,8 @@ export default function QuickEditor({
 
   if (!rung) return null
 
+  const contactPath = node?.type === 'contact' ? selection.path : null
+
   const title = node
     ? node.type === 'contact'
       ? `${CONTACT_NAMES[node.kind]}触点`
@@ -371,17 +375,17 @@ export default function QuickEditor({
     : OUTPUT_NAMES[rung.output.kind]
 
   const commitContact = (patch: Parameters<typeof updateContact>[3]) => {
-    if (node?.type !== 'contact') return
+    if (node?.type !== 'contact' || contactPath === null) return
     let next = program
     if (patch.tag !== undefined && patch.tag) {
       const kind = patch.kind ?? node.kind
       next = ensureNamedTag(next, patch.tag, kind === 'CMP' ? 'INT' : 'BOOL')
     }
-    onProgram(updateContact(next, rung.id, node.id, patch))
+    onProgram(updateContact(next, rung.id, contactPath, patch))
   }
 
   const commitTag = (value: string) => {
-    if (node?.type !== 'contact') return
+    if (node?.type !== 'contact' || contactPath === null) return
     const tagKind: TagKind = node.kind === 'CMP' ? 'INT' : 'BOOL'
     const address = normalizeAddressFor(value, tagKind)
     if (address) {
@@ -390,7 +394,7 @@ export default function QuickEditor({
         onNotify(result.error)
         return
       }
-      onProgram(updateContact(result.program, rung.id, node.id, { tag: result.tag.name }))
+      onProgram(updateContact(result.program, rung.id, contactPath, { tag: result.tag.name }))
       onNotify(`已绑定 ${address}，符号名 ${result.tag.name}`)
       return
     }
@@ -403,7 +407,7 @@ export default function QuickEditor({
     const exists = (node.kind === 'CMP' ? refs.intRefs : refs.boolRefs).includes(value)
     let next = program
     if (value && !exists) next = ensureNamedTag(next, value, node.kind === 'CMP' ? 'INT' : 'BOOL')
-    onProgram(updateContact(next, rung.id, node.id, { tag: value }))
+    onProgram(updateContact(next, rung.id, contactPath, { tag: value }))
     if (value && !exists) onNotify(`已建立变量 ${value}`)
   }
 
@@ -455,7 +459,6 @@ export default function QuickEditor({
 
   // 拖拽换位之外再给一条键盘/点击路径：QuickEditor 里的两个按钮，
   // 和画布上聚焦触点后按左右方向键是同一个操作。
-  const contactPath = node?.type === 'contact' ? selection.path : null
   const canMove = (delta: -1 | 1) =>
     contactPath !== null && moveNodeBy(program, rung.id, contactPath, delta) !== program
   const moveContact = (delta: -1 | 1) => {
@@ -513,7 +516,7 @@ export default function QuickEditor({
                     aria-pressed={node.kind === kind}
                     onClick={() => {
                       if (kind === node.kind) return
-                      onProgram(changeContactKind(program, rung.id, selection.path!, kind))
+                      if (contactPath) onProgram(changeContactKind(program, rung.id, contactPath, kind))
                     }}
                   >
                     {CONTACT_NAMES[kind]}
@@ -526,7 +529,7 @@ export default function QuickEditor({
               label={node.kind === 'CMP' ? '整数 / 计数值' : '操作数'}
               value={node.tag}
               options={node.kind === 'CMP' ? refs.intRefs : refs.boolRefs}
-              listId={`qe-contact-${node.id}`}
+              listId={`qe-contact-${contactPath?.join('-') ?? node.id}`}
               onCommit={commitTag}
               primary
               hint={node.kind === 'CMP'

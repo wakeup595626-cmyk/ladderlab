@@ -2,52 +2,32 @@
  * 真实浏览器冒烟验收：桌面 1440×900 与手机 390×844 各跑一遍核心路径。
  *
  * 用法：先 `npm run preview`（默认 4173），再开一个带调试端口的浏览器，
- * 例如 Edge：`msedge --headless=new --remote-debugging-port=9222`，
+ * 例如 Edge：`msedge --headless=new --remote-debugging-port=9444`，
  * 然后 `npm run qa`。脚本会顺带产出 README 用的截图。
  */
 import { mkdir, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
+import {
+  closeQaPage,
+  connectToPage,
+  createQaPage,
+  DEFAULT_QA_APP_URL,
+  DEFAULT_QA_CDP,
+} from './qa-cdp.mjs'
 
-const CDP_HTTP = process.env.LADDERLAB_CDP ?? 'http://127.0.0.1:9222'
-const APP_URL = process.env.LADDERLAB_URL ?? 'http://127.0.0.1:4173/'
+const CDP_HTTP = process.env.LADDERLAB_CDP ?? DEFAULT_QA_CDP
+const APP_URL = process.env.LADDERLAB_URL ?? DEFAULT_QA_APP_URL
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms))
 
 await mkdir(resolve('docs/qa'), { recursive: true })
 
-const targets = await (await fetch(`${CDP_HTTP}/json`)).json()
-const target = targets.find((item) => item.type === 'page' && item.url === APP_URL)
-  ?? targets.find((item) => item.type === 'page' && item.url.startsWith('http://127.0.0.1:'))
-  ?? targets.find((item) => item.type === 'page')
-if (!target) throw new Error(`没有可调试页面：${CDP_HTTP}`)
-
-const socket = new WebSocket(target.webSocketDebuggerUrl)
-await new Promise((open, fail) => {
-  socket.addEventListener('open', open, { once: true })
-  socket.addEventListener('error', fail, { once: true })
-})
-
-let nextId = 0
-const pending = new Map()
+// Own a fresh tab so another audit cannot navigate or close this run's page.
+const target = await createQaPage(CDP_HTTP)
+const client = await connectToPage(target)
+const { socket, send } = client
 const errors = []
 
-function send(method, params = {}) {
-  const id = ++nextId
-  return new Promise((ok, no) => {
-    pending.set(id, { ok, no })
-    socket.send(JSON.stringify({ id, method, params }))
-  })
-}
-
-socket.addEventListener('message', (event) => {
-  const message = JSON.parse(String(event.data))
-  if (message.id) {
-    const request = pending.get(message.id)
-    if (!request) return
-    pending.delete(message.id)
-    if (message.error) request.no(new Error(message.error.message))
-    else request.ok(message.result)
-    return
-  }
+client.onEvent((message) => {
   if (message.method === 'Runtime.exceptionThrown') {
     const details = message.params.exceptionDetails
     if (JSON.stringify(details).includes('chrome-extension://')) return
@@ -118,6 +98,7 @@ async function screenshot(path) {
 
 async function pressEscape() {
   const base = { key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 }
+  await send('Page.bringToFront')
   await send('Input.dispatchKeyEvent', { type: 'keyDown', ...base })
   await send('Input.dispatchKeyEvent', { type: 'keyUp', ...base })
   await sleep(260)
@@ -125,7 +106,11 @@ async function pressEscape() {
 
 /** 发送组合键；modifiers 位掩码：Alt=1、Ctrl=2、Meta=4、Shift=8。 */
 async function pressKey(key, code, vk, modifiers = 0) {
+  if (process.env.LADDERLAB_QA_TRACE === '1') {
+    console.error(`[QA] key ${key} modifiers=${modifiers}`)
+  }
   const base = { key, code, windowsVirtualKeyCode: vk, nativeVirtualKeyCode: vk, modifiers }
+  await send('Page.bringToFront')
   await send('Input.dispatchKeyEvent', { type: 'rawKeyDown', ...base })
   await send('Input.dispatchKeyEvent', { type: 'keyUp', ...base })
   await sleep(360)
@@ -136,6 +121,9 @@ const details = {}
 const check = (name, value, note) => {
   checks[name] = Boolean(value)
   if (note !== undefined) details[name] = note
+  if (process.env.LADDERLAB_QA_TRACE === '1') {
+    console.error(`[QA] ${checks[name] ? 'PASS' : 'FAIL'} ${name}`)
+  }
 }
 
 /** 载入启保停示例：优先用教练条按钮，教练条已关就从「更多 → 三步上手」进。 */
@@ -1491,5 +1479,6 @@ await screenshot('docs/qa/mobile-360-panel.png')
 await pressEscape()
 
 socket.close()
+await closeQaPage(CDP_HTTP, target.id)
 console.log(JSON.stringify({ checks, details, demoState, editor, mobileFirst, mobileDemo, errors }, null, 2))
 if (Object.values(checks).some((value) => !value) || errors.length > 0) process.exitCode = 1

@@ -59,6 +59,8 @@ interface Guard {
    * 「SD 松开才入库」和「SD 保持才循环」误判成同时通电。
    */
   terms: GuardTerm[]
+  /** 条件组合被截断时，不能据不完整的守卫条件静默抑制写冲突。 */
+  truncated: boolean
 }
 
 function push(ctx: Ctx, severity: 'error' | 'warning', message: string, rungId?: string, nodeId?: string) {
@@ -75,6 +77,7 @@ function warning(ctx: Ctx, message: string, rungId?: string, nodeId?: string) {
 }
 
 const MAX_GUARD_TERMS = 24
+const MAX_GUARD_DEPTH = 3
 
 function newGuardTerm(): GuardTerm {
   return { trueRefs: new Set(), falseRefs: new Set(), compares: new Map() }
@@ -100,30 +103,45 @@ function applyContact(term: GuardTerm, node: Extract<LadderNode, { type: 'contac
   }
 }
 
-/** 把一条串联主干展开成若干组合；并联节点会分叉，深度超过 3 层时只看主干。 */
-function expandGuardTerms(chain: LadderNode[], terms: GuardTerm[], depth: number) {
+/**
+ * 把一条串联主干展开成若干条件组合。超过组合或嵌套上限时继续扫描后续
+ * 串联条件，并明确标记结果不完整，避免为了性能而漏报写冲突。
+ */
+function expandGuardTerms(
+  chain: LadderNode[],
+  terms: GuardTerm[],
+  depth: number,
+): { terms: GuardTerm[]; truncated: boolean } {
   let current = terms
+  let truncated = false
   for (const node of chain) {
     if (node.type === 'contact') {
       for (const term of current) applyContact(term, node)
       continue
     }
-    if (depth >= 3) continue
+    if (depth >= MAX_GUARD_DEPTH) {
+      truncated = true
+      continue
+    }
     const next: GuardTerm[] = []
     // 未闭合分支的草稿还没接进电路，判断互锁时只看主线。
     const activeBranches = node.open === true ? node.branches.slice(0, 1) : node.branches
     for (const term of current) {
       for (const branch of activeBranches) {
         const copy = cloneGuardTerm(term)
-        expandGuardTerms(branch, [copy], depth + 1)
-        next.push(copy)
+        const expanded = expandGuardTerms(branch, [copy], depth + 1)
+        next.push(...expanded.terms)
+        if (expanded.truncated) truncated = true
+        if (next.length > MAX_GUARD_TERMS) break
       }
+      if (next.length > MAX_GUARD_TERMS) break
     }
-    // 组合数失控时保留前若干组：可能多报，但不会漏报。
+    // 组合数失控时保留前若干组，继续处理后续串联条件，并禁止据此
+    // 判定互斥；这样最坏只会多报，不会把真实写冲突藏掉。
+    if (next.length > MAX_GUARD_TERMS) truncated = true
     current = next.slice(0, MAX_GUARD_TERMS)
-    if (next.length > MAX_GUARD_TERMS) break
   }
-  terms.splice(0, terms.length, ...current)
+  return { terms: current, truncated }
 }
 
 function guardFor(ctx: Ctx, rungId: string): Guard {
@@ -131,8 +149,8 @@ function guardFor(ctx: Ctx, rungId: string): Guard {
   if (cached) return cached
   const terms = [newGuardTerm()]
   const rung = ctx.program.rungs.find((item) => item.id === rungId)
-  expandGuardTerms(rung?.nodes ?? [], terms, 0)
-  const guard: Guard = { terms }
+  const expanded = expandGuardTerms(rung?.nodes ?? [], terms, 0)
+  const guard: Guard = { terms: expanded.terms, truncated: expanded.truncated }
   ctx.guards.set(rungId, guard)
   return guard
 }
@@ -157,6 +175,8 @@ function equalityDisjoint(
   equality: { op: string; value: number },
   other: { op: string; value: number },
 ): boolean {
+  // 比较触点按整数语义工作；非整数等值条件没有任何可达值，整条守卫恒为假。
+  if (!Number.isInteger(equality.value)) return true
   switch (other.op) {
     case '==': return equality.value !== other.value
     case '<>': return equality.value === other.value
@@ -173,8 +193,10 @@ function boundDisjoint(
   below: { op: string; value: number },
   above: { op: string; value: number },
 ): boolean {
-  const lowest = above.op === '>' ? above.value + 1 : above.value
-  const highest = below.op === '<' ? below.value - 1 : below.value
+  // 触点值是可落地的整数。先把开区间边界收拢到第一个/最后一个可达整数，
+  // 否则 >4.5 与 <5.1 会被误算成 5.5 > 4.1，漏掉两者都包含 5 的写冲突。
+  const lowest = above.op === '>' ? Math.floor(above.value) + 1 : Math.ceil(above.value)
+  const highest = below.op === '<' ? Math.ceil(below.value) - 1 : Math.floor(below.value)
   return lowest > highest
 }
 
@@ -195,6 +217,7 @@ function termExclusive(left: GuardTerm, right: GuardTerm): boolean {
 
 /** 两个程序段的串联条件如果出现相反极性或互相排斥的比较，就永远不会同时通电。 */
 function obviouslyExclusive(left: Guard, right: Guard): boolean {
+  if (left.truncated || right.truncated) return false
   return left.terms.every((a) => right.terms.every((b) => termExclusive(a, b)))
 }
 
@@ -230,8 +253,8 @@ function walkChain(chain: LadderNode[], visit: (node: LadderNode) => void) {
 }
 
 /**
- * 运行时用边沿触点 ID 保存跳变状态、用输出 ID 保存 PATTERN 进度。
- * 普通触点的 ID 只用于选择界面；只有会保存运行时状态的 ID 才必须全局唯一。
+ * 节点 ID 既是 React 列表身份，也是撤销、定位和运行时状态的索引；
+ * 所有触点与并联节点都必须全局唯一。
  */
 function validateIds(ctx: Ctx) {
   const tagIds = new Map<string, string>()
@@ -267,9 +290,10 @@ function validateIds(ctx: Ctx) {
     const rungLabel = `程序段“${rung.label || normalizeReference(rung.id) || '未命名'}”`
     check(rungIds, '程序段', rung.id, rungLabel)
     walkChain(rung.nodes, (node) => {
-      if (node.type === 'contact' && (node.kind === 'P' || node.kind === 'N')) {
-        check(nodeIds, '边沿触点', node.id, `${CONTACT_LABELS[node.kind]}“${node.id || '无 ID'}”`, rung.id, node.id)
-      }
+      const label = node.type === 'contact'
+        ? `${CONTACT_LABELS[node.kind]}“${node.id || '无 ID'}”`
+        : `并联节点“${node.id || '无 ID'}”`
+      check(nodeIds, '节点', node.id, label, rung.id, node.id)
     })
     const outputLabel = `${rung.output.kind} 输出“${rung.output.tag || rung.output.id || '无 ID'}”`
     check(outputIds, '输出', rung.output.id, outputLabel, rung.id, rung.output.id)
@@ -549,8 +573,8 @@ function checkOutput(ctx: Ctx, rungId: string, output: Program['rungs'][number][
     } else if (!NAME_RE.test(instanceName)) {
       error(ctx, `CTU 实例名“${instanceName}”不合法：只能使用字母、数字、下划线，且不能以数字开头。`, rungId, output.id)
     }
-    if (!Number.isInteger(output.pv) || (output.pv ?? 0) <= 0) {
-      error(ctx, `CTU ${output.tag || ''} 的预设值 PV 必须是大于 0 的整数。`, rungId, output.id)
+    if (!Number.isInteger(output.pv) || (output.pv ?? 0) < 1 || (output.pv ?? 0) > 32767) {
+      error(ctx, `CTU ${output.tag || ''} 的预设值 PV 必须是 1～32767 的整数。`, rungId, output.id)
     }
     variableRef(output.resetTag, 'BOOL', 'CTU 复位变量')
     const qTag = variableRef(output.qTag, 'BOOL', '状态输出变量')

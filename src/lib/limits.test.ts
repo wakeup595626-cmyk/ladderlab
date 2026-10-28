@@ -47,6 +47,59 @@ describe('工程文本字段上限', () => {
       ...source,
       tags: [{ ...source.tags[0], comment: 'C'.repeat(501) }],
     })).toThrow('变量注释')
+    expect(() => serializeProgram({
+      ...source,
+      tags: [{ ...source.tags[0], address: 'A'.repeat(FIELD_LIMITS.address + 1) }],
+    })).toThrow('变量地址')
+    expect(() => serializeProgram({
+      ...source,
+      tags: [{ ...source.tags[0], bitOf: 'R'.repeat(FIELD_LIMITS.reference + 1) }],
+    })).toThrow('变量引用')
+
+    const firstRung = source.rungs[0]
+    const firstNode = firstRung.nodes[0]
+    if (!firstNode || firstNode.type !== 'contact') throw new Error('空白工程的首个元件不是触点')
+    expect(() => serializeProgram({
+      ...source,
+      rungs: [{
+        ...firstRung,
+        nodes: [{ ...firstNode, tag: 'R'.repeat(FIELD_LIMITS.reference + 1) }],
+      }],
+    })).toThrow('变量引用')
+    expect(() => serializeProgram({
+      ...source,
+      rungs: [{
+        ...firstRung,
+        output: { ...firstRung.output, tag: 'R'.repeat(FIELD_LIMITS.reference + 1) },
+      }],
+    })).toThrow('变量引用')
+  })
+
+  it('导入时对地址和变量引用使用同一组上限', () => {
+    const source = blankProgram()
+    const addressAtLimit = 'A'.repeat(FIELD_LIMITS.address)
+    const referenceAtLimit = 'R'.repeat(FIELD_LIMITS.reference)
+    const accepted = parseProgramText(JSON.stringify({
+      ...source,
+      tags: [{ ...source.tags[0], address: addressAtLimit }],
+    }))
+    expect(accepted.tags[0].address).toBe(addressAtLimit)
+
+    expect(() => parseProgramText(JSON.stringify({
+      ...source,
+      tags: [{ ...source.tags[0], address: `${addressAtLimit}A` }],
+    }))).toThrow('变量地址')
+
+    const firstRung = source.rungs[0]
+    const firstNode = firstRung.nodes[0]
+    if (!firstNode || firstNode.type !== 'contact') throw new Error('空白工程的首个元件不是触点')
+    expect(() => parseProgramText(JSON.stringify({
+      ...source,
+      rungs: [{
+        ...firstRung,
+        nodes: [{ ...firstNode, tag: `${referenceAtLimit}R` }],
+      }],
+    }))).toThrow('变量引用')
   })
 })
 

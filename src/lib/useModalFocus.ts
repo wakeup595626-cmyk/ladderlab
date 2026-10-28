@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react'
 import type { RefObject } from 'react'
 
 const FOCUSABLE = [
+  'summary',
   'button:not([disabled])',
   'a[href]',
   'input:not([disabled])',
@@ -19,12 +20,17 @@ const modalStack: symbol[] = []
 function trackExternalFocus() {
   if (tracking || typeof document === 'undefined') return
   tracking = true
-  document.addEventListener('focusin', (event) => {
-    const target = event.target
+  const remember = (candidate: EventTarget | null) => {
+    const target = candidate
     if (!(target instanceof HTMLElement)) return
     if (target.closest('[role="dialog"]')) return
-    lastExternalFocus = target
-  }, true)
+    lastExternalFocus = target.closest<HTMLElement>(
+      'summary, button, a[href], input:not([disabled]), select:not([disabled]), '
+      + 'textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    ) ?? target
+  }
+  document.addEventListener('focusin', (event) => remember(event.target), true)
+  document.addEventListener('pointerdown', (event) => remember(event.target), true)
 }
 
 /** Keeps keyboard focus inside an open dialog and restores it on close. */
@@ -58,11 +64,21 @@ export function useModalFocus<T extends HTMLElement>(
 
     const focusable = () => Array.from(
       containerRef.current?.querySelectorAll<HTMLElement>(FOCUSABLE) ?? [],
-    ).filter((element) => (
-      !element.hasAttribute('hidden')
-      && element.getAttribute('aria-hidden') !== 'true'
-      && element.getClientRects().length > 0
-    ))
+    ).filter((element) => {
+      if (
+        element.hasAttribute('hidden')
+        || element.getAttribute('aria-hidden') === 'true'
+        || element.getClientRects().length === 0
+      ) return false
+      // 折叠的 <details> 只有自己的 summary 可聚焦；里面的控件虽然仍有
+      // 布局矩形，浏览器原生 Tab 会跳过它们，焦点陷阱必须和原生行为一致。
+      const closedDetails = element.closest('details:not([open])')
+      if (closedDetails) {
+        const ownSummary = closedDetails.querySelector(':scope > summary')
+        if (element !== ownSummary) return false
+      }
+      return true
+    })
 
     const focusTimer = window.setTimeout(() => {
       if (modalStack[modalStack.length - 1] !== modalId) return

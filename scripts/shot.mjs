@@ -4,8 +4,9 @@
  * 用法：
  *   node scripts/shot.mjs --out docs/qa/desktop.png --width 1440 --height 900
  * 可选参数：
- *   --cdp   http://127.0.0.1:9223            已开调试端口的浏览器
- *   --url   http://127.0.0.1:4175/           目标页面
+ *   --cdp   http://127.0.0.1:9444            专用 QA 调试端口
+ *   --url   http://127.0.0.1:4173/           目标页面
+ *   --existing                              复用精确匹配的现有页面（默认新建后关闭）
  *   --js    "document.querySelector('.x').click()"   截图前执行一次
  *   --keys  "Escape,Delete"                  依次发送键盘按键
  *   --after "!!document.querySelector('.x')"  按键后再求值一次，只打印结果
@@ -13,14 +14,22 @@
  */
 import { mkdir, writeFile } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
+import {
+  closeQaPage,
+  connectToPage,
+  createQaPage,
+  DEFAULT_QA_APP_URL,
+  DEFAULT_QA_CDP,
+  selectExactPage,
+} from './qa-cdp.mjs'
 
 function arg(name, fallback) {
   const index = process.argv.indexOf(`--${name}`)
   return index > 0 ? process.argv[index + 1] : fallback
 }
 
-const CDP = arg('cdp', 'http://127.0.0.1:9223')
-const URL_TARGET = arg('url', 'http://127.0.0.1:4175/')
+const CDP = arg('cdp', DEFAULT_QA_CDP)
+const URL_TARGET = arg('url', DEFAULT_QA_APP_URL)
 const WIDTH = Number(arg('width', 1440))
 const HEIGHT = Number(arg('height', 900))
 const OUT = resolve(arg('out', 'docs/qa/shot.png'))
@@ -29,35 +38,19 @@ const KEYS = arg('keys', '')
 const AFTER = arg('after', '')
 const WAIT = Number(arg('wait', 400))
 const FRESH = process.argv.includes('--fresh')
+const USE_EXISTING = process.argv.includes('--existing')
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms))
 
-const pages = await (await fetch(`${CDP}/json`)).json()
-const page = pages.find((item) => item.type === 'page' && !item.url.startsWith('chrome-extension://'))
-if (!page) throw new Error(`没有可调试页面：${CDP}`)
+let page
+if (USE_EXISTING) {
+  const pages = await (await fetch(`${CDP}/json`)).json()
+  page = selectExactPage(pages, URL_TARGET, CDP)
+} else {
+  page = await createQaPage(CDP)
+}
 
-const socket = new WebSocket(page.webSocketDebuggerUrl)
-await new Promise((open, fail) => {
-  socket.addEventListener('open', open, { once: true })
-  socket.addEventListener('error', fail, { once: true })
-})
-
-let nextId = 0
-const pending = new Map()
-socket.addEventListener('message', (event) => {
-  const message = JSON.parse(String(event.data))
-  if (!message.id) return
-  const request = pending.get(message.id)
-  if (!request) return
-  pending.delete(message.id)
-  if (message.error) request.no(new Error(message.error.message))
-  else request.ok(message.result)
-})
-
-const send = (method, params = {}) => new Promise((ok, no) => {
-  const id = ++nextId
-  pending.set(id, { ok, no })
-  socket.send(JSON.stringify({ id, method, params }))
-})
+const client = await connectToPage(page)
+const { send } = client
 
 const evaluate = async (expression) => {
   const result = await send('Runtime.evaluate', {
@@ -130,4 +123,5 @@ const shot = await send('Page.captureScreenshot', { format: 'png', fromSurface: 
 await mkdir(dirname(OUT), { recursive: true })
 await writeFile(OUT, Buffer.from(shot.data, 'base64'))
 console.log(`${OUT} ${WIDTH}x${HEIGHT}`)
-socket.close()
+client.close()
+if (!USE_EXISTING) await closeQaPage(CDP, page.id)

@@ -27,6 +27,7 @@ import {
   snapshotRung,
   tagsDependingOn,
   tagUsage,
+  updateContact,
   updateTag,
 } from './programOps'
 import type {
@@ -488,6 +489,22 @@ describe('programOps 地址输入与触点切换', () => {
     const intSource = program([rung('r1', [intNode])], [start, count])
     const comparison = changeContactKind(intSource, 'r1', [0], 'CMP')
     expect(rungOf(comparison, 'r1').nodes[0]).toMatchObject({ kind: 'CMP', tag: 'Count' })
+  })
+
+  it('导入含重复元件 ID 的程序时按路径只修改目标触点', () => {
+    const first = { ...contact('duplicate', 'A'), id: 'same-id' }
+    const second = { ...contact('duplicate', 'B'), id: 'same-id' }
+    const source = program([rung('r1', [first, second])])
+
+    const tagged = updateContact(source, 'r1', [0], { tag: 'Changed' })
+    const nodes = rungOf(tagged, 'r1').nodes
+    expect(nodes[0]).toMatchObject({ id: 'same-id', tag: 'Changed' })
+    expect(nodes[1]).toMatchObject({ id: 'same-id', tag: 'B' })
+
+    const changed = changeContactKind(source, 'r1', [1], 'NC')
+    const changedNodes = rungOf(changed, 'r1').nodes
+    expect(changedNodes[0]).toMatchObject({ kind: 'NO', tag: 'A' })
+    expect(changedNodes[1]).toMatchObject({ kind: 'NC', tag: 'B' })
   })
 })
 

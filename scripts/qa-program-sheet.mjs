@@ -4,18 +4,16 @@
  */
 import { mkdir, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
+import { DEFAULT_QA_APP_URL, DEFAULT_QA_CDP, selectExactPage } from './qa-cdp.mjs'
 
-const CDP_HTTP = process.env.LADDERLAB_CDP ?? 'http://127.0.0.1:9222'
-const APP_URL = process.env.LADDERLAB_URL ?? 'http://127.0.0.1:4173/'
+const CDP_HTTP = process.env.LADDERLAB_CDP ?? DEFAULT_QA_CDP
+const APP_URL = process.env.LADDERLAB_URL ?? DEFAULT_QA_APP_URL
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms))
 
 await mkdir(resolve('docs/qa'), { recursive: true })
 
 const targets = await (await fetch(`${CDP_HTTP}/json`)).json()
-const target = targets.find((item) => item.type === 'page' && item.url === APP_URL)
-  ?? targets.find((item) => item.type === 'page' && item.url.startsWith('http://127.0.0.1:'))
-  ?? targets.find((item) => item.type === 'page')
-if (!target) throw new Error(`没有可调试页面：${CDP_HTTP}`)
+const target = selectExactPage(targets, APP_URL, CDP_HTTP)
 
 const socket = new WebSocket(target.webSocketDebuggerUrl)
 await new Promise((open, fail) => {

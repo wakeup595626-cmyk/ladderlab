@@ -103,7 +103,6 @@
     background-color var(--dur-press) var(--ease-out),
     outline-color var(--dur-press) var(--ease-out);
   cursor: grab;
-  transition: background-color var(--dur-press) var(--ease-out);
 }
 
 .ll-rung-header:active {
@@ -116,11 +115,6 @@
 
 .ll-rung.is-whole-selected > .ll-rung-header .ll-rung-marker {
   height: 24px;
-}
-
-.ll-rung-header:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: -2px;
 }
 
 .ll-rung-header.is-drop-target {
@@ -147,8 +141,12 @@
   height: 32px;
   flex: 0 0 auto;
   place-items: center;
+  padding: 0;
+  border: 0;
   border-radius: var(--radius-control);
+  background: transparent;
   color: var(--faint);
+  font: inherit;
   cursor: grab;
   touch-action: none;
 }
@@ -565,7 +563,19 @@
   stroke-width: 1;
 }
 
+.ll-node:hover > .ll-parallel-select > .ll-node-hit {
+  fill: transparent;
+  stroke: var(--accent);
+  stroke-width: 1;
+}
+
 .ll-node:focus-visible > .ll-node-hit {
+  fill: var(--accent-wash);
+  stroke: var(--accent);
+  stroke-width: 1;
+}
+
+.ll-parallel-select:focus-visible > .ll-node-hit {
   fill: var(--accent-wash);
   stroke: var(--accent);
   stroke-width: 1;
@@ -575,11 +585,22 @@
   fill: var(--accent-wash);
 }
 
+.ll-node.is-selected > .ll-parallel-select > .ll-node-hit {
+  fill: var(--accent-wash);
+}
+
 .ll-node.is-drag-source {
   opacity: 0.45;
 }
 
 .ll-node.is-drop-target > .ll-node-hit {
+  fill: var(--accent-wash);
+  stroke: var(--accent);
+  stroke-width: 2;
+  stroke-dasharray: 5 3;
+}
+
+.ll-node.is-drop-target > .ll-parallel-select > .ll-node-hit {
   fill: var(--accent-wash);
   stroke: var(--accent);
   stroke-width: 2;
@@ -1283,7 +1304,16 @@
   stroke-dasharray: 3 3;
 }
 
+.ll-node.is-group-selected > .ll-parallel-select > .ll-node-hit {
+  stroke: var(--accent);
+  stroke-dasharray: 3 3;
+}
+
 .ll-node.is-primary-selected > .ll-node-hit {
+  fill: var(--accent-wash);
+}
+
+.ll-node.is-primary-selected > .ll-parallel-select > .ll-node-hit {
   fill: var(--accent-wash);
 }
 
@@ -1379,6 +1409,33 @@
 @media (max-width: 420px) {
   .ll-slot-menu {
     width: min(232px, calc(100vw - 16px));
+  }
+}
+
+/* 320px 级别触屏上，10px 的槽位与 24px 的 + 命中区会完全重叠。
+   默认让导线接收第一次点击，选中后再显影该槽的 +；键盘焦点、拖放、
+   合并候选仍沿用各自的高优先级显影规则。 */
+@media (pointer: coarse) and (max-width: 420px) {
+  /* 触摸会短暂触发 :hover / :focus-within。这里必须用同等或更高优先级
+     压住显影规则，否则按下导线中央时，隐藏的 + 会在 touchend 前抢走
+     合成 click，用户看到的是“选线却弹出插入菜单”。 */
+  .ll-slot .ll-slot-plus,
+  .ll-slot:hover .ll-slot-plus,
+  .ll-slot:focus-within .ll-slot-plus {
+    opacity: 0 !important;
+    pointer-events: none !important;
+  }
+
+  .ll-slot.is-wire-selected .ll-slot-plus,
+  .ll-slot.is-merge-candidate .ll-slot-plus,
+  .ll-slot.is-drop-target .ll-slot-plus,
+  .ll-slot:has(.ll-slot-wire:focus-visible) .ll-slot-plus {
+    opacity: 1 !important;
+    pointer-events: all !important;
+  }
+
+  .ll-slot-plus:focus-visible {
+    opacity: 1 !important;
   }
 }
 

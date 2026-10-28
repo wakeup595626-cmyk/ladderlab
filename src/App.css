@@ -1081,7 +1081,7 @@
 }
 
 .recovery-detail {
-  color: var(--faint);
+  color: var(--muted);
   font-family: var(--mono);
   font-size: 11.5px;
   line-height: 1.45;
@@ -1601,7 +1601,7 @@
   border-bottom: 1px solid var(--rule);
 }
 
-.tags-toolbar h3 {
+.tags-toolbar h2 {
   margin: 1px 0 0;
   color: var(--text);
   font-size: 14px;
@@ -2064,7 +2064,7 @@
 }
 
 .run-clock {
-  color: var(--faint);
+  color: var(--muted);
   font-variant-numeric: tabular-nums;
 }
 

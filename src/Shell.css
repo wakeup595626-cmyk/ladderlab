@@ -1065,6 +1065,11 @@ body[data-drag-kind] {
   background: var(--accent-wash);
 }
 
+.wb-saved-project.has-newer-version {
+  border-color: color-mix(in srgb, var(--warning) 60%, var(--border));
+  background: color-mix(in srgb, var(--warning) 8%, var(--surface));
+}
+
 .wb-saved-project-open {
   display: flex;
   min-width: 0;
@@ -1106,6 +1111,11 @@ body[data-drag-kind] {
   color: var(--accent-ink);
   font-size: 9.5px;
   font-weight: 600;
+}
+
+.wb-saved-project-badge.is-update {
+  border-color: color-mix(in srgb, var(--warning) 55%, var(--border));
+  color: color-mix(in srgb, var(--warning) 62%, var(--text));
 }
 
 .wb-saved-project-delete {
@@ -2439,6 +2449,15 @@ body[data-drag-kind] {
   background: var(--surface);
 }
 
+/* The buttons live in a fixed-height segmented bar. Without an explicit
+   stretched wrapper, the percentage height resolves against auto and the menu
+   collapses to a 19px-high hit target. */
+.wb-shell .wb-more {
+  display: flex;
+  height: 100%;
+  align-items: stretch;
+}
+
 .wb-shell .wb-more .icon-button:hover:not(:disabled) {
   border-color: var(--accent-ink);
   background: var(--active);
@@ -2814,7 +2833,7 @@ body[data-drag-kind] {
 }
 
 .property-heading h3,
-.tags-toolbar h3,
+.tags-toolbar h2,
 .panel-heading h3 {
   font-size: 15px;
   font-weight: 600;
@@ -3901,6 +3920,13 @@ body[data-drag-kind] {
   .wb-program-pane {
     padding: 14px 12px 24px;
   }
+
+  /* This shorthand intentionally follows the earlier sheet-spacing rule.
+     Restore the extra scroll runway here, or the selected ladder element
+     remains trapped behind the bottom sheet on phones. */
+  .app-shell[data-inspector='open'] .wb-program-pane {
+    padding-bottom: calc(58dvh + 24px);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -4322,6 +4348,67 @@ body[data-drag-kind] {
 
   .wb-insert-target-select select {
     max-width: 100px;
+  }
+}
+
+@media (max-width: 520px) {
+  /* At phone width the project name keeps a readable first row and every
+     action moves to a second row. The action group stays content-sized: a
+     full-width bordered strip leaves a large empty area that reads like a
+     broken input field. */
+  .wb-shell .wb-topbar {
+    height: auto;
+    min-height: 56px;
+    flex: 0 0 auto;
+    flex-wrap: wrap;
+    row-gap: 2px;
+    column-gap: 8px;
+    padding: 6px 12px;
+  }
+
+  .wb-shell .wb-brand {
+    display: none;
+  }
+
+  .wb-project-name {
+    min-width: 120px;
+    max-width: none;
+    flex: 1 1 120px;
+  }
+
+  .wb-shell .wb-topbar-actions {
+    width: max-content;
+    max-width: 100%;
+    flex: 0 0 auto;
+    justify-content: flex-end;
+    gap: 4px;
+    margin-left: auto;
+  }
+
+  .wb-shell .wb-run-toggle {
+    width: 44px;
+    min-width: 44px;
+    padding: 0;
+    justify-content: center;
+  }
+
+  .wb-shell .wb-run-toggle > span {
+    display: none;
+  }
+
+  .wb-shell .wb-run-toggle .run-error-count {
+    display: inline-grid;
+  }
+
+  .wb-file-compact {
+    width: 58px;
+    min-width: 58px;
+    padding-inline: 0;
+    justify-content: center;
+  }
+
+  .wb-file-compact > span {
+    display: none;
   }
 }
 

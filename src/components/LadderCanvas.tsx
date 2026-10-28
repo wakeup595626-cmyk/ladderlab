@@ -2,6 +2,7 @@ import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type {
   KeyboardEvent as ReactKeyboardEvent,
+  MouseEvent as ReactMouseEvent,
   PointerEvent as ReactPointerEvent,
   ReactNode,
 } from 'react'
@@ -89,6 +90,9 @@ interface Size {
   lineY: number
 }
 
+/** One measurement pass per rung; nested parallel groups reuse the same results. */
+type LayoutMemo = Map<LadderNode, Size>
+
 interface DrawContext {
   runtime: Runtime
   tags: TagDef[]
@@ -100,6 +104,8 @@ interface DrawContext {
   rungId: string
   segment: string
   metrics: LadderMetrics
+  /** Shared node measurements for the current rung render. */
+  measureMemo?: LayoutMemo
   /** 压缩并联支路内触点热区的最大高度；其他区域沿用完整触点高度。 */
   contactHitHeight?: number
   onSelect: (selection: Selection) => void
@@ -309,11 +315,15 @@ function outputSize(output: OutputElement, m: LadderMetrics): Size {
 }
 
 /** 同一并联组内按列取最宽元件，保证每条支路的同序号元件落在同一 X 上。 */
-function chainColumnWidths(chains: LadderNode[][], m: LadderMetrics): number[] {
+function chainColumnWidths(
+  chains: LadderNode[][],
+  m: LadderMetrics,
+  memo: LayoutMemo,
+): number[] {
   const depth = Math.max(0, ...chains.map((chain) => chain.length))
   return Array.from({ length: depth }, (_, index) => Math.max(
     0,
-    ...chains.map((chain) => chain[index] ? measureNode(chain[index], m).width : 0),
+    ...chains.map((chain) => chain[index] ? measureNode(chain[index], m, memo).width : 0),
   ))
 }
 
@@ -321,6 +331,7 @@ function measureChain(
   chain: LadderNode[],
   m: LadderMetrics,
   columnWidths?: number[],
+  memo: LayoutMemo = new Map(),
 ): Size {
   if (chain.length === 0) {
     return {
@@ -334,7 +345,7 @@ function measureChain(
   let top = 0
   let bottom = 0
   for (const [index, node] of chain.entries()) {
-    const size = measureNode(node, m)
+    const size = measureNode(node, m, memo)
     nodeWidth += columnWidths?.[index] ?? size.width
     top = Math.max(top, size.lineY)
     bottom = Math.max(bottom, size.height - size.lineY)
@@ -347,28 +358,43 @@ function measureChain(
   }
 }
 
-function measureNode(node: LadderNode, m: LadderMetrics): Size {
-  if (node.type === 'contact') return contactSize(node, m)
+function measureNode(
+  node: LadderNode,
+  m: LadderMetrics,
+  memo: LayoutMemo = new Map(),
+): Size {
+  const cached = memo.get(node)
+  if (cached) return cached
+
+  if (node.type === 'contact') {
+    const size = contactSize(node, m)
+    memo.set(node, size)
+    return size
+  }
   if (node.branches.length === 0) {
-    return {
+    const size = {
       width: m.emptyChainW + m.parallelGutter * 2 + m.parallelJoinW,
       height: m.emptyChainH,
       lineY: m.emptyChainLineY,
     }
+    memo.set(node, size)
+    return size
   }
 
-  const columnWidths = chainColumnWidths(node.branches, m)
-  const branches = node.branches.map((branch) => measureChain(branch, m, columnWidths))
+  const columnWidths = chainColumnWidths(node.branches, m, memo)
+  const branches = node.branches.map((branch) => measureChain(branch, m, columnWidths, memo))
   const contentW = Math.max(...branches.map((branch) => branch.width))
     + m.parallelGutter * 2
     + m.parallelJoinW
   const placements = parallelBranchOffsets(branches, m)
-  return {
+  const size = {
     // 未闭合时右侧要留出「合并分支」按钮，否则按钮会压到输出线上。
     width: contentW + (node.open === true ? m.openMergeW : 0),
     height: placements[placements.length - 1] + branches[branches.length - 1].height,
     lineY: branches[0].lineY,
   }
+  memo.set(node, size)
+  return size
 }
 
 function pathsEqual(left: number[] | null, right: number[] | null): boolean {
@@ -495,6 +521,33 @@ function renderSlot(
   const selectWire = () => {
     context.onSlotClick(context.rungId, chain, index, chainLength)
   }
+  const selectNearestWire = (event: ReactMouseEvent<SVGGElement>) => {
+    // The compact sheet has 10px slot spacing. A 44px touch band necessarily
+    // overlaps its neighbours, so resolve the tap by the nearest slot centre.
+    if (event.detail === 0) {
+      selectWire()
+      return
+    }
+    const rungElement = event.currentTarget.closest('.ll-rung')
+    if (!rungElement) {
+      selectWire()
+      return
+    }
+    const chainKey = chain.join('.')
+    const slots = Array.from(rungElement.querySelectorAll<SVGGElement>('.ll-slot'))
+      .filter((slot) => slot.dataset.chain === chainKey)
+    let nearestIndex = index
+    let nearestDistance = Number.POSITIVE_INFINITY
+    for (const slot of slots) {
+      const hit = slot.querySelector<SVGGraphicsElement>('.ll-slot-wide-hit') ?? slot
+      const bounds = hit.getBoundingClientRect()
+      const distance = Math.abs(event.clientX - (bounds.left + bounds.width / 2))
+      if (distance >= nearestDistance) continue
+      nearestDistance = distance
+      nearestIndex = Number(slot.dataset.index)
+    }
+    context.onSlotClick(context.rungId, chain, nearestIndex, chainLength)
+  }
   const wireSelected = isWireSelected(context, chain, index)
   // 和博途一致：先点 + 说明“在这一段插入什么”，触点类型和分支都在菜单里选；
   // 点导线本身只做选线，两者不再抢同一个点击。
@@ -534,6 +587,7 @@ function renderSlot(
     : favoriteTarget
       ? '收藏指令的插入点：' + slotLabel + '；点 + 可手动插入'
       : '在' + slotLabel + '插入元件或分支'
+  const hitWidth = Math.max(44, slotW * 2)
 
   return (
     <g
@@ -557,7 +611,7 @@ function renderSlot(
         aria-pressed={wireSelected}
         onClick={(event) => {
           event.stopPropagation()
-          selectWire()
+          selectNearestWire(event)
         }}
         onKeyDown={(event) => {
           if (event.key !== 'Enter' && event.key !== ' ' && event.key !== 'Spacebar') return
@@ -576,9 +630,9 @@ function renderSlot(
         />
         <rect
           className="ll-slot-wide-hit"
-          x={slotW / -2}
+          x={(slotW - hitWidth) / 2}
           y={lineY - 22}
-          width={slotW * 2}
+          width={hitWidth}
           height="44"
         />
         <line
@@ -715,6 +769,7 @@ function renderContact(
       }
       aria-keyshortcuts="ArrowLeft ArrowRight"
       data-node-id={node.id}
+      data-node-path={path.join('.')}
       onClick={(event) => {
         event.stopPropagation()
         // 和桌面软件一致：Ctrl/Cmd 逐项加选，Shift 选同一线路上的连续一段。
@@ -891,7 +946,8 @@ function renderChain(
   columnWidths?: number[],
 ): ReactNode {
   const m = context.metrics
-  const size = measureChain(chain, m, columnWidths)
+  const measureMemo = context.measureMemo ?? new Map<LadderNode, Size>()
+  const size = measureChain(chain, m, columnWidths, measureMemo)
 
   if (chain.length === 0) {
     return (
@@ -913,7 +969,7 @@ function renderChain(
     )
     cursorX += m.slotW
 
-    const nodeSize = measureNode(node, m)
+    const nodeSize = measureNode(node, m, measureMemo)
     const columnWidth = columnWidths?.[index] ?? nodeSize.width
     const nodeY = size.lineY - nodeSize.lineY
     const inheritedMerge = index === chain.length - 1 && node.type === 'parallel'
@@ -1504,7 +1560,8 @@ function measureRung(
   availableWidth: number,
   m: LadderMetrics,
 ) {
-  const chain = measureChain(rung.nodes, m)
+  const measureMemo: LayoutMemo = new Map()
+  const chain = measureChain(rung.nodes, m, undefined, measureMemo)
   const output = outputSize(rung.output, m)
   const chainX = m.railLeft + m.chainLeft
   const naturalWidth = chainX + chain.width + m.chainToOutput
@@ -1525,6 +1582,7 @@ function measureRung(
     chainY: centerY - chain.lineY,
     outputY: centerY - output.lineY,
     centerY,
+    measureMemo,
   }
 }
 
@@ -1739,6 +1797,7 @@ function RungSection({
     rungId: rung.id,
     segment: segmentLabel,
     metrics,
+    measureMemo: layout.measureMemo,
   }
   const powered = context.runtime.rungPower[rung.id] === true
   // 选中某个元件后，这一行才淡显插入位和拖拽手柄：
@@ -1852,8 +1911,6 @@ function RungSection({
           isDropTarget ? 'is-drop-target' : '',
           draggedRungId === rung.id ? 'is-drag-source' : '',
         ].filter(Boolean).join(' ')}
-        tabIndex={0}
-        aria-label={segmentLabel + '：拖动或按 Enter 选中整段'}
         data-drop={JSON.stringify({ type: 'rung', index })}
         onPointerDown={(event) => {
           const target = event.target
@@ -1869,17 +1926,31 @@ function RungSection({
             'rung:' + rung.id,
           )
         }}
-        onKeyDown={(event) => {
-          if (event.target !== event.currentTarget) return
-          if (event.key !== 'Enter' && event.key !== ' ') return
-          event.preventDefault()
-          context.onSelect({ rungId: rung.id, path: null, wholeRung: true })
-        }}
       >
         <div className="ll-rung-title">
-          <span className="ll-rung-drag" data-drag-handle title="拖动程序段">
+          <button
+            type="button"
+            className="ll-rung-drag"
+            data-drag-handle
+            title="拖动程序段"
+            aria-label={'选择并拖动' + segmentLabel}
+            onPointerDown={(event) => {
+              event.stopPropagation()
+              context.onSelect({ rungId: rung.id, path: null, wholeRung: true })
+              context.beginDrag(
+                event as unknown as ReactPointerEvent<SVGGElement>,
+                { type: 'rung', rungId: rung.id },
+                rung.label || segmentLabel,
+                'rung:' + rung.id,
+              )
+            }}
+            onClick={(event) => {
+              event.stopPropagation()
+              context.onSelect({ rungId: rung.id, path: null, wholeRung: true })
+            }}
+          >
             <GripIcon size={16} />
-          </span>
+          </button>
           <span className="ll-rung-marker" aria-hidden="true" />
           <span className="ll-rung-index">{segmentLabel}</span>
           <input
@@ -1942,7 +2013,6 @@ function RungSection({
           )}
           <span
             className={'ll-power-state' + (powered ? ' is-on' : '')}
-            aria-label={powered ? '回路通电' : '回路断开'}
             title={powered ? '回路通电' : '回路断开'}
           >
             <i /><span className="ll-power-text">{powered ? '通电' : '断开'}</span>
@@ -2648,10 +2718,11 @@ function renderParallel(
   splitColumn?: number,
 ): ReactNode {
   const m = context.metrics
-  const size = measureNode(node, m)
-  const columnWidths = chainColumnWidths(node.branches, m)
+  const measureMemo = context.measureMemo ?? new Map<LadderNode, Size>()
+  const size = measureNode(node, m, measureMemo)
+  const columnWidths = chainColumnWidths(node.branches, m, measureMemo)
   const branchSizes = node.branches.map(
-    (branch) => measureChain(branch, m, columnWidths),
+    (branch) => measureChain(branch, m, columnWidths, measureMemo),
   )
   const selected = isSelected(context, path)
   const primary = isPrimarySelected(context, path)
@@ -2715,39 +2786,10 @@ function renderParallel(
         grouped && primary ? 'is-primary-selected' : '',
         source ? 'is-drag-source' : '',
       ].filter(Boolean).join(' ')}
-      role="button"
-      tabIndex={0}
-      aria-label={isOpen
-        ? '并联分支，主线未闭合，点击编辑或点右侧合并分支'
-        : '并联分支，' + node.branches.length + ' 条支路，点击编辑'}
-      aria-keyshortcuts="ArrowLeft ArrowRight"
       data-node-id={node.id}
+      data-node-path={path.join('.')}
       data-split-inherited={splitColumn !== undefined ? 'true' : undefined}
       data-merge-inherited={mergeColumn !== undefined ? 'true' : undefined}
-      onClick={(event) => {
-        event.stopPropagation()
-        selectAndEdit(context, selection, event.currentTarget)
-      }}
-      onKeyDown={(event) => {
-        if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
-          event.preventDefault()
-          context.onMoveNode(context.rungId, path, event.key === 'ArrowLeft' ? -1 : 1)
-          return
-        }
-        activateWithKeyboard(
-          event,
-          () => selectAndEdit(context, selection, event.currentTarget),
-        )
-      }}
-      onPointerDown={(event) => {
-        event.stopPropagation()
-        context.beginDrag(
-          event,
-          { type: 'node', rungId: context.rungId, path },
-          '并联分支',
-          sourceKey,
-        )
-      }}
     >
       <title>
         {isOpen
@@ -2755,14 +2797,49 @@ function renderParallel(
           : '并联分支 · ' + node.branches.length + ' 条支路 · '
             + (outputPower ? '能流接通' : '能流断开')}
       </title>
-      <rect
-        className="ll-node-hit"
-        x="2"
-        y="3"
-        width={size.width - 4}
-        height={size.height - 6}
-        rx="4"
-      />
+      {/* 选择层与支路内容并列而不是包住它们，避免可聚焦按钮里再套按钮。 */}
+      <g
+        className="ll-parallel-select"
+        role="button"
+        tabIndex={0}
+        aria-label={isOpen
+          ? '并联分支，主线未闭合，点击编辑或点右侧合并分支'
+          : '并联分支，' + node.branches.length + ' 条支路，点击编辑'}
+        aria-keyshortcuts="ArrowLeft ArrowRight"
+        onClick={(event) => {
+          event.stopPropagation()
+          selectAndEdit(context, selection, event.currentTarget)
+        }}
+        onKeyDown={(event) => {
+          if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+            event.preventDefault()
+            context.onMoveNode(context.rungId, path, event.key === 'ArrowLeft' ? -1 : 1)
+            return
+          }
+          activateWithKeyboard(
+            event,
+            () => selectAndEdit(context, selection, event.currentTarget),
+          )
+        }}
+        onPointerDown={(event) => {
+          event.stopPropagation()
+          context.beginDrag(
+            event,
+            { type: 'node', rungId: context.rungId, path },
+            '并联分支',
+            sourceKey,
+          )
+        }}
+      >
+        <rect
+          className="ll-node-hit"
+          x="2"
+          y="3"
+          width={size.width - 4}
+          height={size.height - 6}
+          rx="4"
+        />
+      </g>
       <rect
         className="ll-branch-frame"
         data-parallel-frame

@@ -1,17 +1,17 @@
-/** 交互式 UI 快速验证：需要 preview 服务与 Edge 的 CDP 端口 9222。 */
+/** 交互式 UI 快速验证：需要 preview 服务与专用 QA Chromium 的 CDP 端口 9444。 */
 import { writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
+import { DEFAULT_QA_APP_URL, DEFAULT_QA_CDP, selectExactPage } from './qa-cdp.mjs'
 
-const CDP_HTTP = process.env.LADDERLAB_CDP ?? 'http://127.0.0.1:9222'
-const APP_URL = process.env.LADDERLAB_URL ?? 'http://127.0.0.1:4173/'
+const CDP_HTTP = process.env.LADDERLAB_CDP ?? DEFAULT_QA_CDP
+const APP_URL = process.env.LADDERLAB_URL ?? DEFAULT_QA_APP_URL
 const output = resolve(process.argv[2] ?? 'docs/screenshot.png')
 const viewportWidth = Number(process.env.LADDERLAB_WIDTH ?? 1600)
 const viewportHeight = Number(process.env.LADDERLAB_HEIGHT ?? 1000)
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms))
 
 const targets = await (await fetch(`${CDP_HTTP}/json`)).json()
-const page = targets.find((target) => target.type === 'page')
-if (!page) throw new Error(`没有可调试页面：${CDP_HTTP}`)
+const page = selectExactPage(targets, APP_URL, CDP_HTTP)
 
 const socket = new WebSocket(page.webSocketDebuggerUrl)
 await new Promise((resolveOpen, rejectOpen) => {
@@ -58,8 +58,23 @@ await send('Emulation.setDeviceMetricsOverride', {
   deviceScaleFactor: 1,
   mobile: false,
 })
+await send('Page.navigate', { url: 'about:blank' })
+await sleep(320)
+await send('Storage.clearDataForOrigin', {
+  origin: new URL(APP_URL).origin,
+  storageTypes: 'local_storage',
+})
 await send('Page.navigate', { url: APP_URL })
-await sleep(1200)
+for (let attempt = 0; attempt < 60; attempt += 1) {
+  const ready = await send('Runtime.evaluate', {
+    expression: `document.readyState !== 'loading' && !!document.querySelector('.wb-topbar')`,
+    returnByValue: true,
+  }).then((result) => result.result.value).catch(() => false)
+  if (ready) break
+  if (attempt === 59) throw new Error(`等待页面就绪超时：${APP_URL}`)
+  await sleep(200)
+}
+await sleep(250)
 
 async function evaluate(expression) {
   const result = await send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true })

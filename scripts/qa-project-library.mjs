@@ -1,15 +1,19 @@
 import { mkdir, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
+import {
+  DEFAULT_QA_APP_URL,
+  DEFAULT_QA_CDP,
+  READ_LIBRARY_IN_PAGE,
+  selectExactPage,
+} from './qa-cdp.mjs'
 
-const CDP = process.env.LADDERLAB_CDP ?? 'http://127.0.0.1:9222'
-const URL_UNDER_TEST = process.env.LADDERLAB_URL ?? 'http://127.0.0.1:4173/'
+const CDP = process.env.LADDERLAB_CDP ?? DEFAULT_QA_CDP
+const URL_UNDER_TEST = process.env.LADDERLAB_URL ?? DEFAULT_QA_APP_URL
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms))
 await mkdir(resolve('docs/qa'), { recursive: true })
 
 const targets = await (await fetch(CDP + '/json')).json()
-const target = targets.find((item) => item.type === 'page' && item.url === URL_UNDER_TEST)
-  ?? targets.find((item) => item.type === 'page')
-if (!target) throw new Error('No debuggable page at ' + CDP)
+const target = selectExactPage(targets, URL_UNDER_TEST, CDP)
 
 const socket = new WebSocket(target.webSocketDebuggerUrl)
 await new Promise((open, fail) => {
@@ -23,8 +27,18 @@ const consoleErrors = []
 function send(method, params = {}) {
   const id = ++nextId
   return new Promise((ok, no) => {
-    pending.set(id, { ok, no })
-    socket.send(JSON.stringify({ id, method, params }))
+    const timer = setTimeout(() => {
+      pending.delete(id)
+      no(new Error(`CDP 请求超时（12000ms）：${method}`))
+    }, 12_000)
+    pending.set(id, { ok, no, timer })
+    try {
+      socket.send(JSON.stringify({ id, method, params }))
+    } catch (error) {
+      clearTimeout(timer)
+      pending.delete(id)
+      no(error)
+    }
   })
 }
 
@@ -34,6 +48,7 @@ socket.addEventListener('message', (event) => {
     const request = pending.get(message.id)
     if (!request) return
     pending.delete(message.id)
+    clearTimeout(request.timer)
     if (message.error) request.no(new Error(message.error.message))
     else request.ok(message.result)
     return
@@ -71,7 +86,7 @@ async function reload(clear = false) {
     await sleep(250)
     await send('Storage.clearDataForOrigin', {
       origin: new URL(URL_UNDER_TEST).origin,
-      storageTypes: 'local_storage',
+      storageTypes: 'local_storage,session_storage',
     })
   }
   await send('Page.navigate', { url: URL_UNDER_TEST })
@@ -80,6 +95,7 @@ async function reload(clear = false) {
 }
 
 async function screenshot(path) {
+  await send('Page.bringToFront')
   const shot = await send('Page.captureScreenshot', { format: 'png', fromSurface: true })
   await writeFile(resolve(path), Buffer.from(shot.data, 'base64'))
 }
@@ -105,15 +121,31 @@ async function fill(selector, value) {
 }
 
 async function renameProject(value) {
-  return evaluate(`(() => {
+  const changed = await evaluate(`(() => {
     const input = document.querySelector('#project-name')
     if (!input) return false
     input.focus()
     const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
     setter?.call(input, ${JSON.stringify(value)})
     input.dispatchEvent(new Event('input', { bubbles: true }))
-    input.blur()
-    return true
+    return document.activeElement === input
+  })()`)
+  if (!changed) return false
+  // 工程名输入框是非受控字段，只在真实 Enter/失焦时提交。用 CDP 发送可信
+  // 键盘事件，走与用户完全相同的提交路径，避免脚本直接 blur 时事件丢失。
+  await send('Input.dispatchKeyEvent', {
+    type: 'rawKeyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13,
+  })
+  await send('Input.dispatchKeyEvent', {
+    type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13,
+  })
+  await sleep(120)
+  return evaluate(`(() => {
+    const input = document.querySelector('#project-name')
+    return {
+      focused: document.activeElement === input,
+      value: input?.value ?? null,
+    }
   })()`)
 }
 
@@ -190,13 +222,12 @@ await sleep(100)
 await click('.save-project-confirm')
 await sleep(500)
 const firstSave = await evaluate(`(() => {
-  const raw = localStorage.getItem('ladderlab.library.v1')
-  const library = raw ? JSON.parse(raw) : null
+  const library = ${READ_LIBRARY_IN_PAGE}
   return {
     dialogOpen: !!document.querySelector('.save-project-dialog'),
     projectName: document.querySelector('#project-name')?.value ?? null,
     projectNames: library?.projects?.map((project) => project.program.name) ?? [],
-    active: localStorage.getItem('ladderlab.library.v1.active'),
+    active: sessionStorage.getItem('ladderlab.library.v1.active'),
     toast: document.querySelector('.toast-message')?.textContent?.trim() ?? null,
   }
 })()`)
@@ -210,7 +241,7 @@ check(
 await reload(false)
 const restored = await evaluate(`({
   projectName: document.querySelector('#project-name')?.value ?? null,
-  active: localStorage.getItem('ladderlab.library.v1.active'),
+  active: sessionStorage.getItem('ladderlab.library.v1.active'),
 })`)
 check('desktop/named-project-restores-after-reload', restored.projectName === '电机启保停实验' && Boolean(restored.active), restored)
 
@@ -228,18 +259,25 @@ check(
 await screenshot('docs/qa/desktop-project-drawer-filled.png')
 await closeDrawer()
 
-await renameProject('电机启保停实验·改名')
+const firstRename = await renameProject('电机启保停实验·改名')
 await sleep(100)
 await click('.wb-save-button')
 await sleep(300)
 const renamed = await evaluate(`(() => {
-  const library = JSON.parse(localStorage.getItem('ladderlab.library.v1') ?? '{"projects":[]}')
+  const library = ${READ_LIBRARY_IN_PAGE}
   return {
     projectName: document.querySelector('#project-name')?.value ?? null,
     projectNames: library.projects.map((project) => project.program.name),
     count: library.projects.length,
+    dialogOpen: !!document.querySelector('.save-project-dialog'),
+    dialogError: document.querySelector('#save-project-error')?.textContent?.trim() ?? null,
+    toast: document.querySelector('.toast-message')?.textContent?.trim() ?? null,
+    active: sessionStorage.getItem('ladderlab.library.v1.active'),
+    conflict: document.querySelector('.wb-conflict-banner')?.textContent?.trim() ?? null,
+    focused: document.activeElement?.id ?? null,
   }
 })()`)
+renamed.rename = firstRename
 check(
   'desktop/named-project-saves-quickly-in-place',
   renamed.projectName === '电机启保停实验·改名' && renamed.count === 1
@@ -254,7 +292,7 @@ await sleep(500)
 await sleep(800)
 const newProjectState = await evaluate(`({
   name: document.querySelector('#project-name')?.value ?? null,
-  active: localStorage.getItem('ladderlab.library.v1.active'),
+  active: sessionStorage.getItem('ladderlab.library.v1.active'),
   toast: document.querySelector('.toast-message')?.textContent?.trim() ?? null,
 })`)
 check(
@@ -277,10 +315,10 @@ await click('.project-import-back')
 await sleep(220)
 await submitSave('交通灯顺序控制')
 const secondSave = await evaluate(`(() => {
-  const library = JSON.parse(localStorage.getItem('ladderlab.library.v1') ?? '{"projects":[]}')
+  const library = ${READ_LIBRARY_IN_PAGE}
   return {
     names: library.projects.map((project) => project.program.name),
-    active: localStorage.getItem('ladderlab.library.v1.active'),
+    active: sessionStorage.getItem('ladderlab.library.v1.active'),
   }
 })()`)
 check('desktop/second-project-saves', secondSave.names.length === 2 && secondSave.names.includes('交通灯顺序控制'), secondSave)
@@ -292,14 +330,14 @@ await sleep(320)
 const conflict = await evaluate(`({
   open: !!document.querySelector('.save-project-dialog'),
   error: document.querySelector('#save-project-error')?.textContent?.trim() ?? null,
-  names: JSON.parse(localStorage.getItem('ladderlab.library.v1') ?? '{"projects":[]}').projects.map((project) => project.program.name),
+  names: (${READ_LIBRARY_IN_PAGE})?.projects?.map((project) => project.program.name) ?? [],
 })`)
 check('desktop/duplicate-name-is-explained', conflict.open && String(conflict.error).includes('同名项目'), conflict)
 await fill('#save-project-name', '照明控制实验')
 await sleep(80)
 await click('.save-project-confirm')
 await sleep(420)
-const resolved = await evaluate(`JSON.parse(localStorage.getItem('ladderlab.library.v1') ?? '{"projects":[]}').projects.map((project) => project.program.name)`)
+const resolved = await evaluate(`(${READ_LIBRARY_IN_PAGE})?.projects?.map((project) => project.program.name) ?? []`)
 check(
   'desktop/conflict-can-be-resolved',
   resolved.length === 2 && resolved.includes('照明控制实验'),
@@ -319,7 +357,7 @@ await sleep(520)
 const reopened = await evaluate(`({
   projectName: document.querySelector('#project-name')?.value ?? null,
   drawerOpen: !!document.querySelector('.wb-project-drawer'),
-  active: localStorage.getItem('ladderlab.library.v1.active'),
+  active: sessionStorage.getItem('ladderlab.library.v1.active'),
   toast: document.querySelector('.toast-message')?.textContent?.trim() ?? null,
 })`)
 check(
@@ -328,7 +366,7 @@ check(
   reopened,
 )
 
-const activeBeforeShortcut = await evaluate(`localStorage.getItem('ladderlab.library.v1.active')`)
+const activeBeforeShortcut = await evaluate(`sessionStorage.getItem('ladderlab.library.v1.active')`)
 await send('Input.dispatchKeyEvent', {
   type: 'rawKeyDown', key: 's', code: 'KeyS', windowsVirtualKeyCode: 83, modifiers: 2,
 })
@@ -338,7 +376,7 @@ await send('Input.dispatchKeyEvent', {
 await sleep(420)
 const shortcut = await evaluate(`({
   dialogOpen: !!document.querySelector('.save-project-dialog'),
-  active: localStorage.getItem('ladderlab.library.v1.active'),
+  active: sessionStorage.getItem('ladderlab.library.v1.active'),
   toast: document.querySelector('.toast-message')?.textContent?.trim() ?? null,
 })`)
 check(

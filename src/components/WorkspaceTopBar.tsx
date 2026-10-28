@@ -216,7 +216,7 @@ export default function WorkspaceTopBar({
 
   return (
     <header className="topbar wb-topbar">
-      <div className="brand wb-brand" aria-label="梯形实验室 LadderLab">
+      <div className="brand wb-brand">
         <span className="brand-mark" aria-hidden="true">
           <LadderIcon size={20} />
         </span>
@@ -329,7 +329,7 @@ export default function WorkspaceTopBar({
               }}
               aria-label="导出工程或 PNG 图片"
               aria-expanded={fileMenuOpen && fileMenuKind === 'export'}
-              aria-controls="topbar-export-menu"
+              aria-controls={fileMenuOpen && fileMenuKind === 'export' ? 'topbar-export-menu' : undefined}
               aria-haspopup="menu"
               title="导出工程 JSON 或 PNG 图片"
             >
@@ -350,7 +350,7 @@ export default function WorkspaceTopBar({
             }}
             aria-label="文件：新建、导入或导出"
             aria-expanded={fileMenuOpen && fileMenuKind === 'file'}
-            aria-controls="topbar-file-menu"
+            aria-controls={fileMenuOpen && fileMenuKind === 'file' ? 'topbar-file-menu' : undefined}
             aria-haspopup="menu"
             title="新建、导入或导出"
           >
@@ -485,7 +485,7 @@ export default function WorkspaceTopBar({
             aria-label="更多操作"
             title="更多操作"
             aria-expanded={menuOpen}
-            aria-controls="topbar-more-menu"
+            aria-controls={menuOpen ? 'topbar-more-menu' : undefined}
             aria-haspopup="menu"
           >
             <MoreIcon size={19} />

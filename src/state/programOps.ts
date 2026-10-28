@@ -1085,8 +1085,8 @@ export function deleteNodesByIds(program: Program, rungId: string, ids: Set<stri
 }
 
 /**
- * 按路径删除多选元件。导入的工程可能有重复的普通触点 ID，按 ID 删会连带
- * 删掉同 ID 的其他触点，所以多选删除必须按用户实际选中的位置删除。
+ * 按路径删除多选元件。正常导入会拒绝重复 ID，但调用方仍可能传入历史内存
+ * 数据；按 ID 删会连带删掉同 ID 的其他触点，所以必须按用户实际选中的位置删除。
  */
 export function deleteNodesAtPaths(
   program: Program,
@@ -1152,34 +1152,56 @@ export function collectNodesAtPaths(
 export function updateContact(
   program: Program,
   rungId: string,
-  nodeId: string,
+  path: number[],
   patch: { kind?: ContactKind; tag?: string; compareValue?: number; compareOp?: string },
 ): Program {
   return withRung(program, rungId, (rung) => ({
     ...rung,
-    nodes: sanitizeChain(replaceContact(rung.nodes, nodeId, patch)),
+    nodes: sanitizeChain(replaceContactAtPath(rung.nodes, path, patch)),
   }))
 }
 
-function replaceContact(
+function patchContact(
+  node: ContactNode,
+  patch: { kind?: ContactKind; tag?: string; compareValue?: number; compareOp?: string },
+): ContactNode {
+  const nextKind = patch.kind ?? node.kind
+  const next: ContactNode = { ...node, kind: nextKind }
+  if (patch.tag !== undefined) next.tag = patch.tag
+  if (nextKind === 'CMP') {
+    const op = (patch.compareOp ?? node.compare?.op ?? '>=') as NonNullable<typeof node.compare>['op']
+    const value = patch.compareValue ?? node.compare?.value ?? 1
+    next.compare = { op, value }
+  } else {
+    delete next.compare
+  }
+  return next
+}
+
+/** 导入文件可能带有重复元件 ID；编辑必须按树中的精确路径定位。 */
+function replaceContactAtPath(
   chain: LadderNode[],
-  nodeId: string,
+  path: number[],
   patch: { kind?: ContactKind; tag?: string; compareValue?: number; compareOp?: string },
 ): LadderNode[] {
-  return chain.map((node) => {
-    if (node.type === 'parallel') return { ...node, branches: node.branches.map((branch) => replaceContact(branch, nodeId, patch)) }
-    if (node.id !== nodeId) return node
-    const nextKind = patch.kind ?? node.kind
-    const next: ContactNode = { ...node, kind: nextKind }
-    if (patch.tag !== undefined) next.tag = patch.tag
-    if (nextKind === 'CMP') {
-      const op = (patch.compareOp ?? node.compare?.op ?? '>=') as NonNullable<typeof node.compare>['op']
-      const value = patch.compareValue ?? node.compare?.value ?? 1
-      next.compare = { op, value }
-    } else {
-      delete next.compare
+  const [index, branchIndex, ...rest] = path
+  if (!Number.isInteger(index) || index < 0 || index >= chain.length) return chain
+  return chain.map((node, nodeIndex) => {
+    if (nodeIndex !== index) return node
+    if (branchIndex === undefined) {
+      return node.type === 'contact' ? patchContact(node, patch) : node
     }
-    return next
+    if (node.type !== 'parallel' || !Number.isInteger(branchIndex) || branchIndex < 0 || branchIndex >= node.branches.length) {
+      return node
+    }
+    return {
+      ...node,
+      branches: node.branches.map((branch, indexInNode) => (
+        indexInNode === branchIndex
+          ? replaceContactAtPath(branch, rest, patch)
+          : branch
+      )),
+    }
   })
 }
 
@@ -1223,20 +1245,20 @@ export function changeContactKind(program: Program, rungId: string, path: number
   if (boolKind && node.kind !== 'CMP') {
     return withRung(program, rungId, (rung) => ({
       ...rung,
-      nodes: replaceContact(rung.nodes, node.id, { kind, tag: node.tag }),
+      nodes: replaceContactAtPath(rung.nodes, path, { kind, tag: node.tag }),
     }))
   }
   if (kind === 'CMP') {
     if (currentTag?.kind === 'INT') {
       return withRung(program, rungId, (rung) => ({
         ...rung,
-        nodes: replaceContact(rung.nodes, node.id, { kind, tag: node.tag }),
+        nodes: replaceContactAtPath(rung.nodes, path, { kind, tag: node.tag }),
       }))
     }
     const made = tagForNewContact(program, 'INT')
     return withRung(made.program, rungId, (rung) => ({
       ...rung,
-      nodes: replaceContact(rung.nodes, node.id, {
+      nodes: replaceContactAtPath(rung.nodes, path, {
         kind,
         tag: made.tag?.name ?? '',
         compareOp: '>=',
@@ -1248,7 +1270,7 @@ export function changeContactKind(program: Program, rungId: string, path: number
     const made = tagForNewContact(program, 'BOOL')
     return withRung(made.program, rungId, (rung) => ({
       ...rung,
-      nodes: replaceContact(rung.nodes, node.id, { kind, tag: made.tag?.name ?? '' }),
+      nodes: replaceContactAtPath(rung.nodes, path, { kind, tag: made.tag?.name ?? '' }),
     }))
   }
   return program
