@@ -27,7 +27,7 @@ import {
   wrapInParallel,
 } from '../state/programOps'
 import { useModalFocus } from '../lib/useModalFocus'
-import { CheckCircleIcon, CloseIcon, PointerIcon } from './Icons'
+import { CheckCircleIcon, CloseIcon, PointerIcon, SearchIcon } from './Icons'
 
 interface InspectorProps {
   program: Program
@@ -237,20 +237,25 @@ function TagsPanel({
   onToggleBool: (name: string) => void
   onSetInt: (name: string, value: number) => void
 }) {
-  const [expandedTag, setExpandedTag] = useState<string | null>(null)
+  const [tagQuery, setTagQuery] = useState('')
   const instances = contentRungs(program)
     .map((rung) => rung.output)
     .filter((output) => {
       const name = normalizeReference(output.tag)
       return runtime.timers[name] || runtime.counters[name]
     })
+  const normalizedQuery = tagQuery.trim().toLocaleLowerCase()
+  const visibleTags = normalizedQuery
+    ? program.tags.filter((tag) => [tag.name, tag.address, tag.comment, tag.kind]
+      .some((value) => value.toLocaleLowerCase().includes(normalizedQuery)))
+    : program.tags
 
   return (
     <div className="tags-panel">
       <div className="tags-toolbar">
-        <div>
+        <div className="tags-heading">
           <span className="panel-label">符号与地址</span>
-          <h2>PLC 变量表</h2>
+          <h2>PLC 变量表 <span className="tag-count">{program.tags.length}</span></h2>
         </div>
         <div className="button-row compact-row">
           <button type="button" className="secondary-button" onClick={() => onProgram(addTag(program, 'BOOL'))}>
@@ -262,8 +267,32 @@ function TagsPanel({
         </div>
       </div>
 
+      <div className="tag-search" role="search">
+        <SearchIcon aria-hidden="true" />
+        <input
+          className="tag-search-input"
+          type="search"
+          value={tagQuery}
+          onChange={(event) => setTagQuery(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Escape' && tagQuery) {
+              event.preventDefault()
+              event.stopPropagation()
+              setTagQuery('')
+            }
+          }}
+          placeholder="搜索变量、地址或注释"
+          aria-label="搜索变量"
+        />
+        {tagQuery && (
+          <button type="button" className="tag-search-clear" onClick={() => setTagQuery('')} aria-label="清除搜索">
+            <CloseIcon aria-hidden="true" />
+          </button>
+        )}
+      </div>
+
       <section className="tag-list" aria-label="PLC 变量表">
-        {program.tags.map((tag) => {
+        {visibleTags.map((tag) => {
           const usage = tagUsage(program, tag.name)
           return (
             <article className="tag-card" key={tag.id}>
@@ -280,6 +309,15 @@ function TagsPanel({
                   }}
                   spellCheck={false}
                 />
+                <input
+                  key={`${tag.id}-comment-${tag.comment}`}
+                  className="table-input comment-input"
+                  defaultValue={tag.comment}
+                  maxLength={FIELD_LIMITS.tagComment}
+                  placeholder="注释"
+                  aria-label="变量注释"
+                  onBlur={(event) => onProgram(updateTag(program, tag.id, { comment: event.target.value }))}
+                />
                 <span className="type-pill">{tag.kind}</span>
                 <button
                   type="button"
@@ -291,15 +329,6 @@ function TagsPanel({
                   ×
                 </button>
               </div>
-              <input
-                key={`${tag.id}-comment-${tag.comment}`}
-                className="table-input comment-input"
-                defaultValue={tag.comment}
-                maxLength={FIELD_LIMITS.tagComment}
-                placeholder="添加注释"
-                aria-label="变量注释"
-                onBlur={(event) => onProgram(updateTag(program, tag.id, { comment: event.target.value }))}
-              />
               <div className="tag-card-fields">
                 <label>
                   <span>地址</span>
@@ -342,6 +371,7 @@ function TagsPanel({
                       onClick={() => onToggleBool(tag.name)}
                       title="点击切换仿真值"
                       aria-label={`切换 ${tag.name} 仿真值`}
+                      aria-pressed={Boolean(runtime.bools[normalizeReference(tag.name)])}
                     >
                       {readDisplay(program, runtime, tag.name)}
                     </button>
@@ -359,132 +389,16 @@ function TagsPanel({
             </article>
           )
         })}
-      </section>
-
-      <section className="tags-monitor" aria-label="PLC 变量监视">
-        {program.tags.map((tag) => {
-          const usage = tagUsage(program, tag.name)
-          const expanded = expandedTag === tag.id
-          const editorId = `tag-monitor-editor-${tag.id}`
-          return (
-            <article className={expanded ? 'tag-monitor-card is-expanded' : 'tag-monitor-card'} key={tag.id}>
-              <div className="tag-monitor-row">
-                <div className="tag-monitor-id">
-                  <strong>{tag.name}</strong>
-                  <span>{tag.address} · {tag.kind}</span>
-                </div>
-                {tag.kind === 'BOOL' ? (
-                  <button
-                    type="button"
-                    className={runtime.bools[normalizeReference(tag.name)] ? 'live-value on' : 'live-value'}
-                    onClick={() => onToggleBool(tag.name)}
-                    aria-pressed={Boolean(runtime.bools[normalizeReference(tag.name)])}
-                    aria-label={`切换 ${tag.name} 仿真值，当前 ${readDisplay(program, runtime, tag.name)}`}
-                  >
-                    {readDisplay(program, runtime, tag.name)}
-                  </button>
-                ) : (
-                  <input
-                    key={`${tag.id}-monitor-runtime-${runtime.ints[normalizeReference(tag.name)] ?? 0}`}
-                    className="table-input mono tag-monitor-int"
-                    type="number"
-                    defaultValue={runtime.ints[normalizeReference(tag.name)] ?? 0}
-                    aria-label={`${tag.name} 运行值`}
-                    onBlur={(event) => onSetInt(tag.name, Number(event.target.value) || 0)}
-                  />
-                )}
-                <button
-                  type="button"
-                  className="tag-monitor-edit"
-                  aria-expanded={expanded}
-                  aria-controls={editorId}
-                  aria-label={`${expanded ? '收起' : '编辑'} ${tag.name}`}
-                  onClick={() => setExpandedTag(expanded ? null : tag.id)}
-                >
-                  {expanded ? '收起' : '编辑'}
-                </button>
-              </div>
-
-              {expanded && (
-                <div className="tag-monitor-editor" id={editorId}>
-                  <label>
-                    <span>名称</span>
-                    <input
-                      key={`${tag.id}-monitor-name-${tag.name}`}
-                      className="table-input mono"
-                      defaultValue={tag.name}
-                      maxLength={FIELD_LIMITS.tagName}
-                      onBlur={(event) => {
-                        const name = event.target.value.trim()
-                        if (name && name !== tag.name) onProgram(updateTag(program, tag.id, { name }))
-                      }}
-                      spellCheck={false}
-                    />
-                  </label>
-                  <label>
-                    <span>地址</span>
-                    <input
-                      key={`${tag.id}-monitor-address-${tag.address}`}
-                      className="table-input mono"
-                      maxLength={FIELD_LIMITS.address}
-                      defaultValue={tag.address}
-                      onBlur={(event) => onProgram(updateTag(program, tag.id, { address: event.target.value.toUpperCase() }))}
-                      spellCheck={false}
-                    />
-                  </label>
-                  <label>
-                    <span>初值</span>
-                    {tag.kind === 'BOOL' ? (
-                      <select
-                        className="table-input"
-                        defaultValue={tag.initial ? 'true' : 'false'}
-                        onChange={(event) => onProgram(updateTag(program, tag.id, { initial: event.target.value === 'true' }))}
-                      >
-                        <option value="false">FALSE</option>
-                        <option value="true">TRUE</option>
-                      </select>
-                    ) : (
-                      <input
-                        key={`${tag.id}-monitor-initial-${tag.initial}`}
-                        className="table-input mono"
-                        type="number"
-                        defaultValue={Number(tag.initial)}
-                        onBlur={(event) => onProgram(updateTag(program, tag.id, { initial: Number(event.target.value) }))}
-                      />
-                    )}
-                  </label>
-                  <label className="tag-monitor-comment">
-                    <span>注释</span>
-                    <input
-                      key={`${tag.id}-monitor-comment-${tag.comment}`}
-                      className="table-input"
-                      defaultValue={tag.comment}
-                      maxLength={FIELD_LIMITS.tagComment}
-                      placeholder="可选"
-                      onBlur={(event) => onProgram(updateTag(program, tag.id, { comment: event.target.value }))}
-                    />
-                  </label>
-                  <div className="tag-monitor-actions">
-                    <span>{usage > 0 ? `已被引用 ${usage} 次` : '未被引用'}</span>
-                    <button
-                      type="button"
-                      className="tag-monitor-delete"
-                      disabled={usage > 0}
-                      onClick={() => onProgram(deleteTag(program, tag.id))}
-                    >
-                      删除变量
-                    </button>
-                  </div>
-                </div>
-              )}
-            </article>
-          )
-        })}
+        {visibleTags.length === 0 && (
+          <div className="tag-empty">
+            <span>没有匹配的变量</span>
+            <button type="button" className="secondary-button" onClick={() => setTagQuery('')}>清除搜索</button>
+          </div>
+        )}
       </section>
 
       <div className="tags-help">
-        <strong>运行值不会写回真实 PLC</strong>
-        <span>它只改变当前浏览器里的仿真输入。复位后，变量会回到“初值”。</span>
+        <strong>运行值仅用于浏览器仿真，不会写回真实 PLC</strong>
       </div>
 
       {instances.length > 0 && (

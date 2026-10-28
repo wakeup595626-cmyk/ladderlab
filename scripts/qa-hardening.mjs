@@ -273,28 +273,28 @@ async function openTagMonitor(page) {
     await page.waitFor("!!document.querySelector('.inspector')", '属性面板展开')
   }
   await page.click('#inspector-tab-tags')
-  await page.waitFor("!!document.querySelector('.tags-monitor')", '变量监视展开')
+  await page.waitFor("!!document.querySelector('.tags-panel .tag-card')", '变量卡片显示')
 }
 
 async function monitorRows(page) {
-  return page.evaluate(`(() => [...document.querySelectorAll('.tag-monitor-row')].map((row) => ({
-    name: row.querySelector('.tag-monitor-id strong')?.textContent?.trim() ?? null,
+  return page.evaluate(`(() => [...document.querySelectorAll('.tag-card')].map((row) => ({
+    name: row.querySelector('.tag-name-input')?.value ?? null,
     bool: row.querySelector('.live-value')?.textContent?.trim() ?? null,
-    int: row.querySelector('.tag-monitor-int')?.value ?? null,
+    int: row.querySelector('.runtime-input')?.value ?? null,
     pressed: row.querySelector('.live-value')?.getAttribute('aria-pressed') ?? null,
   })))()`)
 }
 
 async function toggleBool(page, name) {
   const toggled = await page.evaluate(`(() => {
-    const row = [...document.querySelectorAll('.tag-monitor-row')].find((item) => item.querySelector('.tag-monitor-id strong')?.textContent?.trim() === ${JSON.stringify(name)})
+    const row = [...document.querySelectorAll('.tag-card')].find((item) => item.querySelector('.tag-name-input')?.value === ${JSON.stringify(name)})
     const button = row?.querySelector('.live-value')
     button?.click()
     return Boolean(button)
   })()`)
   if (!toggled) throw new Error(`变量表里找不到 BOOL 变量 ${name}`)
   await page.waitFor(`(() => {
-    const row = [...document.querySelectorAll('.tag-monitor-row')].find((item) => item.querySelector('.tag-monitor-id strong')?.textContent?.trim() === ${JSON.stringify(name)})
+    const row = [...document.querySelectorAll('.tag-card')].find((item) => item.querySelector('.tag-name-input')?.value === ${JSON.stringify(name)})
     return row?.querySelector('.live-value')?.getAttribute('aria-pressed') === 'true'
   })()`, `${name} 切换为 TRUE`)
 }
@@ -417,7 +417,7 @@ try {
   const runAdvanced = await page.evaluate("document.querySelector('.run-clock')?.textContent?.trim() ?? null")
   await openTagMonitor(page)
   await page.waitFor(`(() => {
-    const row = [...document.querySelectorAll('.tag-monitor-row')].find((item) => item.querySelector('.tag-monitor-id strong')?.textContent?.trim() === 'LAMP')
+    const row = [...document.querySelectorAll('.tag-card')].find((item) => item.querySelector('.tag-name-input')?.value === 'LAMP')
     return row?.querySelector('.live-value')?.textContent?.trim() === 'TRUE'
   })()`, 'LAMP 输出得电', 4000)
   const runRows = await monitorRows(page)
