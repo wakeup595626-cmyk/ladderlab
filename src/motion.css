@@ -1,0 +1,316 @@
+/* Motion layer.
+   One vocabulary for the whole workbench: state moves, never the layout.
+   Only transform and opacity animate; colour changes stay short and linear. */
+
+.inspector-tabs {
+  position: relative;
+}
+
+.inspector-tabs::after {
+  position: absolute;
+  bottom: -1px;
+  left: 0;
+  width: calc(100% / 3);
+  height: 2px;
+  background: var(--accent);
+  content: "";
+  pointer-events: none;
+  transform: translateX(0);
+  transition: transform 220ms var(--ease-in-out);
+}
+
+.inspector-tabs[data-tab="tags"]::after {
+  transform: translateX(100%);
+}
+
+.inspector-tabs[data-tab="diagnostics"]::after {
+  transform: translateX(200%);
+}
+
+.inspector-tabs button.active {
+  border-bottom-color: transparent;
+}
+
+.wb-tabbar.mobile-tabbar {
+  position: relative;
+}
+
+.wb-tabbar.mobile-tabbar::before {
+  position: absolute;
+  top: -1px;
+  left: 0;
+  z-index: 2;
+  width: 25%;
+  height: 2px;
+  background: var(--accent);
+  content: "";
+  opacity: 1;
+  pointer-events: none;
+  transform: translateX(0);
+  transition:
+    transform 240ms var(--ease-in-out),
+    opacity 140ms linear;
+}
+
+.wb-tabbar.mobile-tabbar[data-panel="instructions"]::before {
+  transform: translateX(100%);
+}
+
+.wb-tabbar.mobile-tabbar[data-panel="tags"]::before {
+  transform: translateX(200%);
+}
+
+.wb-tabbar.mobile-tabbar[data-panel="project"]::before {
+  transform: translateX(300%);
+}
+
+.wb-tabbar.mobile-tabbar[data-panel="none"]::before {
+  opacity: 0;
+}
+
+.wb-tabbar .mobile-tab-action.is-active {
+  border-top-color: transparent;
+}
+
+.ll-energy {
+  pointer-events: none;
+}
+
+.ll-energy-spark {
+  fill: var(--accent);
+  opacity: 0.82;
+}
+
+.ll-power-state i {
+  position: relative;
+}
+
+.ll-power-state.is-on i::after {
+  position: absolute;
+  inset: -1px;
+  border: 1px solid var(--positive);
+  border-radius: 50%;
+  content: "";
+  opacity: 0;
+  pointer-events: none;
+}
+
+.ll-insert-cursor-halo,
+.ll-insert-cursor-ripple {
+  pointer-events: none;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.ll-insert-cursor-ripple {
+  fill: none;
+  stroke: color-mix(in srgb, var(--accent) 64%, transparent);
+  stroke-width: 1.25;
+  opacity: 0;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .ll-energy-spark {
+    animation: ll-energy-run 1800ms linear infinite;
+  }
+
+  .ll-power-state.is-on i::after {
+    animation: ll-power-pulse 1600ms var(--ease-out) infinite;
+  }
+
+  .ll-insert-cursor-halo {
+    animation: ll-cursor-breathe 1800ms var(--ease-in-out) infinite;
+  }
+
+  .ll-insert-cursor-ripple {
+    animation: ll-cursor-ripple 1200ms var(--ease-out) infinite;
+  }
+}
+
+@keyframes ll-energy-run {
+  from {
+    transform: translateX(0);
+  }
+
+  to {
+    transform: translateX(var(--ll-energy-span, 0px));
+  }
+}
+
+@keyframes ll-power-pulse {
+  0% {
+    opacity: 0.55;
+    transform: scale(1);
+  }
+
+  70%,
+  100% {
+    opacity: 0;
+    transform: scale(2);
+  }
+}
+
+@keyframes ll-cursor-breathe {
+  0%,
+  100% {
+    opacity: 0.7;
+    transform: scale(1);
+  }
+
+  50% {
+    opacity: 1;
+    transform: scale(1.06);
+  }
+}
+
+@keyframes ll-cursor-ripple {
+  0% {
+    opacity: 0.5;
+    transform: scale(1);
+  }
+
+  70%,
+  100% {
+    opacity: 0;
+    transform: scale(1.8);
+  }
+}
+
+/* ------------------------------------------------------- instruction bar */
+
+.wb-instruction-tools {
+  position: relative;
+}
+
+.wb-instruction-follow {
+  position: absolute;
+  bottom: -3px;
+  left: 0;
+  z-index: 2;
+  width: var(--follow-w, 0px);
+  height: 2px;
+  background: var(--accent);
+  content: "";
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(var(--follow-x, 0px));
+  transition:
+    transform 190ms var(--ease-out),
+    width 190ms var(--ease-out),
+    opacity 120ms linear;
+}
+
+.wb-instruction-tools[data-follow="on"] .wb-instruction-follow {
+  opacity: 1;
+}
+
+.wb-instruction-button {
+  position: relative;
+  overflow: hidden;
+}
+
+.wb-instruction-press {
+  position: absolute;
+  inset: 0;
+  background: var(--accent-wash);
+  opacity: 0;
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .ll-rung:not(.is-placeholder) {
+    animation: ll-rung-enter 140ms var(--ease-out) backwards;
+  }
+
+  .wb-instruction-press {
+    animation: ll-press-flash 300ms var(--ease-out) forwards;
+  }
+
+  .wb-construct-button,
+  .wb-instruction-button,
+  .mobile-tab-action {
+    transition:
+      transform var(--dur-press) var(--ease-out),
+      background-color var(--dur-press) linear,
+      border-color var(--dur-press) linear,
+      color var(--dur-press) linear;
+  }
+
+  .wb-construct-button:active,
+  .wb-instruction-button:active:not(:disabled),
+  .mobile-tab-action:active {
+    transform: scale(0.98);
+  }
+}
+
+@media (hover: hover) and (pointer: fine) and (prefers-reduced-motion: no-preference) {
+  .wb-instruction-card,
+  .wb-construct-button {
+    transition: transform 160ms var(--ease-out);
+  }
+
+  .wb-instruction-card:hover,
+  .wb-construct-button:hover {
+    transform: translateY(-1px);
+  }
+}
+
+@keyframes ll-rung-enter {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes ll-press-flash {
+  from {
+    opacity: 0.5;
+  }
+
+  to {
+    opacity: 0;
+  }
+}
+
+/* The construct buttons are part of the same 44px touch floor as the
+   favourites they sit beside. The strip grows by the two pixels it needs. */
+@media (pointer: coarse) {
+  .wb-instruction-strip {
+    min-height: 58px;
+  }
+
+  .wb-instruction-card,
+  .wb-instruction-button,
+  .wb-instruction-construct,
+  .wb-construct-button {
+    height: 44px;
+  }
+
+  .wb-construct-button {
+    min-height: 44px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .inspector-tabs::after,
+  .wb-tabbar.mobile-tabbar::before,
+  .wb-instruction-follow,
+  .wb-instruction-card,
+  .wb-construct-button,
+  .wb-instruction-button,
+  .mobile-tab-action {
+    transition: none;
+  }
+
+  .ll-energy-spark,
+  .ll-power-state.is-on i::after,
+  .ll-insert-cursor-halo,
+  .ll-insert-cursor-ripple,
+  .ll-rung,
+  .wb-instruction-press {
+    animation: none;
+  }
+}

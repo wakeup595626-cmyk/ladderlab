@@ -16,6 +16,13 @@ export interface FavoriteInsertTarget {
     | { type: 'end' }
 }
 
+/** 画布上的一个「+」插入位。收藏指令和顶部构造按钮都从这里取落点。 */
+export interface InsertSlotRef {
+  rungId: string
+  chain: number[]
+  index: number
+}
+
 const CONTACT_PREFIX: Record<string, string> = {
   NO: '常开',
   NC: '常闭',
@@ -136,6 +143,34 @@ export function resolveFavoriteInsertTarget(
   }
 
   return end()
+}
+
+/**
+ * 把用户刚点过的「+」固定成落点。与 resolveFavoriteInsertTarget 不同，
+ * 这里不做「退到段末」的猜测：位置失效时返回 null，由调用方清除游标。
+ */
+export function resolveSlotInsertTarget(
+  program: Program,
+  slot: InsertSlotRef | null,
+): FavoriteInsertTarget | null {
+  if (!slot) return null
+  const rungIndex = program.rungs.findIndex((rung) => rung.id === slot.rungId)
+  if (rungIndex < 0) return null
+  const rung = program.rungs[rungIndex]
+  const scope = chainAt(rung.nodes, slot.chain)
+  if (!scope) return null
+  if (!Number.isInteger(slot.index) || slot.index < 0 || slot.index > scope.length) return null
+
+  const contentIndex = contentRungs(program).findIndex((item) => item.id === rung.id)
+  return {
+    rungId: rung.id,
+    rungIndex,
+    segmentLabel: contentIndex >= 0 ? '程序段 ' + (contentIndex + 1) : '新程序段',
+    isPlaceholder: isBlankRung(rung),
+    chain: [...slot.chain],
+    index: slot.index,
+    anchor: { type: 'wire', index: slot.index },
+  }
 }
 
 /** 一句话说明触点会落在哪里；输出收藏则替换整个程序段的输出。 */

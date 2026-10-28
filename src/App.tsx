@@ -19,9 +19,16 @@ import { FolderIcon, GripIcon, LadderIcon, TagIcon } from './components/Icons'
 import Inspector, { type InspectorTab } from './components/Inspector'
 import InstructionBar from './components/InstructionBar'
 import InstructionDrawer from './components/InstructionDrawer'
-import LadderCanvas, { type SlotRef } from './components/LadderCanvas'
+import LadderCanvas, { type MergeArmed, type SlotRef } from './components/LadderCanvas'
 import LibraryDialog from './components/LibraryDialog'
 import { useMediaQuery } from './lib/useMediaQuery'
+import {
+  persistThemePreference,
+  readThemePreference,
+  resolveTheme,
+  themeCssVars,
+  type ThemePreference,
+} from './lib/theme'
 import ProjectDrawer from './components/ProjectDrawer'
 import ProjectImportDialog from './components/ProjectImportDialog'
 import SaveProjectDialog from './components/SaveProjectDialog'
@@ -91,6 +98,8 @@ import {
   describeFavoriteInsertTarget,
   favoriteTargetSegmentLabel,
   resolveFavoriteInsertTarget,
+  resolveSlotInsertTarget,
+  type InsertSlotRef,
 } from './lib/insertTarget'
 import {
   archiveRecoveryCopy,
@@ -115,6 +124,8 @@ import {
   deleteNodesAtPaths,
   deleteRung,
   duplicateRung,
+  findOpenBranchPath,
+  findOpenBranchPathForChain,
   getNodeAtPath,
   insertNodeAt,
   insertNodesAt,
@@ -462,6 +473,31 @@ export default function App() {
   const [runtime, setRuntime] = useState<Runtime>(() => createRuntime(initialProgram))
   const [running, setRunning] = useState(false)
   const [speed, setSpeed] = useState(50)
+  const [theme, setTheme] = useState<ThemePreference>(() => readThemePreference(window.localStorage))
+  const [themeSwitching, setThemeSwitching] = useState(false)
+  const themeVars = useMemo(() => themeCssVars(resolveTheme(theme)), [theme])
+  // 预设之间切换时短暂开启颜色过渡；拖拽取色器时保持即时反馈，避免跟手迟滞。
+  const handleTheme = useCallback((next: ThemePreference) => {
+    if (next.preset !== 'custom') setThemeSwitching(true)
+    setTheme(next)
+  }, [])
+  useEffect(() => {
+    if (!themeSwitching) return
+    const timer = window.setTimeout(() => setThemeSwitching(false), 360)
+    return () => window.clearTimeout(timer)
+  }, [themeSwitching])
+  useEffect(() => {
+    persistThemePreference(window.localStorage, theme)
+  }, [theme])
+  // 快速编辑器与插入菜单是 portal 到 body 的，必须让令牌也落在文档根上。
+  useEffect(() => {
+    const root = document.documentElement
+    const entries = Object.entries(themeVars)
+    for (const [name, value] of entries) root.style.setProperty(name, value)
+    return () => {
+      for (const [name] of entries) root.style.removeProperty(name)
+    }
+  }, [themeVars])
   const [selectionState, setSelection] = useState<Selection | null>(() =>
     preferredRung(initialProgram)
       ? { rungId: preferredRung(initialProgram)!.id, path: null }
@@ -503,10 +539,13 @@ export default function App() {
   const [favoriteTargetRungId, setFavoriteTargetRungId] = useState<string | null>(
     () => preferredRung(initialProgram)?.id ?? null,
   )
-  // 画布上的落点高亮是“临时提示”，不是常驻装饰：换程序段或点「定位」时
-  // 亮一下，约 2 秒后退回正常线路；点空白处也会立即收起。
+  // 顶部「定位」的落点高亮是临时提示；用户亲手点过的「+」则固定成
+  // insertCursor，一直亮到再次换落点或点画布空白处。
   const [favoriteTargetPreview, setFavoriteTargetPreview] = useState(false)
   const favoriteTargetPreviewTimerRef = useRef<number | null>(null)
+  /** 用户刚点的 + 是收藏指令的连续插入游标，直到点空白或换落点。 */
+  const [insertCursor, setInsertCursor] = useState<InsertSlotRef | null>(null)
+  const [mergeArmed, setMergeArmed] = useState<MergeArmed | null>(null)
   const [inspectorOpen, setInspectorOpen] = useState(false)
   const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth)
   const [inspectorWidth, setInspectorWidth] = useState(() => {
@@ -1631,10 +1670,15 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKeyDown, true)
   }, [requestSaveProject])
 
-  const insertTarget = useMemo(
+  const cursorInsertTarget = useMemo(
+    () => resolveSlotInsertTarget(program, insertCursor),
+    [insertCursor, program],
+  )
+  const fallbackInsertTarget = useMemo(
     () => resolveFavoriteInsertTarget(program, selection, favoriteTargetRungId),
     [favoriteTargetRungId, program, selection],
   )
+  const insertTarget = cursorInsertTarget ?? fallbackInsertTarget
   const activeRungId = insertTarget?.rungId ?? null
   const targetAnchorLabel = useMemo(
     () => describeFavoriteInsertTarget(program, insertTarget),
@@ -1642,7 +1686,8 @@ export default function App() {
   )
   // 落点标记只在切换程序段或点「定位」后短暂出现；平时线路保持干净。
   // 顶部“· 段末 / 某个触点后”的文字始终保留，不靠高亮也能确认落点。
-  const visibleInsertTarget = favoriteTargetPreview ? insertTarget : null
+  const visibleInsertTarget = cursorInsertTarget
+    ?? (favoriteTargetPreview ? fallbackInsertTarget : null)
 
   const scrollFavoriteTargetIntoView = useCallback((rungId: string) => {
     window.requestAnimationFrame(() => {
@@ -1680,6 +1725,16 @@ export default function App() {
     setFavoriteTargetPreview(false)
   }, [])
 
+  /** 点画布上的 +：固定落点并持续高亮，收藏指令随后按这个位置连续插入。 */
+  const armInsert = useCallback((slot: SlotRef) => {
+    setInsertCursor({ rungId: slot.rungId, chain: [...slot.chain], index: slot.index })
+    setFavoriteTargetRungId(slot.rungId)
+    setSelection(null)
+    setQuickEdit(null)
+    setMobilePanel('none')
+    dismissFavoriteTargetPreview()
+  }, [dismissFavoriteTargetPreview])
+
   useEffect(() => () => {
     if (favoriteTargetPreviewTimerRef.current !== null) {
       window.clearTimeout(favoriteTargetPreviewTimerRef.current)
@@ -1692,6 +1747,7 @@ export default function App() {
     // 换程序段时清掉元件选择，收藏触点就落在该段段末；
     // 高亮只闪一下，之后顶部仍保留目标文字，不妨碍看线路。
     setSelection(null)
+    setInsertCursor(null)
     setFavoriteTargetRungId(rungId)
     setQuickEdit(null)
     revealFavoriteInsertTarget(rungId)
@@ -1760,6 +1816,17 @@ export default function App() {
     notify('仿真已复位，变量恢复初值')
   }
 
+  /** 插入或开分支后，把游标推进到新元件之后的「+」；连续点收藏即可一路往后排。 */
+  const advanceCursorAfter = useCallback((next: Program, rungId: string, nodeId: string) => {
+    const path = findNodePath(next, rungId, nodeId)
+    if (!path || path.length === 0) return
+    setInsertCursor({
+      rungId,
+      chain: path.slice(0, -1),
+      index: path[path.length - 1] + 1,
+    })
+  }, [])
+
   const insert = useCallback((kind: ContactKind, slot?: { rungId: string; chain: number[]; index: number }) => {
     if (slot) {
       const made = makeContactNode(program, kind)
@@ -1771,6 +1838,7 @@ export default function App() {
       commit(next)
       const path = findNodePath(next, slot.rungId, made.node.id)
       setSelection({ rungId: slot.rungId, path })
+      advanceCursorAfter(next, slot.rungId, made.node.id)
       setFavoriteTargetRungId(slot.rungId)
       setQuickEdit(null)
       setMobilePanel('none')
@@ -1797,6 +1865,7 @@ export default function App() {
     // 新触点立即成为选中项：下一次点收藏指令就会接在它后面，
     // 连续点几下自然形成一条串联回路。
     setSelection(selectionForNode)
+    advanceCursorAfter(next, insertTarget.rungId, made.node.id)
     setFavoriteTargetRungId(insertTarget.rungId)
     setQuickEdit(null)
     setMobilePanel('none')
@@ -1805,7 +1874,7 @@ export default function App() {
       + '已插入到' + favoriteTargetSegmentLabel(insertTarget)
       + ' · ' + targetAnchorLabel,
     )
-  }, [commit, insertTarget, notify, program, targetAnchorLabel])
+  }, [advanceCursorAfter, commit, insertTarget, notify, program, targetAnchorLabel])
 
   // 插入点菜单选中的触点：精确落在刚点的那个“+”，不做二次猜测。
   const insertAt = useCallback((slot: SlotRef, kind: ContactKind) => {
@@ -1818,12 +1887,13 @@ export default function App() {
     commit(next)
     const selectionForNode = { rungId: slot.rungId, path: findNodePath(next, slot.rungId, made.node.id) }
     setSelection(selectionForNode)
+    advanceCursorAfter(next, slot.rungId, made.node.id)
     setFavoriteTargetRungId(slot.rungId)
     // 博途放下元件后可以直接输入操作数；这里把焦点送到新元件的操作数字段。
     setQuickEdit({ selection: selectionForNode, anchor: null, autoFocus: true })
     setMobilePanel('none')
     notify(instructionLabel('contact', kind) + '已插入，可直接输入变量或 M4.0 地址')
-  }, [commit, notify, program])
+  }, [advanceCursorAfter, commit, notify, program])
 
   // 博途式「打开分支」：在元件之后的插入点向下分叉，后续元件留在主线，
   // 新支路先作为草稿存在；画完后点支路右侧「合并分支」，再点主线的 + 闭合。
@@ -1839,6 +1909,7 @@ export default function App() {
       path: findNodePath(opened.program, slot.rungId, opened.nodeId),
     }
     setSelection(selectionForNode)
+    advanceCursorAfter(opened.program, slot.rungId, opened.nodeId)
     if (opened.mode === 'sibling') {
       setQuickEdit({ selection: selectionForNode, anchor: null, autoFocus: true })
     } else {
@@ -1847,8 +1918,8 @@ export default function App() {
     setMobilePanel('none')
     notify(opened.mode === 'sibling'
       ? '已在同一并联组新增支路，可直接输入变量或地址'
-      : '并联分支已打开：点 + 继续加元件，画完点右侧「合并分支」')
-  }, [commit, notify, program])
+      : '并联分支已打开：点 + 继续加元件，画完点顶部「合并」')
+  }, [advanceCursorAfter, commit, notify, program])
 
   const mergeBranch = useCallback((rungId: string, parallelPath: number[], closeIndex: number) => {
     const next = closeOpenBranchAt(program, rungId, parallelPath, closeIndex)
@@ -1858,9 +1929,50 @@ export default function App() {
     }
     commit(next)
     setSelection({ rungId, path: parallelPath })
+    // 闭合后游标停在并联组后面，继续点收藏就是沿主线往后排。
+    setInsertCursor({
+      rungId,
+      chain: parallelPath.slice(0, -1),
+      index: parallelPath[parallelPath.length - 1] + 1,
+    })
     setQuickEdit(null)
     notify('并联分支已闭合')
   }, [commit, notify, program])
+
+  /** 收藏条上的「分支」：以当前游标（或选择推算出的落点）作为分叉点。 */
+  const openBranchFromBar = useCallback(() => {
+    if (!insertTarget) {
+      notify('请先选择一个程序段和插入位置')
+      return
+    }
+    openBranchAt({
+      rungId: insertTarget.rungId,
+      chain: insertTarget.chain,
+      index: insertTarget.index,
+    })
+  }, [insertTarget, notify, openBranchAt])
+
+  /** 收藏条上的「合并」：让画布进入主线取点状态，点「合」完成闭合。 */
+  const mergeBranchFromBar = useCallback(() => {
+    const rungId = insertTarget?.rungId ?? selection?.rungId ?? null
+    const rung = rungId ? program.rungs.find((item) => item.id === rungId) : null
+    if (!rung) {
+      notify('请先选择要闭合分支的程序段')
+      return
+    }
+    // 嵌套分支时优先闭合包含当前游标的那一层；游标不在任何未闭合
+    // 分支里（或还没设落点）才退回第一条，保持原来的行为。
+    const parallelPath = (insertTarget && insertTarget.rungId === rung.id
+      ? findOpenBranchPathForChain(rung.nodes, insertTarget.chain)
+      : null) ?? findOpenBranchPath(rung.nodes)
+    if (!parallelPath) {
+      notify('这一段没有待合并的分支：先点元件旁的 +，选择「打开分支」')
+      return
+    }
+    setMergeArmed({ rungId: rung.id, parallelPath })
+    setMobilePanel('none')
+    notify('请点主线上标「合」的 + 选择合并位置')
+  }, [insertTarget, notify, program, selection])
 
   const removeNode = useCallback((rungId: string, path: number[]) => {
     const rung = program.rungs.find((item) => item.id === rungId)
@@ -2819,12 +2931,14 @@ export default function App() {
   return (
     <div
       className="app-shell wb-shell"
+      data-theme={theme.preset}
+      data-theme-switching={themeSwitching ? 'true' : undefined}
       data-mobile-panel={mobilePanel}
       data-sheet={sheetOpen ? 'open' : 'closed'}
       data-inspector={inspectorVisible ? 'open' : 'closed'}
       data-inspector-resizing={resizingInspector ? 'true' : undefined}
       data-program-sheet-resizing={resizingProgramSheetSide ? 'true' : undefined}
-      style={{ '--inspector-width': `${inspectorWidth}px` } as CSSProperties}
+      style={{ '--inspector-width': `${inspectorWidth}px`, ...themeVars } as CSSProperties}
       onPointerDown={clearSelectionOnBlankPointerDown}
     >
       <WorkspaceTopBar
@@ -2852,6 +2966,8 @@ export default function App() {
         onExportImage={startImageExport}
         onGuide={() => setGuideOpen(true)}
         onAbout={() => setAboutOpen(true)}
+        theme={theme}
+        onTheme={handleTheme}
       />
 
       <div className="wb-documentbar" role="region" aria-label="程序编辑器工具栏">
@@ -2904,6 +3020,8 @@ export default function App() {
         onToggleFavorite={toggleInstructionFavorite}
         onInsertContact={insert}
         onChangeOutput={changeOutput}
+        onOpenBranch={openBranchFromBar}
+        onMergeBranch={mergeBranchFromBar}
         onStartDrag={drag.start}
         onOpenAll={() => setMobilePanel('instructions')}
       />
@@ -3089,6 +3207,8 @@ export default function App() {
                 dragTarget={drag.target}
                 isDragging={Boolean(drag.drag)}
                 onSelect={(next) => {
+                  // 点画布上的元件/线路/空白都算重新指定落点：收起 + 的常驻游标。
+                  setInsertCursor(null)
                   if (!next) {
                     setSelection(null)
                     setQuickEdit(null)
@@ -3128,8 +3248,12 @@ export default function App() {
                 onMoveNode={(rungId, path, delta) => commit(moveNodeBy(program, rungId, path, delta))}
                 onInsertAt={insertAt}
                 onDeleteNode={removeNode}
+                onArmInsert={armInsert}
                 onOpenBranchAt={openBranchAt}
                 onMergeBranchAt={mergeBranch}
+                mergeArmed={mergeArmed}
+                onMergeArmedChange={setMergeArmed}
+                onNotice={notify}
                 onPasteAt={(slot) => pasteAt(slot)}
                 clipboardCount={clipboard?.kind === 'nodes' ? clipboard.nodes.length : 0}
                 onExtendSelect={extendSelection}
@@ -3178,7 +3302,17 @@ export default function App() {
         saveBlocked={Boolean(corruptProject) || Boolean(remoteConflict)}
       />
 
-      <nav className="mobile-tabbar wb-tabbar" aria-label="工作区面板">
+      <nav
+        className="mobile-tabbar wb-tabbar"
+        aria-label="工作区面板"
+        data-panel={
+          mobilePanel === 'none'
+            ? 'program'
+            : mobilePanel === 'properties'
+              ? inspectorTab === 'tags' ? 'tags' : 'none'
+              : mobilePanel
+        }
+      >
         <button
           type="button"
           className={mobilePanel === 'none' ? 'mobile-tab-action is-active' : 'mobile-tab-action'}

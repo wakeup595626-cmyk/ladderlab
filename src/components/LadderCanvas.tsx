@@ -1,10 +1,13 @@
-import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type {
+  CSSProperties,
+  Dispatch,
   KeyboardEvent as ReactKeyboardEvent,
   MouseEvent as ReactMouseEvent,
   PointerEvent as ReactPointerEvent,
   ReactNode,
+  SetStateAction,
 } from 'react'
 import type {
   ContactKind,
@@ -59,6 +62,8 @@ export interface LadderCanvasProps {
   onRenameRung?: (rungId: string, label: string) => void
   /** 插入点菜单：选中触点种类后插到这个位置。 */
   onInsertAt?: (slot: SlotRef, kind: ContactKind) => void
+  /** 用户点了某个「+」：记住该位置并持续标色，供收藏指令连续插入。 */
+  onArmInsert?: (slot: SlotRef) => void
   /** 插入点菜单：在这个位置向下打开一条并联分支。 */
   onOpenBranchAt?: (slot: SlotRef) => void
   /** 已打开的并联分支，在主线插入位处闭合。 */
@@ -72,6 +77,14 @@ export interface LadderCanvasProps {
   onDeleteNode?: (rungId: string, path: number[]) => void
   /** 只读提示：菜单项不可用、快捷键缺少选中项时告诉用户下一步。 */
   onNotice?: (message: string) => void
+  /** 当前正在取点的并联分支；由工作区持有，切换图纸或换落点时统一清除。 */
+  mergeArmed?: MergeArmed | null
+  onMergeArmedChange?: Dispatch<SetStateAction<MergeArmed | null>>
+}
+
+export interface MergeArmed {
+  rungId: string
+  parallelPath: number[]
 }
 
 export interface SlotRef {
@@ -725,6 +738,12 @@ function renderSlot(
           </>
         ) : (
           <>
+            {favoriteTarget && (
+              <>
+                <circle className="ll-insert-cursor-halo" r="13" aria-hidden="true" />
+                <circle className="ll-insert-cursor-ripple" r="13" aria-hidden="true" />
+              </>
+            )}
             <rect x="-8" y="-8" width="16" height="16" rx="3" />
             <path d="M -5 0 H 5 M 0 -5 V 5" />
           </>
@@ -1610,11 +1629,16 @@ function measureRung(
   m: LadderMetrics,
 ) {
   const measureMemo: LayoutMemo = new Map()
-  const chain = measureChain(rung.nodes, m, undefined, measureMemo)
-  const output = outputSize(rung.output, m)
+  const placeholder = isBlankRung(rung)
+  const measuredChain = measureChain(rung.nodes, m, undefined, measureMemo)
+  // An empty rung is a draft wire, not an empty network with an invisible coil.
+  const chain = placeholder ? { ...measuredChain, width: m.slotW } : measuredChain
+  const output = placeholder ? { width: 0, height: 0, lineY: 0 } : outputSize(rung.output, m)
   const chainX = m.railLeft + m.chainLeft
-  const naturalWidth = chainX + chain.width + m.chainToOutput
-    + output.width + m.outputToRail + m.railRight
+  const naturalWidth = placeholder
+    ? Math.max(m.minWidth, chainX + chain.width + m.slotW + m.railRight)
+    : chainX + chain.width + m.chainToOutput
+      + output.width + m.outputToRail + m.railRight
   const width = Math.max(m.minWidth, naturalWidth, Math.ceil(availableWidth))
   const top = Math.max(chain.lineY, output.lineY)
   const bottom = Math.max(chain.height - chain.lineY, output.height - output.lineY)
@@ -2155,26 +2179,55 @@ function RungSection({
             x2={metrics.railLeft}
             y2={layout.height}
           />
-          <line
-            className="ll-power-wire is-on"
-            x1={metrics.railLeft}
-            y1={layout.centerY}
-            x2={layout.chainX}
-            y2={layout.centerY}
-          />
+          {placeholder ? (
+            <line
+              className="ll-power-wire is-on"
+              x1={metrics.railLeft}
+              y1={layout.centerY}
+              x2={layout.width - metrics.railRight}
+              y2={layout.centerY}
+            />
+          ) : (
+            <line
+              className="ll-power-wire is-on"
+              x1={metrics.railLeft}
+              y1={layout.centerY}
+              x2={layout.chainX}
+              y2={layout.centerY}
+            />
+          )}
           <g transform={'translate(' + layout.chainX + ', ' + layout.chainY + ')'}>
             {renderChain(rung.nodes, rungContext, [], true)}
           </g>
-          <line
-            className={'ll-power-wire' + (powered ? ' is-on' : '')}
-            x1={layout.chainX + layout.chain.width}
-            y1={layout.centerY}
-            x2={layout.outputX}
-            y2={layout.centerY}
-          />
-          <g transform={'translate(' + layout.outputX + ', ' + layout.outputY + ')'}>
-            {renderOutput(rung.output, rungContext, rung.id, placeholder)}
-          </g>
+          {!placeholder && (
+            <>
+              <line
+                className={'ll-power-wire' + (powered ? ' is-on' : '')}
+                x1={layout.chainX + layout.chain.width}
+                y1={layout.centerY}
+                x2={layout.outputX}
+                y2={layout.centerY}
+              />
+              <g transform={'translate(' + layout.outputX + ', ' + layout.outputY + ')'}>
+                {renderOutput(rung.output, rungContext, rung.id, false)}
+              </g>
+            </>
+          )}
+          {powered && !placeholder && (
+            <g className="ll-energy" aria-hidden="true">
+              <rect
+                className="ll-energy-spark"
+                x={metrics.railLeft - 56}
+                y={layout.centerY - 1.5}
+                width="56"
+                height="3"
+                rx="1.5"
+                style={{
+                  '--ll-energy-span': `${Math.max(0, layout.outputX - metrics.railLeft)}px`,
+                } as CSSProperties}
+              />
+            </g>
+          )}
         </svg>
       </div>
     </article>
@@ -2223,15 +2276,23 @@ function SlotMenu({
     const menu = menuRef.current
     if (!menu) return
     const { anchor } = request
+    const margin = 8
     const width = menu.offsetWidth
     const height = menu.offsetHeight
-    const left = Math.max(
-      8,
-      Math.min(anchor.left + anchor.width / 2 - width / 2, window.innerWidth - width - 8),
-    )
-    let top = anchor.bottom + 8
-    if (top + height > window.innerHeight - 8) top = anchor.top - height - 8
-    if (top < 8) top = Math.max(8, window.innerHeight - height - 8)
+    // 左边缘对齐触发点：菜单贴着「+」出现，比居中之后被窗口边缘挤到
+    // 最左侧更好读，也不会盖住程序段标题和左侧母线。
+    const left = Math.max(margin, Math.min(anchor.left, window.innerWidth - width - margin))
+    const below = anchor.bottom + margin
+    const spaceBelow = window.innerHeight - below - margin
+    const spaceAbove = anchor.top - margin * 2
+    // 下方放得下就放下方；实在放不下才换到空间更大的那一侧，
+    // 避免菜单在视口中段突然跳到顶部盖住工具栏。
+    let top = spaceBelow >= height ? below : anchor.top - height - margin
+    if (spaceBelow < height && spaceBelow >= spaceAbove) top = below
+    if (top < margin) top = margin
+    if (top + height > window.innerHeight - margin) {
+      top = Math.max(margin, window.innerHeight - height - margin)
+    }
     setPlacement({ left: Math.round(left), top: Math.round(top) })
     const timer = window.setTimeout(() => {
       const preferred = initialKind
@@ -2382,6 +2443,7 @@ export default function LadderCanvas({
   onStartDrag,
   onRenameRung,
   onInsertAt,
+  onArmInsert,
   onOpenBranchAt,
   onMergeBranchAt,
   onPasteAt,
@@ -2391,10 +2453,15 @@ export default function LadderCanvas({
   onNotice,
   insertTarget = null,
   insertTargetLabel = '',
+  mergeArmed = null,
+  onMergeArmedChange,
 }: LadderCanvasProps) {
   const [dragSource, setDragSource] = useState<string | null>(null)
   const [slotMenu, setSlotMenu] = useState<SlotMenuRequest | null>(null)
-  const [mergeArmed, setMergeArmed] = useState<{ rungId: string; parallelPath: number[] } | null>(null)
+  const setMergeArmed = useCallback<Dispatch<SetStateAction<MergeArmed | null>>>(
+    (next) => onMergeArmedChange?.(next),
+    [onMergeArmedChange],
+  )
   const [pendingFocus, setPendingFocus] = useState<SlotRef | null>(null)
   const [focusOpenBranch, setFocusOpenBranch] = useState(false)
   const [lastKind, setLastKind] = useState<ContactKind>('NO')
@@ -2506,7 +2573,7 @@ export default function LadderCanvas({
     }
     window.addEventListener('keydown', onKeyDown, true)
     return () => window.removeEventListener('keydown', onKeyDown, true)
-  }, [mergeArmed, onNotice])
+  }, [mergeArmed, onNotice, setMergeArmed])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -2562,6 +2629,7 @@ export default function LadderCanvas({
     onMoveNode,
     onOpenSlotMenu: (request) => {
       setMergeArmed(null)
+      onArmInsert?.({ rungId: request.rungId, chain: [...request.chain], index: request.index })
       setSlotMenu(request)
     },
     onMergeSlotClick: (_slot, closeIndex) => {

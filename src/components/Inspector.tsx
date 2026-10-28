@@ -645,6 +645,7 @@ export default function Inspector({
       </div>
       <div
         className="inspector-tabs"
+        data-tab={tab}
         role="tablist"
         aria-label="属性与变量"
         onKeyDown={(event) => {

@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
-import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
+import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { PROFILES } from '../engine/profiles'
 import type { ProfileId } from '../engine/types'
 import { FIELD_LIMITS } from '../lib/limits'
+import { THEME_PRESETS, type ThemePreference } from '../lib/theme'
 import {
   ChevronDownIcon,
   FolderIcon,
@@ -48,6 +49,8 @@ export interface WorkspaceTopBarProps {
   onNewProject: () => void
   onGuide: () => void
   onAbout: () => void
+  theme: ThemePreference
+  onTheme: (theme: ThemePreference) => void
 }
 
 export default function WorkspaceTopBar({
@@ -75,6 +78,8 @@ export default function WorkspaceTopBar({
   onNewProject,
   onGuide,
   onAbout,
+  theme,
+  onTheme,
 }: WorkspaceTopBarProps) {
   const [menuOpen, setMenuOpen] = useState(false)
   const [fileMenuOpen, setFileMenuOpen] = useState(false)
@@ -175,6 +180,8 @@ export default function WorkspaceTopBar({
   }, [fileMenuKind, fileMenuOpen])
 
   const handleMenuKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    // 颜色选择器自己要吃掉方向键，别被菜单的焦点漫游抢走。
+    if (document.activeElement instanceof HTMLInputElement) return
     if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return
     const items = menuItems()
     if (items.length === 0) return
@@ -543,6 +550,84 @@ export default function WorkspaceTopBar({
                       {item.shortName}
                     </button>
                   ))}
+                </div>
+              </div>
+
+              <div className="wb-menu-group" role="group" aria-label="外观">
+                <span className="wb-menu-label">外观</span>
+                <div className="wb-theme-grid" role="radiogroup" aria-label="配色主题">
+                  {THEME_PRESETS.map((preset) => (
+                    <button
+                      type="button"
+                      role="menuitemradio"
+                      key={preset.id}
+                      aria-checked={theme.preset === preset.id}
+                      className="wb-theme-option"
+                      title={preset.note}
+                      onClick={() => onTheme({
+                        preset: preset.id,
+                        accent: preset.swatch,
+                        ground: preset.tokens.ground,
+                      })}
+                    >
+                      <span
+                        className="wb-theme-swatch"
+                        aria-hidden="true"
+                        style={{
+                          '--swatch': preset.swatch,
+                          '--swatch-bg': preset.tokens.ground,
+                        } as CSSProperties}
+                      />
+                      <span>{preset.name}</span>
+                    </button>
+                  ))}
+                  <button
+                    type="button"
+                    role="menuitemradio"
+                    aria-checked={theme.preset === 'custom'}
+                    className="wb-theme-option is-custom"
+                    title="用取色器调出任意主色与背景"
+                    onClick={() => onTheme({ ...theme, preset: 'custom' })}
+                  >
+                    <span
+                      className="wb-theme-swatch"
+                      aria-hidden="true"
+                      style={{
+                        '--swatch': theme.accent,
+                        '--swatch-bg': theme.ground,
+                      } as CSSProperties}
+                    />
+                    <span>自定义</span>
+                  </button>
+                </div>
+                <div className="wb-theme-custom">
+                  <span className="wb-theme-custom-label">调色</span>
+                  <label className="wb-theme-color" title="自定义主色，立即预览">
+                    <input
+                      type="color"
+                      value={theme.accent}
+                      aria-label="自定义主色"
+                      onChange={(event) => onTheme({
+                        ...theme,
+                        preset: 'custom',
+                        accent: event.target.value,
+                      })}
+                    />
+                    <span>主色</span>
+                  </label>
+                  <label className="wb-theme-color" title="自定义背景色，自动压成浅色">
+                    <input
+                      type="color"
+                      value={theme.ground}
+                      aria-label="自定义背景色"
+                      onChange={(event) => onTheme({
+                        ...theme,
+                        preset: 'custom',
+                        ground: event.target.value,
+                      })}
+                    />
+                    <span>背景</span>
+                  </label>
                 </div>
               </div>
 

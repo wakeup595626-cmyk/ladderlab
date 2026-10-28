@@ -829,6 +829,51 @@ export function hasOpenBranch(nodes: LadderNode[]): boolean {
     && (node.open === true || node.branches.some((branch) => hasOpenBranch(branch))))
 }
 
+/** 找到第一条还没闭合的并联分支，返回它在梯形图中的节点路径。 */
+export function findOpenBranchPath(
+  nodes: LadderNode[],
+  prefix: number[] = [],
+): number[] | null {
+  for (let index = 0; index < nodes.length; index += 1) {
+    const node = nodes[index]
+    if (node.type !== 'parallel') continue
+    if (node.open === true) return [...prefix, index]
+    for (let branch = 0; branch < node.branches.length; branch += 1) {
+      const found = findOpenBranchPath(node.branches[branch], [...prefix, index, branch])
+      if (found) return found
+    }
+  }
+  return null
+}
+
+/**
+ * 找到包含游标所在链、且层级最深的一条未闭合分支。
+ * 嵌套分支时「合并」必须闭合离游标最近的一层：若直接取第一条，
+ * 会先关掉外层并把游标甩出子树，用户得再点一次才能闭合内层。
+ */
+export function findOpenBranchPathForChain(
+  nodes: LadderNode[],
+  chain: number[],
+  prefix: number[] = [],
+): number[] | null {
+  let best: number[] | null = null
+  for (let index = 0; index < nodes.length; index += 1) {
+    const node = nodes[index]
+    if (node.type !== 'parallel') continue
+    const path = [...prefix, index]
+    const contains = chain.length > path.length
+      && path.every((value, offset) => chain[offset] === value)
+    if (node.open === true && contains && (!best || path.length > best.length)) {
+      best = path
+    }
+    for (let branch = 0; branch < node.branches.length; branch += 1) {
+      const found = findOpenBranchPathForChain(node.branches[branch], chain, [...path, branch])
+      if (found && (!best || found.length > best.length)) best = found
+    }
+  }
+  return best
+}
+
 /**
  * 博途式「打开分支」：在插入点把当前线路向下分叉。
  * 原有的后续元件留在主线（branch 0），下方新增一条带常开触点的草稿支路；

@@ -1538,6 +1538,19 @@ const mobileEditor = await evaluate(`({
     const rect = panel.getBoundingClientRect()
     return rect.left >= 0 && rect.right <= innerWidth + 1 && rect.bottom <= innerHeight + 1
   })(),
+  rect: (() => {
+    const panel = document.querySelector('.qe-panel')
+    if (!panel) return null
+    const rect = panel.getBoundingClientRect()
+    return {
+      left: Math.round(rect.left * 10) / 10,
+      right: Math.round(rect.right * 10) / 10,
+      top: Math.round(rect.top * 10) / 10,
+      bottom: Math.round(rect.bottom * 10) / 10,
+      innerWidth,
+      innerHeight,
+    }
+  })(),
 })`)
 check('mobile/node-opens-sheet', mobileEditor.open && mobileEditor.dialog === 'dialog', mobileEditor)
 check('mobile/only-one-modal-layer', mobileEditor.modals === 1 && !mobileEditor.propertiesOpen, mobileEditor)
@@ -1561,6 +1574,7 @@ const mobilePanel = await evaluate(`(() => {
   const panel = document.querySelector('.wb-context-panel')
   const node = document.querySelector('.ll-node.is-selected, .ll-output.is-selected')
   if (!panel || !node) return { panel: !!panel, node: !!node }
+  const pane = document.querySelector('.wb-program-pane')
   const panelRect = panel.getBoundingClientRect()
   const nodeRect = node.getBoundingClientRect()
   return {
@@ -1569,6 +1583,9 @@ const mobilePanel = await evaluate(`(() => {
     panelTop: Math.round(panelRect.top),
     nodeTop: Math.round(nodeRect.top),
     nodeBottom: Math.round(nodeRect.bottom),
+    paneScrollTop: Math.round(pane?.scrollTop ?? -1),
+    paneScrollHeight: pane?.scrollHeight ?? -1,
+    paneClientHeight: pane?.clientHeight ?? -1,
     visible: nodeRect.top >= 0 && nodeRect.bottom <= panelRect.top + 1,
   }
 })()`)

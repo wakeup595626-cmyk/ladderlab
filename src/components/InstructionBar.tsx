@@ -1,4 +1,4 @@
-import { useCallback, useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { getProfile } from '../engine/profiles'
 import type { ContactKind, OutputKind, ProfileId, Rung } from '../engine/types'
 import type { DragPayload } from '../lib/dragTypes'
@@ -8,7 +8,13 @@ import {
   favoriteInstructionId,
 } from '../lib/instructionFavorites'
 import { favoriteTargetSegmentLabel, type FavoriteInsertTarget } from '../lib/insertTarget'
-import { ChevronRightIcon, GripIcon, StarFilledIcon } from './Icons'
+import {
+  BranchIcon,
+  ChevronRightIcon,
+  GripIcon,
+  MergeIcon,
+  StarFilledIcon,
+} from './Icons'
 import InsertTargetControl from './InsertTargetControl'
 import {
   isInstructionAllowed,
@@ -27,6 +33,8 @@ interface InstructionBarProps {
   onToggleFavorite: (family: InstructionFamily, kind: ContactKind | OutputKind) => void
   onInsertContact: (kind: ContactKind) => void
   onChangeOutput: (kind: OutputKind) => void
+  onOpenBranch: () => void
+  onMergeBranch: () => void
   onStartDrag: (event: React.PointerEvent<HTMLElement>, payload: DragPayload, label: string) => void
   onOpenAll: () => void
 }
@@ -64,6 +72,8 @@ export default function InstructionBar({
   onToggleFavorite,
   onInsertContact,
   onChangeOutput,
+  onOpenBranch,
+  onMergeBranch,
   onStartDrag,
   onOpenAll,
 }: InstructionBarProps) {
@@ -72,7 +82,10 @@ export default function InstructionBar({
   const starRefs = useRef(new Map<string, HTMLButtonElement>())
   const pendingStarFocusRef = useRef<{ targetId: string | null } | null>(null)
   const listRef = useRef<HTMLDivElement | null>(null)
+  const toolsRef = useRef<HTMLDivElement | null>(null)
+  const flashTimerRef = useRef<number | null>(null)
   const [listScroll, setListScroll] = useState({ canScroll: false, atEnd: false })
+  const [flash, setFlash] = useState<{ id: string; nonce: number } | null>(null)
   const favorites = favoriteIds
     .map((id) => favoriteInstructionEntry(id))
     .filter((entry) => entry !== undefined)
@@ -82,6 +95,39 @@ export default function InstructionBar({
     : '目标程序段'
 
   const favoriteKey = favoriteIds.join('|')
+
+  useEffect(() => () => {
+    if (flashTimerRef.current !== null) window.clearTimeout(flashTimerRef.current)
+  }, [])
+
+  const pulseFavorite = useCallback((id: string) => {
+    setFlash((current) => ({ id, nonce: (current?.nonce ?? 0) + 1 }))
+    if (flashTimerRef.current !== null) window.clearTimeout(flashTimerRef.current)
+    flashTimerRef.current = window.setTimeout(() => setFlash(null), 320)
+  }, [])
+
+  const hideFollow = useCallback(() => {
+    const host = toolsRef.current
+    if (host) delete host.dataset.follow
+  }, [])
+
+  const moveFollow = useCallback((target: Element | null) => {
+    const host = toolsRef.current
+    if (!host || target === null) return
+    if (window.matchMedia?.('(pointer: coarse)').matches) return
+    const button = target.closest<HTMLElement>(
+      '.wb-instruction-button:not(:disabled), .wb-construct-button',
+    )
+    if (!button || !host.contains(button)) {
+      hideFollow()
+      return
+    }
+    const hostBox = host.getBoundingClientRect()
+    const box = button.getBoundingClientRect()
+    host.style.setProperty('--follow-x', `${box.left - hostBox.left}px`)
+    host.style.setProperty('--follow-w', `${box.width}px`)
+    host.dataset.follow = 'on'
+  }, [hideFollow])
 
   // 收藏超过一屏时，用箭头把“还能往右看”明说出来，避免半个卡片被当成排版错误。
   useLayoutEffect(() => {
@@ -148,7 +194,22 @@ export default function InstructionBar({
         <h2 id="wb-instruction-title">收藏指令</h2>
       </div>
 
-      <div className="wb-instruction-tools" role="toolbar" aria-label="收藏的梯形图指令">
+      <div
+        className="wb-instruction-tools"
+        ref={toolsRef}
+        role="toolbar"
+        aria-label="收藏的梯形图指令"
+        onPointerOver={(event) => {
+          if (event.pointerType === 'touch') return
+          moveFollow(event.target as Element)
+        }}
+        onPointerLeave={hideFollow}
+        onFocusCapture={(event) => moveFollow(event.target as Element)}
+        onBlurCapture={(event) => {
+          if (!event.currentTarget.contains(event.relatedTarget as Node | null)) hideFollow()
+        }}
+      >
+        <span className="wb-instruction-follow" aria-hidden="true" />
         <InsertTargetControl
           rungs={rungs}
           insertTarget={insertTarget}
@@ -156,7 +217,27 @@ export default function InstructionBar({
           onSelectRung={onSelectRung}
           onLocate={onLocateTarget}
         />
-        <div className="wb-instruction-list" ref={listRef}>
+        <div className="wb-instruction-construct" role="group" aria-label="线路构造">
+          <button
+            type="button"
+            className="wb-construct-button"
+            onClick={onOpenBranch}
+            title="在当前插入点向下打开并联分支"
+          >
+            <BranchIcon size={15} />
+            <span>分支</span>
+          </button>
+          <button
+            type="button"
+            className="wb-construct-button"
+            onClick={onMergeBranch}
+            title="闭合当前程序段里未闭合的并联分支"
+          >
+            <MergeIcon size={15} />
+            <span>合并</span>
+          </button>
+        </div>
+        <div className="wb-instruction-list" ref={listRef} onScroll={hideFollow}>
           {favorites.length === 0 && (
             <div className="wb-instruction-empty">
               <span>还没有收藏指令</span>
@@ -192,6 +273,7 @@ export default function InstructionBar({
                     if (!allowed) return
                     if (entry.family === 'contact') onInsertContact(entry.kind as ContactKind)
                     else onChangeOutput(entry.kind as OutputKind)
+                    pulseFavorite(id)
                   }}
                   onPointerDown={(event) => {
                     if (!allowed) return
@@ -207,6 +289,9 @@ export default function InstructionBar({
                     <span className="wb-instruction-replace">替换</span>
                   )}
                   <GripIcon size={14} className="wb-drag-mark" />
+                  {flash?.id === id && (
+                    <span className="wb-instruction-press" key={flash.nonce} aria-hidden="true" />
+                  )}
                 </button>
                 <button
                   type="button"

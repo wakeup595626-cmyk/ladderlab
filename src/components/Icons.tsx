@@ -283,6 +283,17 @@ export function BranchIcon(props: IconProps) {
   )
 }
 
+/** 合并分支：两条支路重新汇回主线。 */
+export function MergeIcon(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <path d="M3 6h8a4 4 0 0 1 4 4v2" />
+      <path d="M3 18h8a4 4 0 0 0 4-4v-2" />
+      <path d="M15 12h6" />
+    </IconBase>
+  )
+}
+
 export function GripIcon(props: IconProps) {
   return (
     <IconBase {...props}>

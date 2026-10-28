@@ -1747,14 +1747,15 @@
 }
 
 .live-value.on {
-  border-color: var(--accent);
-  background: var(--accent);
-  color: var(--surface);
+  border-color: color-mix(in srgb, var(--accent) 34%, var(--border));
+  background: var(--accent-wash);
+  color: var(--accent-ink);
+  box-shadow: inset 2px 0 0 var(--accent);
 }
 
 .live-value.on:hover {
-  border-color: var(--accent-ink);
-  background: var(--accent-ink);
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent-wash) 82%, var(--accent));
 }
 
 .runtime-input {
@@ -3109,7 +3110,7 @@ body[data-drag-kind] * {
     position: relative;
     z-index: 70;
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     border-top: 1px solid var(--border);
     background: var(--surface);
     padding-bottom: env(safe-area-inset-bottom);
