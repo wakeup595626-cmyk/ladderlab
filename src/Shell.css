@@ -2216,7 +2216,7 @@ body[data-drag-kind] {
   }
 
   .wb-shell .wb-instruction-star {
-    width: 30px;
+    width: 44px;
   }
 
   .wb-shell .project-sidebar .instruction-star {
@@ -2531,7 +2531,8 @@ body[data-drag-kind] {
 }
 
 .wb-instruction-tools {
-  height: 38px;
+  /* 46px box minus the 1px top/bottom border leaves a true 44px control row. */
+  height: 46px;
   gap: 0;
   overflow: hidden;
   border: 1px solid var(--control);
@@ -2563,7 +2564,7 @@ body[data-drag-kind] {
 
 .wb-instruction-star {
   display: grid;
-  width: 25px;
+  width: 44px;
   height: 100%;
   flex: 0 0 auto;
   place-items: center;
@@ -3175,13 +3176,13 @@ body[data-drag-kind] {
   }
 
   .wb-topbar-actions {
-    height: 40px;
+    height: 46px;
   }
 
   .wb-project-button,
   .wb-shell .wb-more .icon-button {
-    width: 40px;
-    height: 40px;
+    width: 44px;
+    height: 44px;
   }
 
   .wb-project-button {
@@ -3190,7 +3191,7 @@ body[data-drag-kind] {
 
   .wb-shell .wb-run-toggle {
     min-width: 66px;
-    height: 40px;
+    height: 44px;
     padding-inline: 9px;
   }
 
@@ -3511,7 +3512,6 @@ body[data-drag-kind] {
 
 /* The insert menu and row menu float; give them just enough separation to
    escape the paper without the generic "AI card" shadow. */
-.wb-shell .ll-insert-panel,
 .wb-shell .ll-rung-menu-panel {
   border-radius: 2px;
   box-shadow: 0 4px 12px rgba(21, 24, 22, 0.12);
@@ -4088,7 +4088,7 @@ body[data-drag-kind] {
   }
 
   .wb-save-button {
-    width: 40px;
+    width: 44px;
     padding: 0;
   }
 
@@ -4110,12 +4110,12 @@ body[data-drag-kind] {
 
 @media (max-width: 720px) {
   .wb-file-compact {
-    height: 40px;
+    height: 44px;
     padding-inline: 9px;
   }
 
   .wb-save-button {
-    height: 40px;
+    height: 44px;
   }
 }
 
@@ -4148,7 +4148,7 @@ body[data-drag-kind] {
 
 .wb-instruction-scroll {
   display: grid;
-  width: 26px;
+  width: 44px;
   height: 100%;
   flex: 0 0 auto;
   place-items: center;
@@ -4176,7 +4176,7 @@ body[data-drag-kind] {
 
 @media (pointer: coarse) {
   .wb-instruction-scroll {
-    width: 34px;
+    width: 44px;
   }
 }
 

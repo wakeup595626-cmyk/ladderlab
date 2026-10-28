@@ -26,10 +26,8 @@ import {
 } from '../lib/parallelLayout'
 import { hasOpenBranch } from '../state/programOps'
 import {
-  ChevronDownIcon,
   GripIcon,
   MoreIcon,
-  PlusIcon,
   TrashIcon,
 } from './Icons'
 import './LadderCanvas.css'
@@ -70,8 +68,6 @@ export interface LadderCanvasProps {
   clipboardCount?: number
   /** Ctrl/Shift 点击元件时扩展选择。 */
   onExtendSelect?: (rungId: string, path: number[], mode: 'toggle' | 'range') => void
-  /** 程序段工具栏的“插入触点”：插在已选元件之后，没有选中就接到段尾。 */
-  onInsertContact?: (rungId: string, kind: ContactKind) => void
   /** 删除当前选中的元件；删除整个程序段仍走 onDeleteRung。 */
   onDeleteNode?: (rungId: string, path: number[]) => void
   /** 只读提示：菜单项不可用、快捷键缺少选中项时告诉用户下一步。 */
@@ -582,6 +578,51 @@ function renderSlot(
     }
     openMenu(element)
   }
+  const activateNearestPlus = (event: ReactMouseEvent<SVGGElement>) => {
+    // The 44px touch target intentionally overlaps tightly packed slots. Resolve
+    // a real pointer click to the nearest visible + so the enlarged target can
+    // never open the neighbouring insertion point by accident.
+    if (event.detail === 0) {
+      activatePlus(event.currentTarget)
+      return
+    }
+    const rungElement = event.currentTarget.closest('.ll-rung')
+    if (!rungElement) {
+      activatePlus(event.currentTarget)
+      return
+    }
+    const chainKey = chain.join('.')
+    let nearest: SVGGElement | null = null
+    let nearestDistance = Number.POSITIVE_INFINITY
+    for (const slot of rungElement.querySelectorAll<SVGGElement>('.ll-slot')) {
+      if (slot.dataset.chain !== chainKey) continue
+      const plus = slot.querySelector<SVGGElement>('.ll-slot-plus')
+      if (!plus) continue
+      const style = window.getComputedStyle(plus)
+      if (style.pointerEvents === 'none' || Number(style.opacity) === 0) continue
+      const hit = plus.querySelector<SVGGraphicsElement>('.ll-slot-plus-hit') ?? plus
+      const bounds = hit.getBoundingClientRect()
+      const distance = Math.hypot(
+        event.clientX - (bounds.left + bounds.width / 2),
+        event.clientY - (bounds.top + bounds.height / 2),
+      )
+      if (distance >= nearestDistance) continue
+      nearestDistance = distance
+      nearest = plus
+    }
+    if (nearest && nearest !== event.currentTarget) {
+      // Re-enter through the nearest +'s own handler so its slot closure opens
+      // the menu with the correct chain, index and anchor rectangle.
+      nearest.dispatchEvent(new MouseEvent('click', {
+        bubbles: true,
+        cancelable: true,
+        clientX: event.clientX,
+        clientY: event.clientY,
+      }))
+      return
+    }
+    activatePlus(event.currentTarget)
+  }
   const plusLabel = mergeCandidate
     ? '在这里闭合并联分支'
     : favoriteTarget
@@ -657,7 +698,7 @@ function renderSlot(
         aria-label={plusLabel}
         onClick={(event) => {
           event.stopPropagation()
-          activatePlus(event.currentTarget)
+          activateNearestPlus(event)
         }}
         onKeyDown={(event) => {
           if (
@@ -673,9 +714,10 @@ function renderSlot(
         }}
       >
         <title>{plusLabel}</title>
-        {/* 相邻插入点（尤其是并联支路起点与主线插入点）只隔十几像素。
-            命中区必须比视觉加号略宽但不能互相盖住，否则点主线会误开支路菜单。 */}
-        <rect className="ll-slot-plus-hit" x="-12" y="-22" width="24" height="44" />
+        {/* 44×44 is the product's touch floor. The transparent target
+            overlaps tightly packed slots by design; activateNearestPlus
+            resolves a pointer click to the closest visible +. */}
+        <rect className="ll-slot-plus-hit" x="-22" y="-22" width="44" height="44" />
         {mergeCandidate ? (
           <>
             <rect x="-10" y="-10" width="20" height="20" rx="4" />
@@ -1641,99 +1683,7 @@ interface RungSectionProps {
   onDeleteRung: (rungId: string) => void
   onMoveRung: (rungId: string, delta: -1 | 1) => void
   onRenameRung?: (rungId: string, label: string) => void
-  onInsertContact?: (rungId: string, kind: ContactKind) => void
   onDeleteNode?: (rungId: string, path: number[]) => void
-}
-
-/** 程序段的“插入触点”下拉菜单，行为与右上角的程序段菜单保持一致。 */
-function RungInsertMenu({
-  rungId,
-  segmentLabel,
-  onInsert,
-}: {
-  rungId: string
-  segmentLabel: string
-  onInsert: (rungId: string, kind: ContactKind) => void
-}) {
-  const detailsRef = useRef<HTMLDetailsElement>(null)
-
-  function close(restoreFocus: boolean) {
-    const details = detailsRef.current
-    if (!details) return
-    details.removeAttribute('open')
-    if (restoreFocus) details.querySelector<HTMLElement>('summary')?.focus()
-  }
-
-  return (
-    <details
-      className="ll-insert"
-      data-no-rung-drag
-      ref={detailsRef}
-      onToggle={(event) => {
-        if (!event.currentTarget.open) return
-        window.requestAnimationFrame(() => {
-          detailsRef.current
-            ?.querySelector<HTMLButtonElement>('.ll-insert-panel button')
-            ?.focus()
-        })
-      }}
-      onBlur={(event) => {
-        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
-          event.currentTarget.removeAttribute('open')
-        }
-      }}
-      onKeyDown={(event) => {
-        if (event.key === 'Escape') {
-          event.preventDefault()
-          close(true)
-          return
-        }
-        if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return
-        const items = Array.from(
-          detailsRef.current?.querySelectorAll<HTMLButtonElement>('.ll-insert-panel button') ?? [],
-        )
-        if (items.length === 0) return
-        event.preventDefault()
-        if (!detailsRef.current?.open) {
-          detailsRef.current?.setAttribute('open', '')
-          window.requestAnimationFrame(() => items[0]?.focus())
-          return
-        }
-        const index = items.indexOf(document.activeElement as HTMLButtonElement)
-        let next = 0
-        if (event.key === 'ArrowDown') next = index < 0 ? 0 : (index + 1) % items.length
-        else if (event.key === 'ArrowUp') next = index < 0 ? items.length - 1 : (index - 1 + items.length) % items.length
-        else if (event.key === 'End') next = items.length - 1
-        items[next]?.focus()
-      }}
-    >
-      <summary
-        className="ll-tool ll-insert-trigger"
-        aria-label={segmentLabel + '：插入触点'}
-        title={'在' + segmentLabel + '插入触点'}
-      >
-        <PlusIcon size={15} />
-        <span className="ll-tool-label">插入触点</span>
-        <ChevronDownIcon size={13} />
-      </summary>
-      <div className="ll-insert-panel" role="menu" aria-label="插入触点">
-        {CONTACT_CHOICES.map((choice) => (
-          <button
-            key={choice.kind}
-            type="button"
-            role="menuitem"
-            onClick={() => {
-              close(true)
-              onInsert(rungId, choice.kind)
-            }}
-          >
-            <span className="ll-insert-symbol" aria-hidden="true">{choice.symbol}</span>
-            <span>{choice.label}</span>
-          </button>
-        ))}
-      </div>
-    </details>
-  )
 }
 
 /** 两段之间的插入线：只有拖动整段时才接收指针，平时不改变布局也不挡点击。 */
@@ -1777,7 +1727,6 @@ function RungSection({
   onDeleteRung,
   onMoveRung,
   onRenameRung,
-  onInsertContact,
   onDeleteNode,
 }: RungSectionProps) {
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -1979,13 +1928,6 @@ function RungSection({
         </div>
         <div className="ll-rung-header-right">
           <div className="ll-rung-tools" role="toolbar" aria-label={segmentLabel + ' 编辑工具'}>
-            {onInsertContact && (
-              <RungInsertMenu
-                rungId={rung.id}
-                segmentLabel={segmentLabel}
-                onInsert={onInsertContact}
-              />
-            )}
             <button
               type="button"
               className="ll-tool ll-tool-remove"
@@ -2422,7 +2364,6 @@ export default function LadderCanvas({
   onPasteAt,
   clipboardCount = 0,
   onExtendSelect,
-  onInsertContact,
   onDeleteNode,
   onNotice,
   insertTarget = null,
@@ -2638,6 +2579,10 @@ export default function LadderCanvas({
             + '[role="menu"], [data-node-id], [data-output-id], .ll-slot, '
             + '.ll-merge-chip, .ll-node-grip, [data-drag-handle], .ll-rung-header',
           )) return
+          // 点图纸留白时一并释放元件/并联组上的键盘焦点，避免选中已清除后
+          // :focus-visible 仍把虚线选择框留在屏幕上。
+          const active = document.activeElement
+          if (active instanceof HTMLElement && active.closest('.ll-canvas')) active.blur()
           setMergeArmed(null)
           setSlotMenu(null)
           onSelect(null)
@@ -2673,7 +2618,6 @@ export default function LadderCanvas({
                   onDeleteRung={onDeleteRung}
                   onMoveRung={onMoveRung}
                   onRenameRung={onRenameRung}
-                  onInsertContact={onInsertContact}
                   onDeleteNode={onDeleteNode}
                 />
               </Fragment>
@@ -2763,8 +2707,10 @@ function renderParallel(
     size.height - 2,
     Math.max(...placements.map((placement) => placement.y + placement.height)) + 8,
   )
-  const frameLeft = Math.max(0, Math.min(splitX, ownSplitX) - 8)
-  const frameRight = Math.min(size.width, Math.max(collectX, splitX, ownSplitX) + 8)
+  // Inherited split/join columns can fall outside this group's local bounds.
+  // Keep the frame on the real wires instead of clipping it to 0..size.width.
+  const frameLeft = Math.min(splitX, ownSplitX) - 8
+  const frameRight = Math.max(collectX, splitX, ownSplitX) + 8
   const outputPower = context.runtime.nodePower[node.id] === true
   const selection = { rungId: context.rungId, path }
   const draftPlacements = placements.slice(1)

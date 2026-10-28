@@ -45,6 +45,7 @@ import type {
 } from './engine/types'
 import type { DragPayload, DropTarget } from './lib/dragTypes'
 import { downloadDataUrl, downloadText, parseProgramText, serializeProgram } from './lib/io'
+import { saveLatestNamedProject } from './lib/latestProjectSave'
 import {
   deleteSavedProject as removeSavedProjectFromLibrary,
   isProjectLibraryStorageKey,
@@ -456,6 +457,7 @@ export default function App() {
   )
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>('properties')
   const [quickEdit, setQuickEdit] = useState<QuickEditState | null>(null)
+  const quickEditReturnFocusRef = useRef<Selection | null>(null)
   // 复制的是“快照”而不是选区引用：复制后再改原元件，粘贴出来的仍是复制时的样子。
   const [clipboard, setClipboard] = useState<DocumentClipboard | null>(null)
   const [mobilePanel, setMobilePanel] = useState<MobilePanel>('none')
@@ -783,6 +785,109 @@ export default function App() {
     })
   }, [])
 
+  const persistLatestNamedProject = useCallback((name: string) => {
+    const active = activeSavedProjectRef.current
+    return saveLatestNamedProject({
+      context: active
+        ? { id: active.id, savedAt: active.savedAt }
+        : { id: null, savedAt: null },
+      name,
+      getLatestProgram: () => latestProgramRef.current,
+      getCurrentContext: () => {
+        const current = activeSavedProjectRef.current
+        return current
+          ? { id: current.id, savedAt: current.savedAt }
+          : { id: null, savedAt: null }
+      },
+      save: saveNamedProject,
+      onSaved: (project) => {
+        setActiveProject(project.id, project.savedAt, project.program)
+        // 每次写入都同步草稿信封里的版本号，storage 事件才能及时传播版本变化。
+        saveLatestProgram()
+      },
+    })
+  }, [saveLatestProgram, setActiveProject])
+
+  const commitSavedProjectName = useCallback((project: SavedProject) => {
+    const current = latestProgramRef.current
+    if (project.program.name === current.name) return
+    const next = setProjectName(current, project.program.name)
+    latestProgramRef.current = next
+    commit(next)
+  }, [commit])
+
+  const finishNamedSave = useCallback((project: SavedProject, closeDialog: boolean) => {
+    commitSavedProjectName(project)
+    saveLatestProgram()
+    const settlement = settleSupersededConflict(project.savedAt)
+    if (closeDialog) {
+      setSaveDialogOpen(false)
+      setSaveDialogError(null)
+    }
+    if (settlement === 'cleared') {
+      notify(`已保存「${project.name}」到本机项目库；另一标签页的版本已存为恢复副本`)
+    } else if (settlement === 'archive-failed') {
+      notify(`已保存「${project.name}」，但另一标签页版本暂存失败；请先导出本页工程备份`, { tone: 'error' })
+    } else {
+      notify(`已保存「${project.name}」到本机项目库`)
+    }
+  }, [commitSavedProjectName, notify, saveLatestProgram, settleSupersededConflict])
+
+  const handleSaveNamedProject = useCallback(async (name: string): Promise<SaveNamedProjectResult> => {
+    const outcome = await persistLatestNamedProject(name)
+    if (outcome.projects) setSavedProjects(outcome.projects)
+    if (outcome.status === 'saved') {
+      finishNamedSave(outcome.project, true)
+      return {
+        ok: true,
+        project: outcome.project,
+        projects: outcome.projects,
+      }
+    }
+    if (outcome.status === 'context-changed') {
+      if (outcome.project && outcome.projects) {
+        notify(`已保存「${outcome.project.name}」，当前编辑区已切换到其他项目，因此未改动当前内容`)
+        return { ok: true, project: outcome.project, projects: outcome.projects }
+      }
+      const failure: SaveNamedProjectResult = {
+        ok: false,
+        reason: 'storage',
+        message: '保存过程中当前项目已切换，本次内容没有写回编辑区。请重新保存。',
+      }
+      setSaveDialogError(failure.message)
+      return failure
+    }
+
+    saveLatestProgram()
+    if (outcome.project) settleSupersededConflict(outcome.project.savedAt)
+    if (outcome.status === 'unsettled') {
+      const failure: SaveNamedProjectResult = {
+        ok: false,
+        reason: 'storage',
+        message: '保存期间仍有编辑，最后一版尚未提交。请再次保存。',
+      }
+      setSaveDialogError(failure.message)
+      return failure
+    }
+
+    const failure = outcome.failure
+    if (failure.reason === 'corrupt-library') setProjectLibraryError(failure.message)
+    if (failure.reason === 'save-conflict') {
+      const latest = readProjectLibrary()
+      if (latest.status === 'ok') setSavedProjects(latest.projects)
+    }
+    if (failure.reason === 'missing-project') {
+      setActiveProject(null)
+      const latest = readProjectLibrary()
+      if (latest.status === 'ok') setSavedProjects(latest.projects)
+    }
+    const message = outcome.project
+      ? `${failure.message} 最新编辑已留在本机草稿，但尚未写入项目库。`
+      : failure.message
+    setSaveDialogError(message)
+    return { ...failure, message }
+  }, [finishNamedSave, notify, persistLatestNamedProject, saveLatestProgram, setActiveProject, settleSupersededConflict])
+
   const requestSaveProject = useCallback(async () => {
     setSaveDialogError(null)
     if (projectLibraryError || !activeSavedProjectId) {
@@ -790,115 +895,63 @@ export default function App() {
       return
     }
     if (manualSavePendingRef.current) return
-
-    const context = activeSavedProjectRef.current
-    if (!context) {
-      setSaveDialogOpen(true)
-      return
-    }
-    const snapshot = latestProgramRef.current
     manualSavePendingRef.current = true
     try {
-      const result = await saveNamedProject({
-        id: context.id,
-        name: snapshot.name,
-        program: snapshot,
-        expectedSavedAt: context.savedAt,
-      })
-      if (result.ok) {
-        setSavedProjects(result.projects)
-        const current = activeSavedProjectRef.current
-        if (!current || current.id !== context.id || current.savedAt !== context.savedAt) {
-          notify(`已保存「${result.project.name}」，当前编辑区已切换到其他项目，因此未改动当前内容`)
-          return
-        }
-        setActiveProject(result.project.id, result.project.savedAt, result.project.program)
-        if (result.project.program.name !== latestProgramRef.current.name) {
-          commit(setProjectName(latestProgramRef.current, result.project.program.name))
-        }
-        // 项目库版本已经前进，但内容可能在上一次自动保存后没有变化。
-        // 仍需用新版本号重写本标签页草稿，storage 事件才能让其他标签页
-        // 及时跟随或进入冲突；否则对方下一次保存才会撞上过期版本。
-        saveLatestProgram()
-        const settlement = settleSupersededConflict(result.project.savedAt)
-        if (settlement === 'cleared') {
-          notify(`已保存「${result.project.name}」到本机项目库；另一标签页的版本已存为恢复副本`)
-        } else if (settlement === 'archive-failed') {
-          notify(`已保存「${result.project.name}」，但另一标签页版本暂存失败；请先导出本页工程备份`, { tone: 'error' })
-        } else {
-          notify(`已保存「${result.project.name}」到本机项目库`)
-        }
+      const outcome = await persistLatestNamedProject(latestProgramRef.current.name)
+      if (outcome.projects) setSavedProjects(outcome.projects)
+      if (outcome.status === 'saved') {
+        finishNamedSave(outcome.project, false)
+        return
+      }
+      if (outcome.status === 'context-changed') {
+        notify(
+          outcome.project
+            ? `已保存「${outcome.project.name}」，当前编辑区已切换到其他项目，因此未改动当前内容`
+            : '保存过程中当前项目已切换，本次内容没有写回编辑区。',
+          { tone: outcome.project ? 'info' : 'error' },
+        )
         return
       }
 
-      if (result.reason === 'corrupt-library') setProjectLibraryError(result.message)
-      if (result.reason === 'save-conflict') {
+      saveLatestProgram()
+      if (outcome.project) settleSupersededConflict(outcome.project.savedAt)
+      if (outcome.status === 'unsettled') {
+        const message = '保存期间仍有编辑，最后一版尚未提交。请再次保存。'
+        setSaveDialogError(message)
+        setSaveDialogOpen(true)
+        notify(message, { tone: 'error' })
+        return
+      }
+
+      const failure = outcome.failure
+      if (failure.reason === 'corrupt-library') setProjectLibraryError(failure.message)
+      if (failure.reason === 'save-conflict') {
         const latest = readProjectLibrary()
         if (latest.status === 'ok') setSavedProjects(latest.projects)
       }
-      const current = activeSavedProjectRef.current
-      if (!current || current.id !== context.id || current.savedAt !== context.savedAt) {
-        notify(result.message, { tone: 'error' })
-        return
-      }
-      if (result.reason === 'missing-project') {
+      if (failure.reason === 'missing-project') {
         setActiveProject(null)
         const latest = readProjectLibrary()
         if (latest.status === 'ok') setSavedProjects(latest.projects)
       }
-      setSaveDialogError(result.message)
+      const message = outcome.project
+        ? `${failure.message} 最新编辑已留在本机草稿，但尚未写入项目库。`
+        : failure.message
+      setSaveDialogError(message)
       setSaveDialogOpen(true)
     } finally {
       manualSavePendingRef.current = false
     }
-  }, [activeSavedProjectId, commit, notify, projectLibraryError, saveLatestProgram, setActiveProject, settleSupersededConflict])
-
-  const handleSaveNamedProject = useCallback(async (name: string): Promise<SaveNamedProjectResult> => {
-    const context = activeSavedProjectRef.current
-    const snapshot = latestProgramRef.current
-    const result = await saveNamedProject({
-      id: context?.id ?? null,
-      name,
-      program: snapshot,
-      expectedSavedAt: context?.savedAt ?? null,
-    })
-    const current = activeSavedProjectRef.current
-    const sameContext = context
-      ? current?.id === context.id && current.savedAt === context.savedAt
-      : current === null
-    if (!result.ok) {
-      if (result.reason === 'corrupt-library') setProjectLibraryError(result.message)
-      if (result.reason === 'save-conflict') {
-        const latest = readProjectLibrary()
-        if (latest.status === 'ok') setSavedProjects(latest.projects)
-      }
-      if (sameContext && result.reason === 'missing-project') setActiveProject(null)
-      return result
-    }
-
-    setSavedProjects(result.projects)
-    if (!sameContext) {
-      notify(`已保存「${result.project.name}」，当前编辑区已切换到其他项目，因此未改动当前内容`)
-      return result
-    }
-    setActiveProject(result.project.id, result.project.savedAt, result.project.program)
-    if (result.project.program.name !== latestProgramRef.current.name) {
-      commit(setProjectName(latestProgramRef.current, result.project.program.name))
-    }
-    // 保存命名项目后同步刷新草稿信封中的版本基准，见 requestSaveProject 中的说明。
-    saveLatestProgram()
-    const settlement = settleSupersededConflict(result.project.savedAt)
-    setSaveDialogOpen(false)
-    setSaveDialogError(null)
-    if (settlement === 'cleared') {
-      notify(`已保存「${result.project.name}」到本机项目库；另一标签页的版本已存为恢复副本`)
-    } else if (settlement === 'archive-failed') {
-      notify(`已保存「${result.project.name}」，但另一标签页版本暂存失败；请先导出本页工程备份`, { tone: 'error' })
-    } else {
-      notify(`已保存「${result.project.name}」到本机项目库`)
-    }
-    return result
-  }, [commit, notify, saveLatestProgram, setActiveProject, settleSupersededConflict])
+  }, [
+    activeSavedProjectId,
+    finishNamedSave,
+    notify,
+    persistLatestNamedProject,
+    projectLibraryError,
+    saveLatestProgram,
+    setActiveProject,
+    settleSupersededConflict,
+  ])
 
   // Toast 上的「撤销」只能把这一段插回当前工程，不能回滚成删除那一刻的整份快照，
   // 否则用户在删除后继续做的编辑会被悄悄丢掉。
@@ -1708,32 +1761,6 @@ export default function App() {
     notify(instructionLabel('contact', kind) + '已插入，可直接输入变量或 M4.0 地址')
   }, [commit, notify, program])
 
-  // 段头工具栏没有拖放落点时，按博途的习惯接到已选元件后面；
-  // 没有选中元件就接到这一段的末尾，始终留在用户当前正在编辑的程序段里。
-  const insertContactInRung = useCallback((rungId: string, kind: ContactKind) => {
-    const rung = program.rungs.find((item) => item.id === rungId)
-    if (!rung) return
-    const localSelection = selection?.rungId === rungId ? selection : null
-    const wire = localSelection?.wire ?? null
-    const path = localSelection?.path ?? null
-    // 线段也是有效的插入位置：先点线，再从段头插入，触点就落在所点的那一段导线上。
-    const chain = wire ? wire.chain : path ? path.slice(0, -1) : []
-    const index = wire ? wire.index : path ? path[path.length - 1] + 1 : rung.nodes.length
-    const made = makeContactNode(program, kind)
-    const next = insertNodeAt(made.program, rungId, { chain, index }, made.node)
-    if (next === made.program) {
-      notify('这个位置放不下新的触点')
-      return
-    }
-    commit(next)
-    const selectionForNode = { rungId, path: findNodePath(next, rungId, made.node.id) }
-    setSelection(selectionForNode)
-    setFavoriteTargetRungId(rungId)
-    setQuickEdit({ selection: selectionForNode, anchor: null, autoFocus: true })
-    setMobilePanel('none')
-    notify(`${instructionLabel('contact', kind)}已插入，可直接输入变量或地址`)
-  }, [commit, notify, program, selection])
-
   // 博途式「打开分支」：在元件之后的插入点向下分叉，后续元件留在主线，
   // 新支路先作为草稿存在；画完后点支路右侧「合并分支」，再点主线的 + 闭合。
   const openBranchAt = useCallback((slot: SlotRef) => {
@@ -1805,7 +1832,7 @@ export default function App() {
       if (event.ctrlKey || event.metaKey || event.altKey) return
       const target = event.target
       if (target instanceof Element && target.closest(
-        'input, textarea, select, [contenteditable="true"], .ll-insert-panel, .ll-rung-menu-panel',
+        'input, textarea, select, [contenteditable="true"], .ll-rung-menu-panel',
       )) return
       if (document.querySelector('[role="dialog"][aria-modal="true"]')) return
       if (!selection) return
@@ -2448,6 +2475,39 @@ export default function App() {
           && (quickSelection.path === null || getNodeAtPath(program, rung.id, quickSelection.path) !== null),
       ),
   )
+  /**
+   * 桌面参数框是悬浮组而非模态框，关闭时浏览器不会自动把焦点还给元件。
+   * 按当前选区找回画布里的可聚焦节点，保证 Esc / 关闭按钮之后键盘操作连续。
+   */
+  const focusQuickEditAnchor = useCallback((targetSelection: Selection) => {
+    const pane = editorRef.current
+    if (!pane) return
+    const rung = Array.from(pane.querySelectorAll<HTMLElement>('.ll-rung'))
+      .find((item) => item.dataset.rungId === targetSelection.rungId)
+    if (!rung) return
+
+    let target: SVGGraphicsElement | null = null
+    if (targetSelection.path) {
+      const path = targetSelection.path.join('.')
+      const node = Array.from(
+        rung.querySelectorAll<SVGGraphicsElement>('[data-node-id][data-node-path]'),
+      ).find((item) => item.dataset.nodePath === path)
+      if (node) {
+        target = node.matches('[role="button"][tabindex="0"]')
+          ? node
+          : node.querySelector<SVGGraphicsElement>('[role="button"][tabindex="0"]')
+      }
+    }
+    target ??= rung.querySelector<SVGGraphicsElement>('[data-output-id][tabindex="0"]')
+    if (target?.isConnected) target.focus({ preventScroll: true })
+  }, [])
+  useLayoutEffect(() => {
+    if (quickEdit) return
+    const targetSelection = quickEditReturnFocusRef.current
+    if (!targetSelection) return
+    quickEditReturnFocusRef.current = null
+    focusQuickEditAnchor(targetSelection)
+  }, [focusQuickEditAnchor, quickEdit])
   const inspectorVisible = inspectorOpen || mobilePanel === 'properties'
   const inspectorDocked = useMediaQuery('(min-width: 1025px)')
   const inspectorMaxWidth = maxInspectorWidth(viewportWidth)
@@ -2638,6 +2698,8 @@ export default function App() {
       + '[role="listbox"], [role="complementary"], [role="separator"], '
       + '.wb-context-resizer, .wb-program-resizer',
     )) return
+    const active = document.activeElement
+    if (active instanceof HTMLElement && active !== document.body) active.blur()
     setSelection(null)
     setQuickEdit(null)
     dismissFavoriteTargetPreview()
@@ -2988,7 +3050,6 @@ export default function App() {
                 onMoveNode={(rungId, path, delta) => commit(moveNodeBy(program, rungId, path, delta))}
                 onAddRung={insertRung}
                 onInsertAt={insertAt}
-                onInsertContact={insertContactInRung}
                 onDeleteNode={removeNode}
                 onOpenBranchAt={openBranchAt}
                 onMergeBranchAt={mergeBranch}
@@ -3292,7 +3353,10 @@ export default function App() {
           anchor={quickEdit.anchor}
           autoFocus={quickEdit.autoFocus}
           onProgram={commit}
-          onClose={() => setQuickEdit(null)}
+          onClose={() => {
+            quickEditReturnFocusRef.current = quickEdit.selection
+            setQuickEdit(null)
+          }}
           onNotify={notify}
           onDeleteNode={() => {
             if (quickEdit.selection.path) {

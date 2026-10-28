@@ -790,8 +790,8 @@ export default function QuickEditor({
                 <NumberField
                   label={output.kind === 'MOVE' ? '常量' : output.kind === 'SHL' || output.kind === 'ROL' ? '移位次数' : '操作数'}
                   value={output.value ?? 0}
-                  min={0}
-                  max={output.kind === 'SHL' ? 15 : output.kind === 'ROL' ? 7 : undefined}
+                  min={output.kind === 'SHL' || output.kind === 'ROL' ? 0 : -32768}
+                  max={output.kind === 'SHL' ? 15 : output.kind === 'ROL' ? 7 : 32767}
                   onCommit={(value) => onProgram(updateOutput(program, rung.id, { value }))}
                 />
                 <label className="qe-field">

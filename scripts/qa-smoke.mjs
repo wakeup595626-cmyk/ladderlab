@@ -247,6 +247,8 @@ await evaluate(`document.querySelector('.wb-more .icon-button')?.click()`)
 await sleep(200)
 
 // 点 StartBtn 切换仿真输入，电机应自锁。
+// 新开的验收标签页可能在后台被浏览器节流 requestAnimationFrame；先激活页签，再轮询结果。
+await send('Page.bringToFront')
 const started = await evaluate(`(() => {
   const card = [...document.querySelectorAll('.tag-card')]
     .find((item) => item.querySelector('input')?.value === 'StartBtn')
@@ -255,13 +257,18 @@ const started = await evaluate(`(() => {
   button.click(); return true
 })()`)
 check('desktop/start-button-reachable', started)
-await sleep(600)
-const motor = await evaluate(`({
-  value: [...document.querySelectorAll('.tag-card')]
-    .find((card) => card.querySelector('input')?.value === 'Motor')
-    ?.querySelector('.live-value')?.textContent?.trim(),
-  powered: document.querySelectorAll('.ll-rung.is-powered').length,
-})`)
+let motor = { value: null, powered: 0 }
+const motorDeadline = Date.now() + 2500
+while (Date.now() < motorDeadline) {
+  motor = await evaluate(`({
+    value: [...document.querySelectorAll('.tag-card')]
+      .find((card) => card.querySelector('input')?.value === 'Motor')
+      ?.querySelector('.live-value')?.textContent?.trim(),
+    powered: document.querySelectorAll('.ll-rung.is-powered').length,
+  })`)
+  if (motor.value === 'TRUE' && motor.powered >= 1) break
+  await sleep(100)
+}
 check('desktop/motor-latches', motor.value === 'TRUE' && motor.powered >= 1, motor)
 await screenshot('docs/qa/desktop-1440.png')
 await screenshot('docs/screenshot.png')
@@ -518,7 +525,7 @@ check(
   { menuBeforeEscape, menuAfterEscape },
 )
 
-// 选线路后再用段头「插入触点」，触点必须落在这条线上，而不是跑到段尾。
+// 先选线路，再点同一位置的 +：触点必须准确落在这条线上，而不是跑到段尾。
 await evaluate(`(() => {
   const rung = document.querySelectorAll('.ll-rung')[0]
   const slot = rung?.querySelector('.ll-slot[data-chain=""][data-index="1"]')
@@ -532,9 +539,14 @@ const wireForToolbar = await evaluate(`({
   selectedWires: document.querySelectorAll('.ll-slot.is-wire-selected').length,
   chip: document.querySelector('.ll-selected-chip')?.textContent?.trim() ?? null,
 })`)
-await evaluate(`document.querySelector('.ll-insert-trigger')?.click()`)
+await evaluate(`(() => {
+  const plus = document.querySelector('.ll-slot[data-chain=""][data-index="1"] .ll-slot-plus')
+  if (!plus) return false
+  plus.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+  return true
+})()`)
 await sleep(280)
-await evaluate(`[...document.querySelectorAll('.ll-insert-panel button')]
+await evaluate(`[...document.querySelectorAll('.ll-slot-menu-item')]
   .find((button) => button.textContent?.includes('常开触点'))?.click()`)
 await sleep(420)
 const wireInserted = await evaluate(`(() => {
@@ -547,7 +559,7 @@ const wireInserted = await evaluate(`(() => {
   }
 })()`)
 check(
-  'desktop/toolbar-insert-uses-selected-wire',
+  'desktop/inline-insert-uses-selected-wire',
   wireForToolbar.selectedWires === 1
     && String(wireForToolbar.chip ?? '').includes('已选线路')
     && wireInserted.selectedIndex === 1
@@ -557,7 +569,7 @@ check(
 await evaluate(`document.querySelector('.wb-history-actions [aria-label="撤销上一步"]')?.click()`)
 await sleep(420)
 
-/* 程序段工具栏：插入与删除是常显按钮，不再只靠画布角上的小加号。 */
+/* 程序段工具栏只保留删除；插入统一走收藏栏、线路 + 和元件之间的 +。 */
 await pressEscape()
 await evaluate(`document.querySelectorAll('.ll-node[data-node-id]')[0]
   ?.dispatchEvent(new MouseEvent('click', { bubbles: true }))`)
@@ -566,13 +578,12 @@ await pressEscape()
 
 const rungTools = await evaluate(`(() => {
   const tools = document.querySelector('.ll-rung-tools')
-  const trigger = tools?.querySelector('.ll-insert-trigger')
   const remove = tools?.querySelector('.ll-tool-remove')
-  if (!tools || !trigger || !remove) return { present: false }
+  if (!tools || !remove) return { present: false }
   const rect = tools.getBoundingClientRect()
   return {
     present: true,
-    insertLabel: trigger.textContent?.trim() ?? '',
+    insertAbsent: !tools.querySelector('.ll-insert-trigger, .ll-insert'),
     removeLabel: remove.textContent?.trim() ?? '',
     removeEnabled: remove.disabled === false,
     removeTitle: remove.getAttribute('title'),
@@ -583,19 +594,24 @@ const rungTools = await evaluate(`(() => {
 check(
   'desktop/rung-toolbar-visible',
   rungTools.present
-    && rungTools.insertLabel.includes('插入触点')
+    && rungTools.insertAbsent
     && rungTools.removeLabel.includes('删除元件'),
   rungTools,
 )
 check('desktop/rung-toolbar-in-viewport', rungTools.inViewport)
 check('desktop/delete-enabled-on-selection', rungTools.removeEnabled, rungTools.removeTitle)
 
-// 打开「插入触点」菜单，选常开触点：元件 +1，新元件保持选中，删除键随之可用。
+// 线路上的 + 打开插入菜单，选常开触点：元件 +1，新元件保持选中，删除键随之可用。
 const beforeBarInsert = await evaluate(`document.querySelectorAll('.ll-node[data-node-id]').length`)
-await evaluate(`document.querySelector('.ll-insert-trigger')?.click()`)
+await evaluate(`(() => {
+  const plus = document.querySelector('.ll-slot[data-chain=""][data-index="1"] .ll-slot-plus')
+  if (!plus) return false
+  plus.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+  return true
+})()`)
 await sleep(320)
 const insertMenu = await evaluate(`(() => {
-  const panel = document.querySelector('.ll-insert-panel')
+  const panel = document.querySelector('.ll-slot-menu')
   if (!panel) return { open: false }
   const rect = panel.getBoundingClientRect()
   return {
@@ -607,17 +623,17 @@ const insertMenu = await evaluate(`(() => {
 check('desktop/insert-menu-opens', insertMenu.open && insertMenu.items.length >= 5, insertMenu.items)
 check('desktop/insert-menu-fits', insertMenu.fits)
 
-await evaluate(`[...document.querySelectorAll('.ll-insert-panel button')]
+await evaluate(`[...document.querySelectorAll('.ll-slot-menu-item')]
   .find((button) => button.textContent?.includes('常开触点'))?.click()`)
 await sleep(420)
 const barInserted = await evaluate(`({
   count: document.querySelectorAll('.ll-node[data-node-id]').length,
   selected: document.querySelectorAll('.ll-node.is-selected').length,
   deleteEnabled: document.querySelector('.ll-tool-remove')?.disabled === false,
-  menuOpen: document.querySelector('details.ll-insert')?.open === true,
+  menuOpen: !!document.querySelector('.ll-slot-menu'),
 })`)
 check(
-  'desktop/toolbar-insert-adds-contact',
+  'desktop/inline-insert-adds-contact',
   barInserted.count === beforeBarInsert + 1,
   { beforeBarInsert, ...barInserted },
 )
@@ -1280,13 +1296,13 @@ const mobileTools = await evaluate(`(() => {
   const rect = tools.getBoundingClientRect()
   return {
     present: true,
-    insert: !!tools.querySelector('.ll-insert-trigger'),
+    insertAbsent: !tools.querySelector('.ll-insert-trigger, .ll-insert'),
     remove: !!tools.querySelector('.ll-tool-remove'),
     inViewport: rect.left >= -1 && rect.right <= innerWidth + 1,
     height: Math.round(rect.height),
   }
 })()`)
-check('mobile/rung-toolbar-visible', mobileTools.present && mobileTools.insert && mobileTools.remove, mobileTools)
+check('mobile/rung-toolbar-visible', mobileTools.present && mobileTools.insertAbsent && mobileTools.remove, mobileTools)
 check('mobile/rung-toolbar-in-viewport', mobileTools.inViewport)
 
 // 窄屏段头工具很多，程序段菜单必须固定在可见位置，不能被挤出屏幕。

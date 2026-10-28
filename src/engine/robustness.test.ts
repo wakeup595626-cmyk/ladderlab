@@ -296,6 +296,48 @@ describe('输出驱动与定时器边界', () => {
     }
   })
 
+  it('整数指令缺少变量和常量时明确报错，不再静默使用 0 或 1', () => {
+    for (const kind of ['MOVE', 'ADD', 'SUB', 'SHL', 'ROL'] as const) {
+      const source = program(
+        [tag('Pulse'), tag('Value', 'INT', 0)],
+        [rung(
+          'op',
+          [contact('c1', 'NO', 'Pulse')],
+          output(kind, 'Value', { id: `op-${kind}` }),
+        )],
+      )
+      const messages = compile(source).errors.map((item) => item.message).join('\n')
+      expect(messages, kind).toContain(kind + ' 需要操作数变量或常量')
+    }
+  })
+
+  it('变量模式不使用残留常量，也不误报移位次数越界', () => {
+    const source = program(
+      [
+        tag('Pulse'),
+        tag('Value', 'INT', 1),
+        tag('Count', 'INT', 2),
+        tag('Source', 'INT', 3),
+      ],
+      [
+        rung(
+          'shl',
+          [contact('c1', 'NO', 'Pulse')],
+          output('SHL', 'Value', { id: 'shl-out', valueTag: 'Count', value: 99 }),
+        ),
+        rung(
+          'move',
+          [contact('c2', 'NO', 'Pulse')],
+          output('MOVE', 'Value', { id: 'move-out', sourceTag: 'Source', value: 99999 }),
+        ),
+      ],
+    )
+
+    const result = compile(source)
+    expect(result.errors).toEqual([])
+    expect(result.warnings.some((item) => item.message.includes('取模'))).toBe(true)
+  })
+
   it('算术指令的源变量类型必须是 INT', () => {
     const source = program(
       [tag('Pulse'), tag('Value', 'INT', 0), tag('Flag')],

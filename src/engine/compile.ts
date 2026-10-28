@@ -625,15 +625,20 @@ function checkOutput(ctx: Ctx, rungId: string, output: Program['rungs'][number][
     const usesConstant = output.kind === 'MOVE'
       ? !normalizeReference(output.sourceTag ?? '')
       : !normalizeReference(output.valueTag ?? '')
+    if (usesConstant && output.value === undefined) {
+      error(ctx, `${output.kind} 需要操作数变量或常量。`, rungId, output.id)
+    }
     if (usesConstant && output.value !== undefined) {
       if (!Number.isInteger(output.value) || output.value < -32768 || output.value > 32767) {
         error(ctx, `${output.kind} 的整数常量必须是 -32768～32767 之间的整数。`, rungId, output.id)
       }
     }
-    if (output.kind === 'SHL' && output.value !== undefined && (output.value < 0 || output.value > 15)) {
+    if (usesConstant && output.kind === 'SHL' && output.value !== undefined
+      && (output.value < 0 || output.value > 15)) {
       error(ctx, 'SHL 的移位次数必须在 0～15 之间。', rungId, output.id)
     }
-    if (output.kind === 'ROL' && output.value !== undefined && (output.value < 0 || output.value > 7)) {
+    if (usesConstant && output.kind === 'ROL' && output.value !== undefined
+      && (output.value < 0 || output.value > 7)) {
       error(ctx, 'ROL 的移位次数必须在 0～7 之间。', rungId, output.id)
     }
     if ((output.kind === 'SHL' || output.kind === 'ROL') && normalizeReference(output.valueTag ?? '')) {

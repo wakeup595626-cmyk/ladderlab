@@ -39,8 +39,7 @@
   background: var(--surface);
 }
 
-.ll-rung:has(.ll-rung-menu[open]),
-.ll-rung:has(.ll-insert[open]) {
+.ll-rung:has(.ll-rung-menu[open]) {
   z-index: 2;
 }
 
@@ -250,83 +249,6 @@
 .ll-tool:hover:not(:disabled) {
   border-color: var(--control);
   background: var(--active);
-}
-
-.ll-insert {
-  position: relative;
-  display: flex;
-}
-
-.ll-insert-trigger {
-  border-color: var(--control);
-  color: var(--accent-ink);
-  list-style: none;
-}
-
-.ll-insert-trigger::-webkit-details-marker {
-  display: none;
-}
-
-.ll-insert-trigger svg:first-child {
-  color: var(--accent);
-}
-
-.ll-insert-trigger svg:last-child {
-  color: var(--faint);
-}
-
-.ll-insert[open] > .ll-insert-trigger {
-  border-color: var(--accent);
-  background: var(--accent-wash);
-}
-
-.ll-insert-panel {
-  position: absolute;
-  z-index: 8;
-  top: calc(100% + 5px);
-  left: 0;
-  display: grid;
-  width: 176px;
-  gap: 1px;
-  padding: 4px;
-  border: 1px solid var(--control);
-  border-radius: 4px;
-  background: var(--surface);
-  box-shadow: 0 12px 26px rgba(21, 24, 22, 0.14);
-}
-
-.ll-insert-panel button {
-  display: flex;
-  min-height: 34px;
-  align-items: center;
-  gap: 9px;
-  padding: 4px 8px;
-  border: 0;
-  border-radius: 3px;
-  background: transparent;
-  color: var(--text);
-  font: 450 12.5px/1.3 var(--sans);
-  text-align: left;
-  cursor: pointer;
-}
-
-.ll-insert-panel button:hover,
-.ll-insert-panel button:focus-visible {
-  background: var(--accent-wash);
-  color: var(--accent-ink);
-  outline: none;
-}
-
-.ll-insert-symbol {
-  width: 52px;
-  flex: 0 0 52px;
-  color: var(--muted);
-  font: 500 12px/1 var(--mono);
-  letter-spacing: -0.02em;
-}
-
-.ll-insert-panel button:hover .ll-insert-symbol {
-  color: var(--accent);
 }
 
 .ll-tool-remove {
@@ -838,13 +760,23 @@
   stroke-width: 4;
 }
 
-/* 并联组外圈只帮助快速识别支路边界，保持细虚线并让指针事件穿透。 */
+/*
+ * 外圈只在选中或键盘聚焦时提示支路边界。并联选择层覆盖整组，
+ * 若绑定 :hover，鼠标停在组内空白处时虚线框会在取消选中后重新出现。
+ */
 .ll-branch-frame {
   fill: none;
   stroke: var(--control);
   stroke-width: 1.25;
   stroke-dasharray: 5 4;
+  opacity: 0;
   pointer-events: none;
+  transition: opacity var(--dur-press) var(--ease-out);
+}
+
+.ll-parallel.is-selected > .ll-branch-frame,
+.ll-parallel > .ll-parallel-select:focus-visible ~ .ll-branch-frame {
+  opacity: 1;
 }
 
 .ll-branch-stub path {
@@ -1133,13 +1065,9 @@
   }
 
   .ll-tool {
-    height: 40px;
+    height: 44px;
     padding: 0 10px;
     font-size: 12.5px;
-  }
-
-  .ll-insert-panel button {
-    min-height: 44px;
   }
 
   .ll-add-rung,
@@ -1318,7 +1246,7 @@
 }
 
 /* 插入点 + 的真实点击区：视觉上仍是 16px 的小圆点，命中层由 JSX 给出 44×44。
-   这里绝不能改写 x / y / width / height —— 一改就把触控热区压回 28×44。
+   这里绝不能改写 x / y / width / height —— 一改就会破坏触控热区。
    命中层必须透明，否则会画出一个多余的白框。 */
 .ll-slot-plus {
   cursor: pointer;
@@ -1412,10 +1340,10 @@
   }
 }
 
-/* 320px 级别触屏上，10px 的槽位与 24px 的 + 命中区会完全重叠。
-   默认让导线接收第一次点击，选中后再显影该槽的 +；键盘焦点、拖放、
-   合并候选仍沿用各自的高优先级显影规则。 */
-@media (pointer: coarse) and (max-width: 420px) {
+/* 触屏上 44px 的 + 命中区会覆盖整段 44px 导线。默认让导线接收第一次
+   点击，选中后再显影该槽的 44px + 目标；键盘焦点、拖放、合并候选仍沿用
+   各自的高优先级显影规则。 */
+@media (pointer: coarse) {
   /* 触摸会短暂触发 :hover / :focus-within。这里必须用同等或更高优先级
      压住显影规则，否则按下导线中央时，隐藏的 + 会在 touchend 前抢走
      合成 click，用户看到的是“选线却弹出插入菜单”。 */

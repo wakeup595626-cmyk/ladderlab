@@ -167,6 +167,12 @@ export async function connectToPage(target, {
     throw error
   }
 
+  // Headless Chromium pauses requestAnimationFrame and CSS transitions in a
+  // background tab. Every acceptance run owns this tab, so bring it forward
+  // once before any measurement; otherwise visual-state checks can report
+  // stale computed styles that a real user never sees.
+  await send('Page.bringToFront').catch(() => {})
+
   function send(method, params = {}, timeout = requestTimeoutMs) {
     if (closedError) return Promise.reject(closedError)
     lastRequest = method
@@ -205,11 +211,42 @@ export async function closeQaPage(cdpUrl, targetId, timeoutMs = DEFAULT_CONNECT_
     const response = await fetch(`${cdpUrl}/json`, { signal: AbortSignal.timeout(timeoutMs) })
     if (!response.ok) return false
     const pages = (await response.json()).filter((target) => target.type === 'page')
-    if (!pages.some((target) => target.id === targetId) || pages.length <= 1) return false
+    const target = pages.find((page) => page.id === targetId)
+    if (!target || pages.length <= 1) return false
+
+    // Headless Chromium can reject a direct close while the app is still on an
+    // editable page. Navigating away first lets pagehide run and makes cleanup
+    // deterministic without touching any tab this run did not create.
+    try {
+      const connection = await connectToPage(target, {
+        timeoutMs,
+        requestTimeoutMs: Math.min(timeoutMs, 3000),
+      })
+      try {
+        await connection.send('Page.navigate', { url: 'about:blank' }, Math.min(timeoutMs, 3000))
+      } finally {
+        connection.close()
+      }
+      await new Promise((resolve) => setTimeout(resolve, 100))
+    } catch {
+      // A tab can disappear between enumeration and navigation; the close
+      // request below still gives the browser the final say.
+    }
+
     const closed = await fetch(`${cdpUrl}/json/close/${encodeURIComponent(targetId)}`, {
       signal: AbortSignal.timeout(timeoutMs),
     })
-    return closed.ok
+    if (!closed.ok) return false
+
+    const deadline = Date.now() + Math.min(timeoutMs, 2000)
+    while (Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      const after = await fetch(`${cdpUrl}/json`, { signal: AbortSignal.timeout(timeoutMs) })
+      if (!after.ok) return false
+      const remaining = await after.json()
+      if (!remaining.some((page) => page.id === targetId)) return true
+    }
+    return false
   } catch {
     return false
   }
