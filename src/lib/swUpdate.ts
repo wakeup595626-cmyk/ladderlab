@@ -13,6 +13,10 @@ export interface ControllerChangeSource {
   removeEventListener(type: 'controllerchange', listener: () => void): void
 }
 
+export interface MonitorControllerSource extends ControllerChangeSource {
+  readonly controller: ServiceWorker | null
+}
+
 export interface SwUpdateInfo {
   version: string
   revision: number
@@ -27,7 +31,7 @@ interface VersionMessage {
 
 interface MonitorOptions {
   registration: ServiceWorkerRegistration
-  container: ServiceWorkerContainer
+  container: ServiceWorkerContainer & MonitorControllerSource
   onUpdate?: (update: SwUpdateInfo) => void
 }
 
@@ -223,6 +227,10 @@ export function monitorServiceWorkerUpdates({
   onUpdate,
 }: MonitorOptions): () => void {
   let hadController = container.controller !== null
+  // clients.claim() 会让首次安装的 worker 在激活时接管一个原本不受控的页面。
+  // 它仍然是首装，不是“新版本待刷新”；记住这个 worker，避免 activated
+  // 状态在 controllerchange 之后再次触发提示。
+  let initialClaimWorker: ServiceWorker | null = hadController ? container.controller : null
   const trackedWorkers = new Set<ServiceWorker>()
   const announcedWorkers = new WeakSet<ServiceWorker>()
   const versionRequests = new WeakMap<ServiceWorker, Promise<string | null>>()
@@ -243,6 +251,7 @@ export function monitorServiceWorkerUpdates({
   const inspectWorker = async (worker: ServiceWorker): Promise<void> => {
     if (
       disposed ||
+      worker === initialClaimWorker ||
       announcedWorkers.has(worker) ||
       !isUpdateReadyToPrompt(worker.state, hadController)
     ) {
@@ -275,6 +284,7 @@ export function monitorServiceWorkerUpdates({
   const rememberController = (): void => {
     // The first install controls the page without a banner. Remember that so a
     // later update in this same long-lived tab is still treated as an update.
+    if (!hadController && container.controller) initialClaimWorker = container.controller
     hadController = true
   }
 

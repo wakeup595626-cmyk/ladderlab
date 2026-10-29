@@ -80,7 +80,7 @@ describe('通用网络图：同条件布尔输出合并', () => {
     expect(chart.edges[1].label).toContain('一号灯（Q0.0）')
   })
 
-  it('进入条件不同时不合并', () => {
+  it('两个网络互不引用时并入同一步，条件写在各自动作上', () => {
     const chart = chartOf(program('条件不同', [
       tag('Start1', '%I0.0', '启动一'),
       tag('Start2', '%I0.1', '启动二'),
@@ -91,16 +91,16 @@ describe('通用网络图：同条件布尔输出合并', () => {
       rung('n2', '二号灯', [contact('n2-a', 'Start2')], 'Lamp2'),
     ]))
 
-    expect(chart.steps.map((step) => step.number)).toEqual(['0', '1', '2'])
-    expect(chart.steps[1].actions).toHaveLength(1)
-    expect(chart.steps[2].actions).toHaveLength(1)
-    expect(chart.edges.map((edge) => edge.label)).toEqual([
-      '启动一（I0.0）',
-      '启动二（I0.1）',
+    // 两条网络各自独立，梯形图里可以同时得电；串成两步会凭空规定先后顺序。
+    expect(chart.steps.map((step) => step.number)).toEqual(['1'])
+    expect(chart.steps[0].actions).toEqual([
+      { text: '启动一 时 一号灯', detail: 'Q0.0=1' },
+      { text: '启动二 时 二号灯', detail: 'Q0.1=1' },
     ])
+    expect(chart.edges).toHaveLength(0)
   })
 
-  it('同条件但含定时器的网络不合并', () => {
+  it('含定时器的独立网络同样并入同一步，定时动作不会丢', () => {
     const chart = chartOf(program('含定时器', [
       tag('Start', '%I0.0', '启动'),
       tag('T1', '%M10.0', '一号定时'),
@@ -114,13 +114,15 @@ describe('通用网络图：同条件布尔输出合并', () => {
       rung('n2', '输出灯', [contact('n2-a', 'Start')], 'Lamp'),
     ]))
 
-    expect(chart.steps.map((step) => step.number)).toEqual(['0', '1', '2'])
-    expect(chart.steps[1].actions).toHaveLength(1)
-    expect(chart.steps[1].actions[0].text).toContain('计时')
-    expect(chart.steps[2].actions).toEqual([{ text: '输出灯', detail: 'Q0.0=1' }])
+    expect(chart.steps.map((step) => step.number)).toEqual(['1'])
+    expect(chart.steps[0].actions.map((action) => action.text)).toEqual([
+      '启动 时 一号定时 计时 2s',
+      '启动 时 输出灯',
+    ])
+    expect(chart.edges).toHaveLength(0)
   })
 
-  it('多处合并后步骤号连续且默认标题用组内第一条网络序号', () => {
+  it('六条互不引用的网络合成一步，六个动作按网络顺序排列', () => {
     const chart = chartOf(program('连续编号', [
       ...startTags,
       tag('Q1', '%Q0.0', '输出一'),
@@ -139,19 +141,17 @@ describe('通用网络图：同条件布尔输出合并', () => {
     ]))
 
     expect(chart.source).toBe('network')
-    expect(chart.steps.map((step) => step.number)).toEqual(['0', '1', '2', '3', '4'])
-    expect(chart.steps.map((step) => step.title)).toEqual([
-      '', '网络 1', '单独一路', '网络 4', '收尾',
+    expect(chart.steps.map((step) => step.number)).toEqual(['1'])
+    expect(chart.steps[0].title).toBe('')
+    expect(chart.steps[0].initial).toBe(true)
+    expect(chart.steps[0].actions.map((action) => action.text)).toEqual([
+      '启动 A 时 输出一',
+      '启动 A 时 输出二',
+      '启动 B 时 输出三',
+      '启动 C 时 输出四',
+      '启动 C 时 输出五',
+      '启动 D 时 输出六',
     ])
-    expect(chart.steps.map((step) => step.actions.length)).toEqual([0, 2, 1, 2, 1])
-    expect(chart.edges.map((edge) => edge.from)).toEqual([
-      '__initial', 'n1', 'n3', 'n4',
-    ])
-    expect(chart.edges.map((edge) => edge.label)).toEqual([
-      '启动 A（I0.0）',
-      '启动 B（I0.1）',
-      '启动 C（I0.2）',
-      '启动 D（I0.3）',
-    ])
+    expect(chart.edges).toHaveLength(0)
   })
 })

@@ -217,6 +217,9 @@ describe('service worker update detection', () => {
     worker.transitionTo('installed')
     uncontrolled.controller = worker as unknown as ServiceWorker
     uncontrolled.dispatchEvent(new Event('controllerchange'))
+    // clients.claim() 后浏览器还会发出 activated statechange。这次再检查时
+    // hadController 已经为 true，不能因此把同一个首装 worker 当成更新提示。
+    worker.transitionTo('activated')
 
     await new Promise((resolve) => setTimeout(resolve, 20))
     expect(onUpdate).not.toHaveBeenCalled()

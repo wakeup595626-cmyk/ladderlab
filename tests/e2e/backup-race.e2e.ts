@@ -68,6 +68,10 @@ async function exportBackup(page: Page, dialog: Locator): Promise<BackupDocument
   await dialog.getByRole('button', { name: /^导出整包备份/ }).click()
   const download = await downloadPromise
   expect(await download.failure()).toBeNull()
+  // 备份文件名和其他导出一致：本地时间 yyyy-MM-dd_HH-mm-ss，只含安全字符。
+  const name = download.suggestedFilename()
+  expect(name, '整包备份文件名应带本地时间戳：' + name)
+    .toMatch(/^梯形实验室-整包备份-\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}\.json$/)
   const path = await download.path()
   expect(path).not.toBeNull()
   return JSON.parse(await readFile(path!, 'utf8')) as BackupDocument

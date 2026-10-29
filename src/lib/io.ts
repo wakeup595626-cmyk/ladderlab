@@ -285,3 +285,13 @@ export function downloadDataUrl(filename: string, dataUrl: string) {
   anchor.click()
   anchor.remove()
 }
+
+/**
+ * 导出文件名用的本地时间戳：YYYY-MM-DD_HH-mm-ss。
+ * 必须走本地 getter —— toISOString() 是 UTC，上海凌晨会显示成前一天。
+ */
+export function downloadTimestamp(date = new Date()): string {
+  const pad = (value: number) => String(value).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+    + `_${pad(date.getHours())}-${pad(date.getMinutes())}-${pad(date.getSeconds())}`
+}

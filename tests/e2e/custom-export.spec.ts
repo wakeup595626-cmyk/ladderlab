@@ -44,9 +44,9 @@ export const BUILT_IN_LAB_TEXTS = [
 export interface SvgAudit {
   bytes: number
   rootTag: string
-  /** 根节点上的 role（下载后的静态图片允许是 img）。 */
+  /** 根节点上的 role；三种导出都必须为空。 */
   rootRole: string
-  /** 根节点后紧跟的 <title> 文本。 */
+  /** 根节点后紧跟的 <title> 文本；三种导出都必须为空。 */
   rootTitle: string
   width: string
   height: string
@@ -57,14 +57,6 @@ export interface SvgAudit {
   issues: string[]
 }
 
-export interface SvgAuditOptions {
-  /**
-   * 完整程序 / 纯梯形图导出的是给人看的静态图片，根节点保留 role="img" 和
-   * 根级 <title> 是合法无障碍标注；顺序功能图导出则必须两者都没有。
-   */
-  allowRootLabel?: boolean
-}
-
 function attribute(tag: string, name: string): string {
   return new RegExp(`${name}="([^"]*)"`).exec(tag)?.[1] ?? ''
 }
@@ -73,7 +65,7 @@ function attribute(tag: string, name: string): string {
  * 白盒审查一份导出的 SVG：单一根节点、纯矢量、无交互/无障碍残留、白底。
  * 返回结构化结果，由调用方决定哪些项目必须成立。
  */
-export function auditSvg(text: string, options: SvgAuditOptions = {}): SvgAudit {
+export function auditSvg(text: string): SvgAudit {
   const issues: string[] = []
   const bytes = new TextEncoder().encode(text).length
   const rootTag = /<svg\b[^>]*>/.exec(text)?.[0] ?? ''
@@ -92,16 +84,14 @@ export function auditSvg(text: string, options: SvgAuditOptions = {}): SvgAudit 
   const rootTitleMatch = /^\s*<title\b[^>]*>([\s\S]*?)<\/title>/.exec(bodyAfterRoot)
   const rootTitle = rootTitleMatch ? rootTitleMatch[1].replace(/<[^>]+>/g, '').trim() : ''
 
-  // 根节点自身属性与根级 <title> 单独判定，其余子树按「导出图不该出现交互
-  // 或无障碍残留」统一检查。
+  // 三种导出共用同一份根节点契约（与顺序功能图一致）：只声明画布尺寸，
+  // 不带 role，也不带根级 <title>。
+  if (rootRole) issues.push(`根节点不应带 role，实际是 ${rootRole}`)
+  if (rootTitleMatch) issues.push('根节点不应带根级 <title>')
+
+  // 根级 <title> 已经单独报过，子树检查只负责残留的嵌套 <title>。
   let subtree = rootTag ? text.replace(rootTag, '') : text
-  if (options.allowRootLabel) {
-    if (rootRole && rootRole !== 'img') issues.push(`根节点 role 应为 img，实际是 ${rootRole}`)
-    if (rootTitleMatch) subtree = subtree.replace(rootTitleMatch[0], '')
-  } else {
-    if (rootRole) issues.push(`顺序功能图根节点不应带 role，实际是 ${rootRole}`)
-    if (rootTitleMatch) issues.push('顺序功能图不应带根级 <title>')
-  }
+  if (rootTitleMatch) subtree = subtree.replace(rootTitleMatch[0], '')
 
   if (/\sclass="/.test(subtree)) issues.push('残留 class 属性')
   if (/\saria-[a-z]+="/.test(subtree)) issues.push('残留 aria-* 属性')
@@ -292,20 +282,24 @@ if (process.env.VITEST) {
     if (missingTexts(clean, ['Step9'])[0] !== 'Step9') throw new Error('missingTexts 漏报')
     if (builtInLeaks(clean).length !== 0) throw new Error('builtInLeaks 误报')
 
-    // 完整程序 / 纯梯形图允许根级 role=img + <title>，顺序功能图不允许。
+    // 三种导出共用同一份根节点契约：role 与根级 <title> 都必须被拒绝。
     const labeled = good
       .replace('<svg xmlns', '<svg role="img" xmlns')
       .replace('<rect x="0"', '<title>越级跳步验收工程</title><rect x="0"')
-    const allowed = auditSvg(labeled, { allowRootLabel: true })
-    if (allowed.issues.length !== 0) throw new Error(`根级标注被误判: ${allowed.issues.join('; ')}`)
-    if (allowed.rootRole !== 'img') throw new Error('没读出根节点 role')
-    if (allowed.rootTitle !== '越级跳步验收工程') throw new Error('没读出根级 <title>')
-    const sfcView = auditSvg(labeled).issues.join('|')
-    if (!sfcView.includes('不应带 role') || !sfcView.includes('不应带根级 <title>')) {
-      throw new Error(`顺序功能图没有拒绝根级标注: ${sfcView}`)
+    const rejected = auditSvg(labeled)
+    if (!rejected.issues.includes('根节点不应带 role，实际是 img')) {
+      throw new Error(`没有拒绝根节点 role: ${rejected.issues.join('; ')}`)
+    }
+    if (!rejected.issues.includes('根节点不应带根级 <title>')) {
+      throw new Error(`没有拒绝根级 <title>: ${rejected.issues.join('; ')}`)
+    }
+    if (rejected.rootRole !== 'img') throw new Error('没读出根节点 role')
+    if (rejected.rootTitle !== '越级跳步验收工程') throw new Error('没读出根级 <title>')
+    if (rejected.issues.length !== 2) {
+      throw new Error(`根级标注应只报 2 条 issue: ${rejected.issues.join('; ')}`)
     }
     const nestedTitle = labeled.replace('<text', '<g><title>x</title></g><text')
-    if (!auditSvg(nestedTitle, { allowRootLabel: true }).issues.includes('残留 <title> 元素')) {
+    if (!auditSvg(nestedTitle).issues.includes('残留 <title> 元素')) {
       throw new Error('子树里的 <title> 被放过')
     }
   })

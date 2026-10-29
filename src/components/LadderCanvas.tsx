@@ -2689,7 +2689,7 @@ export default function LadderCanvas({
               <RungSection
                 rung={rung}
                 index={index}
-                total={contentRungs(program).length}
+                total={contentIndexById.size}
                 segmentLabel={isBlankRung(rung)
                   ? '新程序段'
                   : '程序段 ' + (contentIndexById.get(rung.id) ?? 0)}
