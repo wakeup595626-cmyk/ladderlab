@@ -75,7 +75,15 @@ function freeAddress(program: Program, kind: TagKind): string {
   return ''
 }
 
-export function addTag(program: Program, kind: TagKind): Program {
+/**
+ * 新建变量。`auto` 表示“插入指令时顺手带出来的变量”，用户只要在变量表里改过它
+ * 就会失去这个标记，从此归用户所有、不再自动回收（见 pruneOrphanTags）。
+ */
+export function addTag(
+  program: Program,
+  kind: TagKind,
+  options: { auto?: boolean } = {},
+): Program {
   const tag: TagDef = {
     id: uid('tag'),
     name: nextTagName(program, kind),
@@ -83,6 +91,7 @@ export function addTag(program: Program, kind: TagKind): Program {
     kind,
     initial: kind === 'BOOL' ? false : 0,
     comment: '',
+    ...(options.auto ? { auto: true } : {}),
   }
   return { ...program, tags: [...program.tags, tag] }
 }
@@ -135,6 +144,7 @@ export function updateTag(
   program: Program,
   tagId: string,
   patch: Partial<Pick<TagDef, 'name' | 'address' | 'initial' | 'comment'>>,
+  options: { keepAuto?: boolean } = {},
 ): Program {
   const current = program.tags.find((tag) => tag.id === tagId)
   if (!current) return program
@@ -158,7 +168,11 @@ export function updateTag(
   const next: Program = {
     ...program,
     tags: program.tags.map((tag) => {
-      if (tag.id === tagId) return { ...tag, ...patch, name: nextName }
+      if (tag.id === tagId) {
+        // 用户亲手改过这一行，就当作他自己登记的表项，删指令时不再跟着消失。
+        const adopted = tag.auto === true && !options.keepAuto ? { auto: false as const } : {}
+        return { ...tag, ...patch, name: nextName, ...adopted }
+      }
       if (tag.bitOf !== undefined && normalizeReference(tag.bitOf) === normalizeReference(current.name)) {
         return { ...tag, bitOf: nextName }
       }
@@ -197,10 +211,10 @@ export function ensureAddressTag(
     }
     return { program, tag: existing }
   }
-  const added = addTag(program, kind)
+  const added = addTag(program, kind, { auto: true })
   const created = added.tags.at(-1)
   if (!created) return { error: '无法新建变量。' }
-  const next = updateTag(added, created.id, { address })
+  const next = updateTag(added, created.id, { address }, { keepAuto: true })
   return { program: next, tag: next.tags.find((tag) => tag.id === created.id) ?? created }
 }
 
@@ -240,6 +254,82 @@ export function tagUsage(program: Program, name: string): number {
     if (tag.bitOf !== undefined && normalizeReference(tag.bitOf) === target) count += 1
   }
   return count
+}
+
+/** 引用去掉位号后的基名：Motor.0 与 Motor 指向同一个变量。 */
+function baseReference(reference: string | undefined): string {
+  const normalized = normalizeReference(reference ?? '')
+  const dot = normalized.indexOf('.')
+  return dot < 0 ? normalized : normalized.slice(0, dot)
+}
+
+export interface TagPruneResult {
+  program: Program
+  removed: TagDef[]
+}
+
+/**
+ * 回收“插入指令时自动带出、现在已无人引用”的变量，回答 issue #12：
+ * 删掉触点/线圈后，变量表里不该继续留着一行没人用的 Tag。
+ *
+ * 只动 auto 标记的变量：
+ * - 手写变量（+ BOOL / + INT）、样例预置变量、导入工程的变量没有该标记，始终保留；
+ * - 用户在变量表里改过的变量会被 updateTag 摘掉标记，同样始终保留。
+ * 位别名（bitOf）也算引用，先删别名再删父变量，因此循环直到没有可回收项。
+ */
+export function pruneOrphanTags(program: Program): TagPruneResult {
+  if (!program.tags.some((tag) => tag.auto === true)) return { program, removed: [] }
+  const removed: TagDef[] = []
+  let tags = program.tags
+  for (;;) {
+    const current: Program = { ...program, tags }
+    const orphan = tags.find((tag) => tag.auto === true && tagUsage(current, tag.name) === 0)
+    if (!orphan) break
+    removed.push(orphan)
+    tags = tags.filter((tag) => tag.id !== orphan.id)
+  }
+  return removed.length ? { program: { ...program, tags }, removed } : { program, removed }
+}
+
+/**
+ * 按“变量第一次出现在梯形图里的顺序”排序：先按程序段先后，再按段内从左上到右下的
+ * 元件顺序，最后是输出端操作数。没被引用的变量保持原相对顺序排在末尾，
+ * 这样变量表可以顺着程序往下读（issue #12 的第二条建议）。
+ */
+export function tagsInProgramOrder(program: Program): TagDef[] {
+  const firstSeen = new Map<string, number>()
+  let position = 0
+  const note = (reference: string | undefined) => {
+    const base = baseReference(reference)
+    if (!base || firstSeen.has(base)) return
+    firstSeen.set(base, position)
+    position += 1
+  }
+  const walk = (chain: LadderNode[]) => {
+    for (const node of chain) {
+      if (node.type === 'contact') note(node.tag)
+      else node.branches.forEach(walk)
+    }
+  }
+  for (const rung of program.rungs) {
+    walk(rung.nodes)
+    note(rung.output.tag)
+    note(rung.output.resetTag)
+    note(rung.output.qTag)
+    note(rung.output.valueTag)
+    note(rung.output.sourceTag)
+    note(rung.output.pulseTag)
+    note(rung.output.stepTag)
+  }
+  return program.tags
+    .map((tag, index) => ({ tag, index, seen: firstSeen.get(baseReference(tag.name)) }))
+    .sort((left, right) => {
+      if (left.seen === undefined && right.seen === undefined) return left.index - right.index
+      if (left.seen === undefined) return 1
+      if (right.seen === undefined) return -1
+      return left.seen - right.seen
+    })
+    .map((entry) => entry.tag)
 }
 
 function withRung(program: Program, rungId: string, update: (rung: Rung) => Rung): Program {
@@ -648,7 +738,7 @@ export function moveRung(program: Program, rungId: string, delta: -1 | 1): Progr
 }
 
 function ensureTag(program: Program, kind: TagKind): Program {
-  return program.tags.some((tag) => tag.kind === kind) ? program : addTag(program, kind)
+  return program.tags.some((tag) => tag.kind === kind) ? program : addTag(program, kind, { auto: true })
 }
 
 /** 找到触点当前引用的变量（T1.Q 这类实例位自然找不到，返回 undefined）。 */
@@ -692,7 +782,7 @@ function tagForNewContact(
   let next = ensureTag(program, kind)
   let tag = pickDefaultTag(next, kind)
   if (!tag) {
-    next = addTag(next, kind)
+    next = addTag(next, kind, { auto: true })
     tag = next.tags.find((item) => !before.has(item.id))
   }
   return { program: next, tag, created: Boolean(tag && !before.has(tag.id)) }

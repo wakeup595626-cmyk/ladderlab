@@ -2896,6 +2896,12 @@ body[data-drag-kind] {
   align-items: center;
 }
 
+.tags-toolbar .secondary-button[aria-pressed='true'] {
+  border-color: var(--accent);
+  background: var(--active);
+  color: var(--text);
+}
+
 .tag-count {
   display: inline-flex;
   min-width: 18px;

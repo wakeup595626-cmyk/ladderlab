@@ -22,6 +22,11 @@ export interface TagDef {
   comment: string
   /** INT 字节的 BOOL 位别名，例如 ShiftByte=%MB6、Step1=%M6.0。 */
   bitOf?: string
+  /**
+   * 由“插入指令”顺手带出的变量，尚未被用户手动编辑。
+   * 只有这类变量在引用清零后才会被自动回收；手写变量和导入工程的变量一律保留。
+   */
+  auto?: boolean
 }
 
 export interface ContactNode {

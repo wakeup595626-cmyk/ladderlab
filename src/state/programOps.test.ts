@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import {
+  addTag,
   cancelOpenBranchAt,
   canDeleteTag,
   changeContactKind,
   cloneNodesForPaste,
   closeOpenBranchAt,
   collectNodesAtPaths,
+  deleteNode,
   deleteTag,
   deleteNodesAtPaths,
   deleteNodesByIds,
@@ -26,7 +28,9 @@ import {
   nextInstanceName,
   openBranchAtSlot,
   pickDefaultTag,
+  pruneOrphanTags,
   snapshotRung,
+  tagsInProgramOrder,
   tagsDependingOn,
   tagUsage,
   updateContact,
@@ -915,5 +919,79 @@ describe('programOps 分支编排与批量编辑', () => {
     const source = program([rung('r1', [])], [tag('T1'), tag('T2')])
     expect(nextInstanceName(source, 'T')).toBe('T3')
     expect(nextInstanceName(source, 'C')).toBe('C1')
+  })
+})
+
+describe('programOps issue #12 变量表跟随程序', () => {
+  it('删除最后一个引用后回收自动变量，同时保留手写变量', () => {
+    const manual = tag('Manual', 'INT', 0)
+    const source = program(
+      [rung('r1', [contact('c1', 'Start')])],
+      [tag('Start'), tag('Coil'), manual],
+    )
+    const made = makeContactNode(source, 'NO')
+    expect(made.createdTag?.auto).toBe(true)
+
+    const inserted = insertNodeAt(
+      made.program,
+      'r1',
+      { chain: [], index: 1 },
+      made.node,
+    )
+    const deleted = deleteNode(inserted, 'r1', [1])
+    const pruned = pruneOrphanTags(deleted)
+
+    expect(pruned.removed.map((item) => item.name)).toEqual([made.node.tag])
+    expect(pruned.program.tags.map((item) => item.name)).toEqual(['Start', 'Coil', 'Manual'])
+    expect(pruned.program.tags).toContain(manual)
+  })
+
+  it('用户改过自动变量后即归用户所有，删除指令时不再回收', () => {
+    const source = program(
+      [rung('r1', [contact('c1', 'Start')])],
+      [tag('Start'), tag('Coil')],
+    )
+    const made = makeContactNode(source, 'NO')
+    const created = made.createdTag
+    if (!created) throw new Error('同类变量占满时应新建变量')
+
+    const adopted = updateTag(made.program, created.id, { comment: '用户备注' })
+    const tagAfterEdit = adopted.tags.find((item) => item.id === created.id)
+    expect(tagAfterEdit?.auto).toBe(false)
+    expect(pruneOrphanTags(adopted)).toEqual({ program: adopted, removed: [] })
+  })
+
+  it('地址输入带出的变量可回收，直接点 + 添加的变量始终保留', () => {
+    const source = program([rung('r1', [contact('c1', 'Start')])])
+    const addressed = ensureAddressTag(source, 'M100.0', 'BOOL')
+    if ('error' in addressed) throw new Error(addressed.error)
+
+    expect(addressed.tag.auto).toBe(true)
+    expect(pruneOrphanTags(addressed.program).removed.map((item) => item.name))
+      .toEqual([addressed.tag.name])
+
+    const withManual = addTag(source, 'INT')
+    const manual = withManual.tags.at(-1)
+    expect(manual?.auto).toBeUndefined()
+    expect(pruneOrphanTags(withManual)).toEqual({ program: withManual, removed: [] })
+  })
+
+  it('按程序段和段内元件顺序列出变量，未引用的变量保持原顺序排在末尾', () => {
+    const source = program(
+      [
+        rung('r1', [contact('c1', 'Third')]),
+        rung('r2', [contact('c2', 'First')]),
+      ],
+      [
+        tag('Unused'),
+        tag('First'),
+        tag('Second'),
+        tag('Third'),
+        tag('Coil'),
+      ],
+    )
+
+    expect(tagsInProgramOrder(source).map((item) => item.name))
+      .toEqual(['Third', 'Coil', 'First', 'Unused', 'Second'])
   })
 })

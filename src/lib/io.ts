@@ -144,6 +144,8 @@ export function parseProgram(input: unknown): Program {
           `${where}.bitOf`,
         ),
       } : {}),
+      // 保留“自动变量”标记，重新导入后仍能跟着指令一起增删；缺省（旧工程）按手写变量处理。
+      ...(tag.auto === true ? { auto: true } : {}),
     }
   })
 

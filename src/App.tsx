@@ -145,6 +145,7 @@ import {
   moveRungTo,
   moveRungToBoundary,
   openBranchAtSlot,
+  pruneOrphanTags,
   setProfile as setProgramProfile,
   setProjectName,
   snapshotRung,
@@ -646,6 +647,9 @@ export default function App() {
   // 过期草稿不应该再把已经前进的页面拉回冲突状态。
   const lastDraftStampRef = useRef<number | null>(startupState.lastSavedAt)
   const toastTimerRef = useRef<number | null>(null)
+  // 变量表回收的提示不单独抢 Toast：等本次操作的提示先出现，再用下一轮补一句结果。
+  const pendingPruneRef = useRef<string[]>([])
+  const pruneFlushRef = useRef<number | null>(null)
   const lastRuntimeSignatureRef = useRef<string | null>(null)
   const program = history.present
   const compileResult = useMemo(() => compile(program), [program])
@@ -732,9 +736,17 @@ export default function App() {
       focusAction?: boolean
     },
   ) => {
+    // 同一个操作里刚回收过变量表条目时，把结果并进操作提示，免得被后一条提示顶掉。
+    const prunedNames = pendingPruneRef.current.splice(0)
+    if (pruneFlushRef.current !== null) {
+      window.clearTimeout(pruneFlushRef.current)
+      pruneFlushRef.current = null
+    }
     setToast({
       id: Date.now() + Math.random(),
-      message,
+      message: prunedNames.length
+        ? `${message}；变量表已同步，移除未引用的 ${prunedNames.join('、')}`
+        : message,
       tone: options?.tone ?? 'info',
       sticky: options?.sticky ?? options?.tone === 'error',
       action: options?.action,
@@ -893,14 +905,28 @@ export default function App() {
     setFavoriteInstructions((current) => toggleFavoriteInstruction(current, family, kind))
   }, [favoriteInstructions, notify])
 
-  const commit = useCallback((next: Program) => {
-    const normalized = ensureTrailingBlankRung(next)
+  const commit = useCallback((next: Program): Program => {
+    // 变量表跟着指令走：某个自动带出的变量丢掉最后一个引用后当场回收（issue #12）。
+    const pruned = pruneOrphanTags(ensureTrailingBlankRung(next))
+    if (pruned.removed.length) {
+      pendingPruneRef.current.push(...pruned.removed.map((tag) => tag.name))
+      if (pruneFlushRef.current === null) {
+        // 操作自己的提示在同一轮里同步发出；没发才由这里单独补一句。
+        pruneFlushRef.current = window.setTimeout(() => {
+          pruneFlushRef.current = null
+          const names = pendingPruneRef.current.splice(0)
+          if (names.length) notify(`变量表已同步：移除未引用的 ${names.join('、')}`)
+        }, 0)
+      }
+    }
+    const normalized = pruned.program
     setHistory((previous) => {
       if (normalized === previous.present) return previous
       const past = [...previous.past, previous.present].slice(-HISTORY_LIMIT)
       return { past, present: normalized, future: [] }
     })
-  }, [])
+    return normalized
+  }, [notify])
 
   const persistLatestNamedProject = useCallback((name: string) => {
     const active = activeSavedProjectRef.current
@@ -2057,7 +2083,7 @@ export default function App() {
     if (next === program) return
     const chain = path.slice(0, -1)
     const index = path[path.length - 1]
-    commit(next)
+    const committed = commit(next)
     setSelection({ rungId, path: null })
     setQuickEdit(null)
     const label = node.type === 'contact'
@@ -2067,7 +2093,7 @@ export default function App() {
       action: {
         label: '撤销',
         run: () => {
-          if (restoreNodeAt(rungId, chain, index, node, program, next)) {
+          if (restoreNodeAt(rungId, chain, index, node, program, committed)) {
             notify(label + '已恢复')
           } else {
             notify('元件位置已改变，请用顶部的“撤销上一步”恢复', { tone: 'error' })
