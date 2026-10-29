@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Program, Selection } from '../engine/types'
 import { createRuntime } from '../engine/simulate'
 import { contentRungs } from '../engine/rungInvariant'
+import { planCanvasSize } from '../lib/canvasLimits'
 import { assertSvgDocument, declareSvgDocument, escapeXmlText } from '../lib/svgDocument'
 import LadderCanvas from './LadderCanvas'
 import './ProgramImageExporter.css'
@@ -44,9 +45,6 @@ interface VectorRung {
 
 const INITIAL_STAGE_WIDTH = 1240
 const SOURCE_SCALE = 2
-const EXPORT_SCALE = 2
-const MAX_CANVAS_SIDE = 30000
-const MAX_CANVAS_PIXELS = 140_000_000
 const WHITE = '#ffffff'
 const INK = '#17191c'
 const MUTED = '#6b7178'
@@ -173,26 +171,21 @@ function drawRule(
 }
 
 function assertCanvasBounds(width: number, height: number) {
-  const pixelWidth = Math.ceil(width * EXPORT_SCALE)
-  const pixelHeight = Math.ceil(height * EXPORT_SCALE)
-  if (
-    pixelWidth > MAX_CANVAS_SIDE
-    || pixelHeight > MAX_CANVAS_SIDE
-    || pixelWidth * pixelHeight > MAX_CANVAS_PIXELS
-  ) {
+  const plan = planCanvasSize(width, height)
+  if (!plan) {
     throw new Error('工程过长，单张图片超过浏览器画布上限；请减少程序段后重试')
   }
-  return { pixelWidth, pixelHeight }
+  return plan
 }
 
 function createExportCanvas(width: number, height: number) {
-  const { pixelWidth, pixelHeight } = assertCanvasBounds(width, height)
+  const { scale, pixelWidth, pixelHeight } = assertCanvasBounds(width, height)
   const canvas = document.createElement('canvas')
   canvas.width = pixelWidth
   canvas.height = pixelHeight
   const context = canvas.getContext('2d')
   if (!context) throw new Error('浏览器无法创建图片画布')
-  context.scale(EXPORT_SCALE, EXPORT_SCALE)
+  context.scale(scale, scale)
   context.fillStyle = WHITE
   context.fillRect(0, 0, width, height)
   return { canvas, context }

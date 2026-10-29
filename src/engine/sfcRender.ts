@@ -81,16 +81,48 @@ function textWidth(text: string, size: number, weight = 500): number {
 
 const SIGNAL = /(?:%?(?:[IQM]\d+(?:\.\d+)?|DB\d+\.DB[XBWD]\d+(?:\.\d+)?|T\d+|C\d+))(?:=\s*-?\d+)?/i
 
+/** 一个括号组：含短信号就把该段说明换成信号，纯说明就整组去掉。 */
+function replaceParenGroup(prefix: string, inner: string): string {
+  const trimmed = inner.trim()
+  if (!SIGNAL.test(inner)) return prefix
+  const pieces = prefix.split(/(\s*(?:或|且|·|\/)\s*)/)
+  if (pieces.length === 0) return trimmed
+  pieces[pieces.length - 1] = trimmed
+  return pieces.join('')
+}
+
+/**
+ * 从最内层括号开始收：外层说明里还嵌着说明时，旧的正则只能吃一层，
+ * 会留下半截括号把里面的条件名一起删掉。这里按配对逐层收，结果稳定。
+ */
+function foldInnermostParens(value: string): string {
+  let text = value
+  for (let guard = 0; guard < 16; guard += 1) {
+    const stack: number[] = []
+    let start = -1
+    let end = -1
+    for (let index = 0; index < text.length; index += 1) {
+      const ch = text[index]
+      if (ch === '（' || ch === '(') {
+        stack.push(index)
+        continue
+      }
+      if (ch !== '）' && ch !== ')') continue
+      const open = stack.pop()
+      if (open === undefined) continue
+      start = open
+      end = index
+      break
+    }
+    if (start < 0) return text
+    text = replaceParenGroup(text.slice(0, start), text.slice(start + 1, end)) + text.slice(end + 1)
+  }
+  return text
+}
+
 /** 导出图只留地址和短信号，不带括号说明与模式描述。 */
 export function compactSfcText(value: string): string {
-  let text = value
-    .replace(/([^（）()]*?)[（(]([^（）()]*)[）)]/g, (_match, prefix: string, inner: string) => {
-      if (!SIGNAL.test(inner)) return prefix
-      const pieces = prefix.split(/(\s*(?:或|且|·|\/)\s*)/)
-      if (pieces.length === 0) return inner.trim()
-      pieces[pieces.length - 1] = inner.trim()
-      return pieces.join('')
-    })
+  let text = foldInnermostParens(value)
     .replace(/各步均未激活/g, '')
     .replace(/第\s*(\d+)\s*步/g, '步$1')
     .replace(/H\s*完成/g, 'H')
@@ -248,7 +280,8 @@ export function renderSfcSvg(chart: SfcChart): SfcSvg {
   )
   const laneCount = jumps.length
   const gutter = laneCount > 0
-    ? PAGE_PAD + Math.ceil(branchLabelWidth) + 54 + (laneCount - 1) * LANE_GAP
+    ? PAGE_PAD + Math.ceil(branchLabelWidth) + 12 + LANE_INSET + 16
+      + (laneCount - 1) * Math.max(LANE_GAP, Math.ceil(branchLabelWidth) + 18)
     : PAGE_PAD
   const stepX = gutter
   const centerX = stepX + STEP_W / 2
@@ -431,8 +464,17 @@ function finishSvg(
     }
   }
   const ordered = routes.slice().sort((a, b) => a.endY - b.endY || a.exitY - b.exitY)
+  // 每条回跳占一列，列距按右边那列条件文字的实际宽度撑开，
+  // 否则长条件会横穿相邻的竖线；最右一列固定贴紧步骤框。
+  const laneWidths = ordered.map((route) => (
+    route.lines.length > 0 ? Math.max(...route.lines.map((line) => textWidth(line, LABEL_SIZE))) : 0
+  ))
+  const laneOffsets: number[] = new Array(ordered.length).fill(LANE_INSET)
+  for (let index = ordered.length - 2; index >= 0; index -= 1) {
+    laneOffsets[index] = laneOffsets[index + 1] + Math.max(LANE_GAP, Math.ceil(laneWidths[index + 1]) + 18)
+  }
   ordered.forEach((route, index) => {
-    route.laneX = stepX - LANE_INSET - (ordered.length - 1 - index) * LANE_GAP
+    route.laneX = stepX - laneOffsets[index]
   })
   const placed: Array<{ y1: number; y2: number }> = []
   const arrowDrawn = new Set<number>()

@@ -1338,14 +1338,58 @@ function networkGuard(rung: Rung, ctx: Context): string {
   return formatNodes(nodes, ctx, false) || '—'
 }
 
+/** 只有普通布尔输出才可能并进同一步；定时 / 计数 / 功能盒一律单独成步。 */
+const MERGEABLE_OUTPUTS: ReadonlySet<Rung['output']['kind']> = new Set(['COIL', 'SET', 'RESET'])
+
+function isPlainOutput(rung: Rung): boolean {
+  return MERGEABLE_OUTPUTS.has(rung.output.kind)
+}
+
+/** 条件里是否直接引用了某个输出位（并联分支和比较触点都算引用）。 */
+function referencesTag(nodes: LadderNode[], tag: string): boolean {
+  return collectContactNodes(nodes).some((node) => node.tag === tag)
+}
+
 /**
- * 通用兜底：梯形图里每个网络就是顺序功能图里的一步。
- * 找不到步骤位或状态链的自建工程也一定有图，而且图和它自己的梯形图逐条对应。
+ * 连续网络能否并入同一组：都是普通布尔输出、进入条件文本相同、
+ * 输出位互不引用，也不重复写同一个输出。
+ */
+function canJoinNetworkGroup(group: Rung[], next: Rung, guard: string, ctx: Context): boolean {
+  if (!group.every(isPlainOutput) || !isPlainOutput(next)) return false
+  const nextTag = next.output.tag.trim()
+  if (!nextTag || group.some((rung) => rung.output.tag === nextTag)) return false
+  if (networkGuard(next, ctx) !== guard) return false
+  for (const rung of group) {
+    if (referencesTag(next.nodes, rung.output.tag)) return false
+    if (referencesTag(rung.nodes, nextTag)) return false
+  }
+  return true
+}
+
+interface NetworkGroup {
+  rungs: Rung[]
+  /** 组内第一条网络在梯形图里的序号，用来生成默认标题。 */
+  order: number
+  guard: string
+}
+
+/**
+ * 通用兜底：按梯形图网络顺序排列。连续、进入条件相同且输出互不引用的
+ * 普通布尔输出网络并成同一步，避免把“同时得电”画成先后两步。
  */
 function buildNetworkChart(ctx: Context): SfcChart | null {
   // 没有输出变量的网络不算一步，跳过；全空说明还没有可归纳的梯形图。
   const rungs = ctx.rungs.filter((rung) => rung.output.tag.trim() !== '')
   if (rungs.length === 0) return null
+  const groups: NetworkGroup[] = []
+  rungs.forEach((rung, index) => {
+    const group = groups.at(-1)
+    if (group && canJoinNetworkGroup(group.rungs, rung, group.guard, ctx)) {
+      group.rungs.push(rung)
+      return
+    }
+    groups.push({ rungs: [rung], order: index, guard: networkGuard(rung, ctx) })
+  })
   // 初始步不写文字，只留双边框；每一步的进入条件写在上一条连线上。
   const steps: SfcStep[] = [{
     key: '__initial',
@@ -1356,24 +1400,28 @@ function buildNetworkChart(ctx: Context): SfcChart | null {
   }]
   const edges: SfcEdge[] = []
   let previous = '__initial'
-  rungs.forEach((rung, index) => {
+  groups.forEach((group, index) => {
+    const first = group.rungs[0]
     steps.push({
-      key: rung.id,
+      key: first.id,
       number: String(index + 1),
-      title: cleanRungLabel(rung.label) || `网络 ${index + 1}`,
+      title: cleanRungLabel(first.label) || `网络 ${group.order + 1}`,
       initial: false,
-      tagName: rung.output.tag || undefined,
-      tagAddress: ctx.tags.get(rung.output.tag)?.address.replace(/^%/, ''),
-      actions: [outputAction(rung.output, ctx)],
+      tagName: first.output.tag || undefined,
+      tagAddress: ctx.tags.get(first.output.tag)?.address.replace(/^%/, ''),
+      actions: group.rungs.map((rung) => outputAction(rung.output, ctx)),
     })
-    edges.push({ from: previous, to: rung.id, label: networkGuard(rung, ctx) })
-    previous = rung.id
+    edges.push({ from: previous, to: first.id, label: group.guard })
+    previous = first.id
   })
+  const merged = groups.some((group) => group.rungs.length > 1)
   return {
     programName: ctx.program.name,
     steps,
     edges,
-    notes: ['按梯形图的网络顺序逐步排列，每个网络对应一步。'],
+    notes: [merged
+      ? '按梯形图的网络顺序排列；进入条件相同的连续布尔输出网络已合并为同一步。'
+      : '按梯形图的网络顺序逐步排列，每个网络对应一步。'],
     source: 'network',
   }
 }
