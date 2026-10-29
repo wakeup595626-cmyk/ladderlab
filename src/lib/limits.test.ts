@@ -81,7 +81,7 @@ describe('工程文本字段上限', () => {
     const referenceAtLimit = 'R'.repeat(FIELD_LIMITS.reference)
     const accepted = parseProgramText(JSON.stringify({
       ...source,
-      tags: [{ ...source.tags[0], address: addressAtLimit }],
+      tags: source.tags.map((item, index) => index === 0 ? { ...item, address: addressAtLimit } : item),
     }))
     expect(accepted.tags[0].address).toBe(addressAtLimit)
 

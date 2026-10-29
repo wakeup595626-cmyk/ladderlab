@@ -7,9 +7,17 @@ import type {
   TagKind,
 } from '../engine/types'
 import { contentRungs, ensureTrailingBlankRung } from '../engine/rungInvariant'
+import { splitReference } from '../engine/references'
 import { FIELD_LIMITS, programTextFieldIssues, utf8ByteLength } from './limits'
 
 const CONTACT_KINDS: ContactKind[] = ['NO', 'NC', 'P', 'N', 'CMP']
+const CONTACT_LABELS: Record<ContactKind, string> = {
+  NO: '常开触点',
+  NC: '常闭触点',
+  P: '上升沿触点',
+  N: '下降沿触点',
+  CMP: '比较触点',
+}
 const OUTPUT_KINDS: OutputKind[] = ['COIL', 'SET', 'RESET', 'TON', 'TOF', 'TONR', 'CTU', 'MOVE', 'ADD', 'SUB', 'SHL', 'ROL', 'PATTERN']
 const TAG_KINDS: TagKind[] = ['BOOL', 'INT']
 const PROFILES: ProfileId[] = ['v14', 'v21']
@@ -19,6 +27,24 @@ const MAX_RUNGS = 1000
 const MAX_NODES = 5000
 const MAX_PATTERN = 1024
 export const MAX_IMPORT_BYTES = 5 * 1024 * 1024
+const RUNG_LIMIT_MESSAGE = `程序段数量超过上限 ${MAX_RUNGS} 条（末尾空白占位段不计入上限）。`
+
+export interface LatestRequestGate {
+  begin(): number
+  isCurrent(requestId: number): boolean
+}
+
+/** 只允许最后一次异步选择提交结果；旧请求晚到时会被静默丢弃。 */
+export function createLatestRequestGate(): LatestRequestGate {
+  let latest = 0
+  return {
+    begin: () => {
+      latest += 1
+      return latest
+    },
+    isCurrent: (requestId) => requestId === latest,
+  }
+}
 
 function fail(message: string): never {
   throw new Error(`工程文件格式不正确：${message}`)
@@ -42,6 +68,120 @@ function text(value: unknown, where: string): string {
 function number(value: unknown, where: string): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) fail(`${where} 必须是有效数字。`)
   return value
+}
+
+/** 在完整解析前先识别末尾占位段，确保“程序段超限”优先于变量数量错误。 */
+function isBlankRungInput(value: unknown): boolean {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
+  const rung = value as Record<string, unknown>
+  const output = rung.output
+  if (!Array.isArray(rung.nodes) || rung.nodes.length !== 0) return false
+  if (typeof rung.label !== 'string' || rung.label.trim() !== '') return false
+  if (typeof output !== 'object' || output === null || Array.isArray(output)) return false
+  const parsedOutput = output as Record<string, unknown>
+  return parsedOutput.kind === 'COIL'
+    && typeof parsedOutput.tag === 'string'
+    && parsedOutput.tag.trim() === ''
+}
+
+function canonicalAddress(address: string): string {
+  // 地址层级（例如 %M0 与 %M0.0）是合法的父子关系，不能按区间重叠误判为冲突。
+  return address.trim().toUpperCase().replace(/\s+/g, '')
+}
+
+function validateReferences(rungs: Program['rungs'], tags: Program['tags']) {
+  const tagNames = new Set(tags.map((tag) => tag.name))
+  const tagIds = new Set(tags.map((tag) => tag.id))
+  const timers = new Set<string>()
+  const counters = new Set<string>()
+
+  for (const rung of rungs) {
+    const instance = rung.output.tag.trim()
+    if (!instance) continue
+    if (rung.output.kind === 'TON' || rung.output.kind === 'TOF' || rung.output.kind === 'TONR') {
+      timers.add(instance)
+    } else if (rung.output.kind === 'CTU') {
+      counters.add(instance)
+    }
+  }
+
+  for (const tag of tags) {
+    if (!tag.bitOf) continue
+    const reference = tag.bitOf.trim()
+    if (reference && !tagNames.has(reference)) {
+      fail(`位别名“${tag.name}”引用了未定义变量“${reference}”。`)
+    }
+  }
+
+  const requireVariable = (reference: string | undefined, rungNumber: number, label: string) => {
+    if (!reference?.trim()) return
+    const { base } = splitReference(reference)
+    if (!tagNames.has(base)) {
+      fail(`第 ${rungNumber} 条程序段的${label}引用了未定义变量“${reference.trim()}”。`)
+    }
+  }
+
+  const requireBoolOrInstanceQ = (reference: string | undefined, rungNumber: number, label: string) => {
+    if (!reference?.trim()) return
+    const { base, field } = splitReference(reference)
+    if (field?.toUpperCase() === 'Q') {
+      if (!timers.has(base) && !counters.has(base)) {
+        fail(`第 ${rungNumber} 条程序段的${label}引用了不存在的定时器/计数器 Q 位“${reference.trim()}”。`)
+      }
+      return
+    }
+    if (field === null && !tagNames.has(base)) {
+      fail(`第 ${rungNumber} 条程序段的${label}引用了未定义变量“${reference.trim()}”。`)
+    }
+  }
+
+  const visitNodes = (nodes: LadderNode[], rungNumber: number) => {
+    for (const node of nodes) {
+      if (node.type === 'parallel') {
+        if (node.autoTagId && !tagIds.has(node.autoTagId)) {
+          fail(`第 ${rungNumber} 条程序段的并联分支引用了不存在的自动变量 ID“${node.autoTagId}”。`)
+        }
+        node.branches.forEach((branch) => visitNodes(branch, rungNumber))
+        continue
+      }
+
+      const reference = node.tag.trim()
+      if (!reference) continue
+      const label = CONTACT_LABELS[node.kind]
+      const { base, field } = splitReference(reference)
+      const fieldName = field?.toUpperCase() ?? null
+      if (node.kind === 'CMP') {
+        if (fieldName === 'CV') {
+          if (!counters.has(base)) {
+            fail(`第 ${rungNumber} 条程序段的比较触点引用了不存在的计数器“${reference}”。`)
+          }
+        } else if (field === null && !tagNames.has(base)) {
+          fail(`第 ${rungNumber} 条程序段的比较触点引用了未定义变量“${reference}”。`)
+        }
+      } else if (fieldName === 'Q') {
+        if (!timers.has(base) && !counters.has(base)) {
+          fail(`第 ${rungNumber} 条程序段的${label}引用了不存在的定时器/计数器 Q 位“${reference}”。`)
+        }
+      } else if (field === null && !tagNames.has(base)) {
+        fail(`第 ${rungNumber} 条程序段的${label}引用了未定义变量“${reference}”。`)
+      }
+    }
+  }
+
+  rungs.forEach((rung, index) => {
+    const rungNumber = index + 1
+    visitNodes(rung.nodes, rungNumber)
+    const output = rung.output
+    if (output.kind !== 'TON' && output.kind !== 'TOF' && output.kind !== 'TONR' && output.kind !== 'CTU') {
+      requireVariable(output.tag, rungNumber, `${output.kind} 输出变量`)
+    }
+    requireVariable(output.resetTag, rungNumber, '复位变量')
+    requireVariable(output.qTag, rungNumber, '状态输出变量')
+    requireVariable(output.valueTag, rungNumber, '数值输出变量')
+    requireVariable(output.sourceTag, rungNumber, '源变量')
+    requireVariable(output.stepTag, rungNumber, '步号变量')
+    requireBoolOrInstanceQ(output.pulseTag, rungNumber, 'PATTERN 节拍变量')
+  })
 }
 
 function parseNode(value: unknown, where: string, depth = 0): LadderNode {
@@ -98,11 +238,14 @@ export function parseProgram(input: unknown): Program {
   if (!Array.isArray(tags)) fail('tags 必须是数组。')
   const rungs = data.rungs
   if (!Array.isArray(rungs)) fail('rungs 必须是数组。')
-  if (tags.length > MAX_TAGS) fail(`变量数量超过上限 ${MAX_TAGS}。`)
+  // 先按内容段判限，避免超长工程因每条程序段都带变量而误报“变量太多”。
   // 保存的工程始终带一个末尾占位段，因此文件允许比内容段上限多 1 段。
-  if (rungs.length > MAX_RUNGS + 1) fail(`程序段数量超过上限 ${MAX_RUNGS}。`)
+  const inputContentRungs = rungs.reduce((count, rung) => count + (isBlankRungInput(rung) ? 0 : 1), 0)
+  if (inputContentRungs > MAX_RUNGS || rungs.length > MAX_RUNGS + 1) fail(RUNG_LIMIT_MESSAGE)
+  if (tags.length > MAX_TAGS) fail(`变量数量超过上限 ${MAX_TAGS}。`)
   const tagIds = new Set<string>()
   const tagNames = new Set<string>()
+  const addresses = new Map<string, { name: string; address: string }>()
 
   const parsedTags = tags.map((item, index) => {
     const where = `tags[${index}]`
@@ -122,15 +265,23 @@ export function parseProgram(input: unknown): Program {
     if (!name) fail(`${where}.name 不能为空。`)
     if (tagNames.has(name)) fail(`变量名“${name}”重复。`)
     tagNames.add(name)
+    const address = capped(
+      text(tag.address, `${where}.address`).trim(),
+      FIELD_LIMITS.address,
+      '变量地址',
+      `${where}.address`,
+    )
+    if (!address) fail(`变量“${name}”的地址为空。`)
+    const normalizedAddress = canonicalAddress(address)
+    const previousAddress = addresses.get(normalizedAddress)
+    if (previousAddress) {
+      fail(`变量“${previousAddress.name}”与“${name}”使用了重复地址“${normalizedAddress}”。`)
+    }
+    addresses.set(normalizedAddress, { name, address })
     return {
       id,
       name,
-      address: capped(
-        text(tag.address, `${where}.address`).trim(),
-        FIELD_LIMITS.address,
-        '变量地址',
-        `${where}.address`,
-      ),
+      address,
       kind,
       initial,
       comment: typeof tag.comment === 'string'
@@ -238,9 +389,9 @@ export function parseProgram(input: unknown): Program {
     tags: parsedTags,
     rungs: parsedRungs,
   })
-  if (contentRungs(normalized).length > MAX_RUNGS) {
-    fail(`程序段数量超过上限 ${MAX_RUNGS}。`)
-  }
+  const content = contentRungs(normalized)
+  if (content.length > MAX_RUNGS) fail(RUNG_LIMIT_MESSAGE)
+  validateReferences(content, parsedTags)
   return normalized
 }
 

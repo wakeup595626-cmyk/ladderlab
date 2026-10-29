@@ -2,7 +2,7 @@ import { useRef, useState } from 'react'
 import type { DragEvent } from 'react'
 import { contentRungs } from '../engine/rungInvariant'
 import type { LadderNode, Program } from '../engine/types'
-import { MAX_IMPORT_BYTES, parseProgramText } from '../lib/io'
+import { createLatestRequestGate, MAX_IMPORT_BYTES, parseProgramText } from '../lib/io'
 import { useModalFocus } from '../lib/useModalFocus'
 import { CloseIcon, ImportIcon } from './Icons'
 import './ProjectImportDialog.css'
@@ -44,14 +44,18 @@ function ProjectImportDialogContent({ onClose, onImport }: Omit<ProjectImportDia
   const fileInputRef = useRef<HTMLInputElement>(null)
   const firstButtonRef = useRef<HTMLButtonElement>(null)
   const dialogRef = useModalFocus<HTMLElement>(true, onClose, firstButtonRef)
+  const requestGate = useRef(createLatestRequestGate()).current
 
-  const inspectText = (text: string, source: string, size: number | null) => {
+  const inspectText = (text: string, source: string, size: number | null, requestId = requestGate.begin()) => {
+    if (!requestGate.isCurrent(requestId)) return false
     try {
       const program = parseProgramText(text)
+      if (!requestGate.isCurrent(requestId)) return false
       setPreview({ program, source, size })
       setError('')
       return true
     } catch (reason) {
+      if (!requestGate.isCurrent(requestId)) return false
       setPreview(null)
       setError(reason instanceof Error ? reason.message : '工程文件无法读取')
       return false
@@ -60,16 +64,20 @@ function ProjectImportDialogContent({ onClose, onImport }: Omit<ProjectImportDia
 
   const inspectFile = async (file: File | undefined) => {
     if (!file) return
+    const requestId = requestGate.begin()
     try {
       if (file.size > MAX_IMPORT_BYTES) {
         throw new Error(`工程文件超过 ${MAX_IMPORT_BYTES / (1024 * 1024)} MB 上限，请精简后再导入`)
       }
-      inspectText(await file.text(), file.name, file.size)
+      const text = await file.text()
+      if (!requestGate.isCurrent(requestId)) return
+      inspectText(text, file.name, file.size, requestId)
     } catch (reason) {
+      if (!requestGate.isCurrent(requestId)) return
       setPreview(null)
       setError(reason instanceof Error ? reason.message : '工程文件无法读取')
     } finally {
-      if (fileInputRef.current) fileInputRef.current.value = ''
+      if (requestGate.isCurrent(requestId) && fileInputRef.current) fileInputRef.current.value = ''
     }
   }
 
