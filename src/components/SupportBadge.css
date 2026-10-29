@@ -92,13 +92,13 @@
   border-radius: 999px;
 }
 
-/* 六个汉字要塞进 60px 的内容宽：9px 排得下还留两侧呼吸位，且任何屏幕下都不换行。 */
+/* 四个汉字配 11px：60px 的内容宽里两侧仍留得下呼吸位，且任何屏幕下都不换行。 */
 .support-badge-caption {
   display: block;
   grid-row: 2;
   grid-column: 1 / -1;
-  padding: 0 0 4px;
-  font-size: 9px;
+  padding: 0 0 5px;
+  font-size: 11px;
   font-weight: 500;
   line-height: 1.35;
   letter-spacing: 0.01em;
