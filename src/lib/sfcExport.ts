@@ -29,7 +29,7 @@ export async function rasterizeSfcPng(chart: SfcChart): Promise<string> {
   const rendered = renderSfcSvg(chart)
   const plan = planCanvasSize(rendered.width, rendered.height)
   if (!plan) {
-    throw new Error('顺序功能图过大，超过浏览器画布上限；请减少步骤位或缩短步骤说明后重试')
+    throw new Error('顺序功能图过大，超过浏览器画布上限；请改用 SVG 导出（不受画布限制）')
   }
   const { pixelWidth, pixelHeight } = plan
 

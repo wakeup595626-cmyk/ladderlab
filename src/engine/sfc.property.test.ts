@@ -336,6 +336,9 @@ function visualSignature(chart: SfcChart): string {
   return JSON.stringify({
     steps: chart.steps.map((step) => [
       step.number,
+      // 步骤号下面还会画 title（L1/L2 这类状态名），签名少了它，
+      // 两个只有标题不同的图会被当成同一张。
+      step.title,
       step.initial,
       step.actions.map((action) => [action.text, action.detail]),
     ]),

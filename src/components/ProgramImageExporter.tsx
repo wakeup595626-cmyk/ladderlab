@@ -3,7 +3,20 @@ import type { Program, Selection } from '../engine/types'
 import { createRuntime } from '../engine/simulate'
 import { contentRungs } from '../engine/rungInvariant'
 import { planCanvasSize } from '../lib/canvasLimits'
-import { assertSvgDocument, declareSvgDocument, escapeXmlText } from '../lib/svgDocument'
+import {
+  COMPLETE_LAYOUT,
+  planCompleteLayout,
+  planPlainLayout,
+  type CompleteLayout,
+  type PlainLayout,
+  type RungExtent,
+} from '../lib/programImageLayout'
+import {
+  assertSvgDocument,
+  declareSvgDocument,
+  escapeXmlText,
+  sanitizeXmlText,
+} from '../lib/svgDocument'
 import LadderCanvas from './LadderCanvas'
 import './ProgramImageExporter.css'
 
@@ -105,7 +118,17 @@ const WIRE_SELECTOR = [
 ].join(',')
 
 function nextFrame() {
-  return new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()))
+  return new Promise<void>((resolve) => {
+    let settled = false
+    const finish = () => {
+      if (settled) return
+      settled = true
+      resolve()
+    }
+    // 后台标签页可能暂停 requestAnimationFrame；定时器兜底避免导出永久悬挂。
+    window.setTimeout(finish, 80)
+    window.requestAnimationFrame(finish)
+  })
 }
 
 function noop() {}
@@ -170,12 +193,26 @@ function drawRule(
   context.stroke()
 }
 
+/** 超限时给的是能走通的两条路：换不受画布限制的 SVG，或者减少程序段。 */
+const PNG_TOO_LARGE = '工程过长，单张 PNG 超过浏览器画布上限；'
+  + '请改用 SVG（不受画布限制）导出，或减少程序段后重试'
+
 function assertCanvasBounds(width: number, height: number) {
   const plan = planCanvasSize(width, height)
   if (!plan) {
-    throw new Error('工程过长，单张图片超过浏览器画布上限；请减少程序段后重试')
+    throw new Error(PNG_TOO_LARGE)
   }
   return plan
+}
+
+/** 用 PNG 与 SVG 共用的版面参数预算最终尺寸；放不下就立刻失败并指向 SVG。 */
+function programImageFits(mode: ProgramImageMode, rungs: readonly RungExtent[]) {
+  const layout = mode === 'plain' ? planPlainLayout(rungs) : planCompleteLayout(rungs)
+  return Boolean(planCanvasSize(layout.width, layout.height))
+}
+
+function assertProgramImageFits(mode: ProgramImageMode, rungs: readonly RungExtent[]) {
+  if (!programImageFits(mode, rungs)) throw new Error(PNG_TOO_LARGE)
 }
 
 function createExportCanvas(width: number, height: number) {
@@ -205,6 +242,36 @@ const SVG_DEFAULT_VALUES: Record<string, string> = {
   display: 'inline',
   'font-style': 'normal',
   'letter-spacing': 'normal',
+}
+
+/* DOM 节点类型常量：文本 3、CDATA 4、注释 8。 */
+const TEXT_NODE = 3
+const CDATA_SECTION_NODE = 4
+const COMMENT_NODE = 8
+const ELEMENT_NODE = 1
+
+/**
+ * XML 1.0 不接受 \u0001 这类控制字符：从 Word / Excel 粘贴来的变量名一旦带进去，
+ * 浏览器会拒绝解析整份 SVG（PNG 光栅化同样会失败）。逐节点清洗文本与属性值，
+ * 合法的中文、emoji 原样保留。
+ */
+function sanitizeSvgTree(node: Node) {
+  if (
+    node.nodeType === TEXT_NODE
+    || node.nodeType === CDATA_SECTION_NODE
+    || node.nodeType === COMMENT_NODE
+  ) {
+    const value = node.nodeValue
+    if (value) node.nodeValue = sanitizeXmlText(value)
+    return
+  }
+  if (node.nodeType === ELEMENT_NODE) {
+    for (const attribute of Array.from((node as Element).attributes)) {
+      const clean = sanitizeXmlText(attribute.value)
+      if (clean !== attribute.value) attribute.value = clean
+    }
+  }
+  for (const child of Array.from(node.childNodes)) sanitizeSvgTree(child)
 }
 
 /** 把计算后的样式逐节点写成 style 属性：PowerPoint、Word、Illustrator 都只认
@@ -277,6 +344,9 @@ function inlineSvgStyles(source: SVGSVGElement, clone: SVGSVGElement) {
       clone.removeAttribute(attribute.name)
     }
   }
+
+  // 样式、交互残留清完之后，最后再洗一遍所有文本与属性值。
+  sanitizeSvgTree(clone)
 }
 
 function serializeSvg(source: SVGSVGElement) {
@@ -293,7 +363,8 @@ function serializeSvg(source: SVGSVGElement) {
   return {
     width,
     height,
-    xml: new XMLSerializer().serializeToString(clone),
+    // 兜底：即使某个节点绕过了上面的清洗，序列化结果里也不能留非法控制字符。
+    xml: sanitizeXmlText(new XMLSerializer().serializeToString(clone)),
   }
 }
 
@@ -347,9 +418,14 @@ async function prepareRung(svg: SVGSVGElement, label: string, title: string) {
     await loaded
     await image.decode().catch(() => {})
 
+    const rasterWidth = Math.ceil(serialized.width * SOURCE_SCALE)
+    const rasterHeight = Math.ceil(serialized.height * SOURCE_SCALE)
+    // 单段本身就大到画不出来时，先给出“改用 SVG”的提示，而不是让 canvas 静默变空。
+    if (!planCanvasSize(rasterWidth, rasterHeight)) throw new Error(PNG_TOO_LARGE)
+
     const raster = document.createElement('canvas')
-    raster.width = Math.ceil(serialized.width * SOURCE_SCALE)
-    raster.height = Math.ceil(serialized.height * SOURCE_SCALE)
+    raster.width = rasterWidth
+    raster.height = rasterHeight
     const rasterContext = raster.getContext('2d', { willReadFrequently: true })
     if (!rasterContext) throw new Error('浏览器无法绘制程序段')
     rasterContext.fillStyle = WHITE
@@ -405,83 +481,80 @@ function drawRungImage(
   context.drawImage(rung.canvas, x, y, rung.width, rung.height)
 }
 
-function buildPlainImage(rungs: PreparedRung[]) {
-  const padding = 40
-  const gap = 30
-  const contentWidth = Math.max(...rungs.map((rung) => rung.width))
-  const width = Math.ceil(contentWidth + padding * 2)
-  const height = Math.ceil(
-    padding * 2
-    + rungs.reduce((total, rung) => total + rung.height, 0)
-    + gap * Math.max(0, rungs.length - 1),
-  )
-  const { canvas, context } = createExportCanvas(width, height)
-  let y = padding
-  for (const rung of rungs) {
-    drawRungImage(context, rung, padding, y)
-    y += rung.height + gap
-  }
+function buildPlainImage(rungs: PreparedRung[], layout: PlainLayout) {
+  const { canvas, context } = createExportCanvas(layout.width, layout.height)
+  layout.placements.forEach((placement, index) => {
+    const rung = rungs[index]
+    if (rung) drawRungImage(context, rung, placement.x, placement.y)
+  })
   return canvas
 }
 
-function buildCompleteImage(program: Program, rungs: PreparedRung[]) {
-  const pagePad = 56
-  const cardPad = 34
-  const cardHeader = 48
-  const cardBottom = 26
-  const contentWidth = Math.max(...rungs.map((rung) => rung.width))
-  const cardWidth = Math.max(900, Math.ceil(contentWidth + cardPad * 2))
-  const width = Math.ceil(cardWidth + pagePad * 2)
-  const headerHeight = 120
-  const gap = 22
-  const height = Math.ceil(
-    pagePad
-    + headerHeight
-    + rungs.reduce(
-      (total, rung) => total + cardHeader + 22 + rung.height + cardBottom,
-      0,
-    )
-    + gap * Math.max(0, rungs.length - 1)
-    + pagePad,
-  )
+/** 页头标题的可用宽度：给右侧的 Main [OB1] 与指令档案留出位置。 */
+function completeHeadingLimit(
+  context: CanvasRenderingContext2D | null,
+  program: Program,
+  cardWidth: number,
+) {
+  if (!context) return Math.max(120, cardWidth - 220)
+  setFont(context, 650, 16)
+  const mainLabelWidth = context.measureText('Main [OB1]').width
+  setFont(context, 500, 11)
+  const profileLabelWidth = context.measureText(program.profile.toUpperCase() + '  指令档案').width
+  return Math.max(120, cardWidth - Math.max(mainLabelWidth, profileLabelWidth) - 56)
+}
+
+function buildCompleteImage(program: Program, rungs: PreparedRung[], layout: CompleteLayout) {
+  const {
+    pagePad,
+    cardPad,
+    cardHeader,
+    cardTitleBaseline,
+    titleBaseline,
+    rightTitleBaseline,
+    rightNoteBaseline,
+    ruleOffset,
+  } = COMPLETE_LAYOUT
+  const { width, height, cardWidth, cards } = layout
   const { canvas, context } = createExportCanvas(width, height)
 
-  context.fillStyle = MUTED
-  setFont(context, 600, 11)
-  context.fillText('LADDERLAB  /  程序导出', pagePad, pagePad + 8)
-
+  const headingLimit = completeHeadingLimit(context, program, cardWidth)
   context.fillStyle = INK
   setFont(context, 650, 28)
   context.fillText(
-    fitText(context, program.name, cardWidth - 280),
+    fitText(context, program.name, headingLimit),
     pagePad,
-    pagePad + 45,
+    pagePad + titleBaseline,
   )
 
   context.textAlign = 'right'
   context.fillStyle = INK
   setFont(context, 650, 16)
-  context.fillText('Main [OB1]', width - pagePad, pagePad + 14)
+  context.fillText('Main [OB1]', width - pagePad, pagePad + rightTitleBaseline)
   context.fillStyle = MUTED
   setFont(context, 500, 11)
-  context.fillText(`${program.profile.toUpperCase()} 指令档案`, width - pagePad, pagePad + 36)
+  context.fillText(
+    `${program.profile.toUpperCase()} 指令档案`,
+    width - pagePad,
+    pagePad + rightNoteBaseline,
+  )
   context.textAlign = 'left'
 
-  drawRule(context, pagePad, pagePad + 76, width - pagePad, pagePad + 76)
+  drawRule(context, pagePad, pagePad + ruleOffset, width - pagePad, pagePad + ruleOffset)
 
-  let y = pagePad + headerHeight
   rungs.forEach((rung, index) => {
-    const cardHeight = cardHeader + 22 + rung.height + cardBottom
+    const card = cards[index]
+    if (!card) return
     context.fillStyle = WHITE
-    context.fillRect(pagePad, y, cardWidth, cardHeight)
+    context.fillRect(pagePad, card.y, cardWidth, card.height)
     context.strokeStyle = RULE
     context.lineWidth = 1
-    context.strokeRect(pagePad + 0.5, y + 0.5, cardWidth - 1, cardHeight - 1)
-    drawRule(context, pagePad, y + cardHeader, pagePad + cardWidth, y + cardHeader)
+    context.strokeRect(pagePad + 0.5, card.y + 0.5, cardWidth - 1, card.height - 1)
+    drawRule(context, pagePad, card.y + cardHeader, pagePad + cardWidth, card.y + cardHeader)
 
     context.fillStyle = INK
     setFont(context, 650, 13)
-    context.fillText(rung.label, pagePad + cardPad, y + 29)
+    context.fillText(rung.label, card.rungX, card.y + cardTitleBaseline)
 
     if (rung.title) {
       const labelWidth = context.measureText(rung.label).width
@@ -489,8 +562,8 @@ function buildCompleteImage(program: Program, rungs: PreparedRung[]) {
       setFont(context, 450, 12)
       context.fillText(
         fitText(context, rung.title, cardWidth - cardPad * 2 - labelWidth - 22),
-        pagePad + cardPad + labelWidth + 14,
-        y + 29,
+        card.rungX + labelWidth + 14,
+        card.y + cardTitleBaseline,
       )
     }
 
@@ -500,12 +573,11 @@ function buildCompleteImage(program: Program, rungs: PreparedRung[]) {
     context.fillText(
       `${String(index + 1).padStart(2, '0')} / ${String(rungs.length).padStart(2, '0')}`,
       pagePad + cardWidth - cardPad,
-      y + 29,
+      card.y + cardTitleBaseline,
     )
     context.textAlign = 'left'
 
-    drawRungImage(context, rung, pagePad + cardPad, y + cardHeader + 22)
-    y += cardHeight + gap
+    drawRungImage(context, rung, card.rungX, card.rungY)
   })
 
   return canvas
@@ -595,9 +667,9 @@ function placeVectorRung(rung: VectorRung, x: number, y: number) {
     .join('')
   const transform = 'translate(' + round2(x - rung.bounds.x)
     + ' ' + round2(y - rung.bounds.y) + ')'
-  return '<g transform="' + transform + '"'
+  return sanitizeXmlText('<g transform="' + transform + '"'
     + (rung.inherited ? ' style="' + escapeXmlText(rung.inherited) + '"' : '')
-    + '>' + children + '</g>'
+    + '>' + children + '</g>')
 }
 
 function vectorLine(x1: number, y1: number, x2: number, y2: number) {
@@ -627,13 +699,16 @@ function vectorText(x: number, y: number, value: string, style: VectorTextStyle)
     + '>' + escapeXmlText(value) + '</text>'
 }
 
-function vectorDocument(width: number, height: number, title: string, body: string) {
+/**
+ * 三种导出共用同一份根节点契约（与顺序功能图一致）：只声明画布尺寸，
+ * 不带 role，也不带根级 <title>，避免同一份图在 Word / 浏览器里语义不一致。
+ */
+function vectorDocument(width: number, height: number, body: string) {
   const w = Math.ceil(width)
   const h = Math.ceil(height)
   const markup = [
     '<svg xmlns="http://www.w3.org/2000/svg" width="' + w + '" height="' + h
-      + '" viewBox="0 0 ' + w + ' ' + h + '" role="img" shape-rendering="geometricPrecision">',
-    '<title>' + escapeXmlText(title) + '</title>',
+      + '" viewBox="0 0 ' + w + ' ' + h + '">',
     '<rect x="0" y="0" width="' + w + '" height="' + h + '" fill="' + WHITE + '" />',
     body,
     '</svg>',
@@ -646,80 +721,52 @@ function measureContext() {
   return document.createElement('canvas').getContext('2d')
 }
 
-function buildPlainVector(program: Program, rungs: VectorRung[]) {
-  const padding = 40
-  const gap = 30
-  const contentWidth = Math.max(...rungs.map((rung) => rung.width))
-  const width = Math.ceil(contentWidth + padding * 2)
-  const height = Math.ceil(
-    padding * 2
-    + rungs.reduce((total, rung) => total + rung.height, 0)
-    + gap * Math.max(0, rungs.length - 1),
-  )
-  const body: string[] = []
-  let y = padding
-  for (const rung of rungs) {
-    body.push(placeVectorRung(rung, padding, y))
-    y += rung.height + gap
-  }
-  return vectorDocument(width, height, program.name + ' 梯形图', body.join(''))
+function buildPlainVector(rungs: VectorRung[], layout: PlainLayout) {
+  const body = layout.placements
+    .map((placement, index) => {
+      const rung = rungs[index]
+      return rung ? placeVectorRung(rung, placement.x, placement.y) : ''
+    })
+    .join('')
+  return vectorDocument(layout.width, layout.height, body)
 }
 
-function buildCompleteVector(program: Program, rungs: VectorRung[]) {
-  const pagePad = 56
-  const cardPad = 34
-  const cardHeader = 48
-  const cardBottom = 26
-  const headerHeight = 120
-  const gap = 22
-  const contentWidth = Math.max(...rungs.map((rung) => rung.width))
-  const cardWidth = Math.max(900, Math.ceil(contentWidth + cardPad * 2))
-  const width = Math.ceil(cardWidth + pagePad * 2)
-  const height = Math.ceil(
-    pagePad
-    + headerHeight
-    + rungs.reduce(
-      (total, rung) => total + cardHeader + 22 + rung.height + cardBottom,
-      0,
-    )
-    + gap * Math.max(0, rungs.length - 1)
-    + pagePad,
-  )
-
+function buildCompleteVector(program: Program, rungs: VectorRung[], layout: CompleteLayout) {
+  const {
+    pagePad,
+    cardPad,
+    cardHeader,
+    cardTitleBaseline,
+    titleBaseline,
+    rightTitleBaseline,
+    rightNoteBaseline,
+    ruleOffset,
+  } = COMPLETE_LAYOUT
+  const { width, height, cardWidth, cards } = layout
   const context = measureContext()
   const body: string[] = []
-  body.push(vectorText(pagePad, pagePad + 8, 'LADDERLAB  /  程序导出', {
-    size: 11, weight: 600, fill: MUTED, tracking: 0.6,
-  }))
 
-  let heading = program.name
-  if (context) {
-    setFont(context, 650, 28)
-    setFont(context, 650, 16)
-    const mainLabelWidth = context.measureText('Main [OB1]').width
-    setFont(context, 500, 11)
-    const profileLabelWidth = context.measureText(program.profile.toUpperCase() + '  指令档案').width
-    const headingLimit = Math.max(120, cardWidth - Math.max(mainLabelWidth, profileLabelWidth) - 56)
-    setFont(context, 650, 28)
-    heading = fitText(context, program.name, headingLimit)
-  } else {
-    heading = fitTextApprox(program.name, Math.max(120, cardWidth - 220), 28)
-  }
-  body.push(vectorText(pagePad, pagePad + 45, heading, { size: 28, weight: 650, fill: INK }))
-  body.push(vectorText(width - pagePad, pagePad + 14, 'Main [OB1]', {
+  const headingLimit = completeHeadingLimit(context, program, cardWidth)
+  const heading = context
+    ? fitText(context, program.name, headingLimit)
+    : fitTextApprox(program.name, headingLimit, 28)
+  body.push(vectorText(pagePad, pagePad + titleBaseline, heading, {
+    size: 28, weight: 650, fill: INK,
+  }))
+  body.push(vectorText(width - pagePad, pagePad + rightTitleBaseline, 'Main [OB1]', {
     size: 16, weight: 650, fill: INK, anchor: 'end',
   }))
   body.push(vectorText(
     width - pagePad,
-    pagePad + 36,
+    pagePad + rightNoteBaseline,
     program.profile.toUpperCase() + ' 指令档案',
     { size: 11, weight: 500, fill: MUTED, anchor: 'end' },
   ))
-  body.push(vectorLine(pagePad, pagePad + 76, width - pagePad, pagePad + 76))
+  body.push(vectorLine(pagePad, pagePad + ruleOffset, width - pagePad, pagePad + ruleOffset))
 
-  let y = pagePad + headerHeight
   rungs.forEach((rung, index) => {
-    const cardHeight = cardHeader + 22 + rung.height + cardBottom
+    const card = cards[index]
+    if (!card) return
     const counter = String(index + 1).padStart(2, '0') + ' / ' + String(rungs.length).padStart(2, '0')
     const counterWidth = context ? (() => {
       setFont(context, 500, 10)
@@ -730,25 +777,25 @@ function buildCompleteVector(program: Program, rungs: VectorRung[]) {
     let labelWidth = 0
     if (context) {
       setFont(context, 650, 13)
-      label = fitText(context, rung.label, Math.max(60, contentRight - pagePad - cardPad))
+      label = fitText(context, rung.label, Math.max(60, contentRight - card.rungX))
       labelWidth = context.measureText(label).width
     } else {
-      label = fitTextApprox(rung.label, Math.max(60, contentRight - pagePad - cardPad), 13)
+      label = fitTextApprox(rung.label, Math.max(60, contentRight - card.rungX), 13)
       labelWidth = Array.from(label).reduce((total, character) => (
         total + (isNarrowGlyph(character) ? 13 * 0.58 : 13)
       ), 0)
     }
-    body.push('<rect x="' + pagePad + '" y="' + round2(y) + '" width="' + cardWidth
-      + '" height="' + round2(cardHeight) + '" fill="' + WHITE
+    body.push('<rect x="' + pagePad + '" y="' + round2(card.y) + '" width="' + cardWidth
+      + '" height="' + round2(card.height) + '" fill="' + WHITE
       + '" stroke="' + RULE + '" stroke-width="1" />')
-    body.push(vectorLine(pagePad, y + cardHeader, pagePad + cardWidth, y + cardHeader))
-    body.push(vectorText(pagePad + cardPad, y + 29, label, {
+    body.push(vectorLine(pagePad, card.y + cardHeader, pagePad + cardWidth, card.y + cardHeader))
+    body.push(vectorText(card.rungX, card.y + cardTitleBaseline, label, {
       size: 13, weight: 650, fill: INK,
     }))
 
     if (rung.title) {
       let title = rung.title
-      const titleLeft = pagePad + cardPad + labelWidth + 14
+      const titleLeft = card.rungX + labelWidth + 14
       const titleLimit = Math.max(40, contentRight - titleLeft)
       if (context) {
         setFont(context, 450, 12)
@@ -756,22 +803,21 @@ function buildCompleteVector(program: Program, rungs: VectorRung[]) {
       } else {
         title = fitTextApprox(rung.title, titleLimit, 12)
       }
-      body.push(vectorText(titleLeft, y + 29, title, {
+      body.push(vectorText(titleLeft, card.y + cardTitleBaseline, title, {
         size: 12, weight: 450, fill: MUTED,
       }))
     }
 
     body.push(vectorText(
       pagePad + cardWidth - cardPad,
-      y + 29,
+      card.y + cardTitleBaseline,
       counter,
       { size: 10, weight: 500, fill: MUTED, anchor: 'end' },
     ))
-    body.push(placeVectorRung(rung, pagePad + cardPad, y + cardHeader + 22))
-    y += cardHeight + gap
+    body.push(placeVectorRung(rung, card.rungX, card.rungY))
   })
 
-  return vectorDocument(width, height, program.name + ' 完整程序', body.join(''))
+  return vectorDocument(width, height, body.join(''))
 }
 
 export default function ProgramImageExporter({
@@ -834,26 +880,34 @@ export default function ProgramImageExporter({
             throw new Error('有程序段没有绘制内容，无法生成 SVG')
           }
           const markup = mode === 'plain'
-            ? buildPlainVector(program, vectorRungs)
-            : buildCompleteVector(program, vectorRungs)
+            ? buildPlainVector(vectorRungs, planPlainLayout(vectorRungs))
+            : buildCompleteVector(program, vectorRungs, planCompleteLayout(vectorRungs))
           if (!cancelled) onComplete({ format: 'svg', data: markup })
           return
         }
 
         const prepared: PreparedRung[] = []
         for (const [index, svg] of currentDiagrams.entries()) {
+          // 组件已经卸载（切换工程、关闭导出）时，剩余程序段不必再光栅化。
+          if (cancelled) return
           const rung = exportProgram.rungs[index]
           if (!rung) break
           const result = await prepareRung(svg, '程序段 ' + (index + 1), rung.label)
-          if (result) prepared.push(result)
+          if (cancelled) return
+          if (result) {
+            prepared.push(result)
+            // 每准备完一段，就按最终版面预算检查一次：一旦确定超限立即停手，
+            // 不把剩下几十段也光栅化一遍，更不会等到最后才让整个画布失败。
+            assertProgramImageFits(mode, prepared)
+          }
         }
         if (prepared.length !== exportProgram.rungs.length) {
           throw new Error('有程序段没有绘制内容，无法生成 PNG')
         }
 
         const canvas = mode === 'plain'
-          ? buildPlainImage(prepared)
-          : buildCompleteImage(program, prepared)
+          ? buildPlainImage(prepared, planPlainLayout(prepared))
+          : buildCompleteImage(program, prepared, planCompleteLayout(prepared))
         if (!cancelled) onComplete({ format: 'png', data: canvas.toDataURL('image/png') })
       } catch (reason) {
         if (!cancelled) {

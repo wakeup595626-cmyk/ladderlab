@@ -22,9 +22,9 @@ import {
 const GITHUB_PROFILE = 'https://github.com/wakeup595626-cmyk'
 const GITHUB_REPO = 'https://github.com/wakeup595626-cmyk/ladderlab'
 const REPO_API = 'https://api.github.com/repos/wakeup595626-cmyk/ladderlab'
-/** Star 数只是锦上添花：缓存半小时，拉不到就只留图标，不影响编辑。 */
+/** Star 数只是锦上添花：缓存六小时，拉不到就只留图标，不影响编辑。 */
 const STAR_CACHE_KEY = 'ladderlab.star-count'
-const STAR_CACHE_TTL = 30 * 60 * 1000
+const STAR_CACHE_TTL = 6 * 60 * 60 * 1000
 /**
  * 落点按「可用行程的比例」保存：0 贴左/上，1 贴右/下。
  * 换窗口尺寸或换设备后浮标仍在相对位置，不会按旧像素卡在屏幕外。
@@ -198,7 +198,9 @@ export default function SupportBadge() {
   }, [])
 
   useEffect(() => {
-    if (stars !== null) return
+    // 只在浮层真正打开时才问一次 GitHub：页面平时完全不发这个请求，
+    // 共享出口 IP 被限流时也不会在控制台留下 403。
+    if (!open || stars !== null) return
     const controller = new AbortController()
     const timer = window.setTimeout(() => controller.abort(), 6000)
     fetch(REPO_API, { signal: controller.signal, headers: { Accept: 'application/vnd.github+json' } })
@@ -221,7 +223,7 @@ export default function SupportBadge() {
       window.clearTimeout(timer)
       controller.abort()
     }
-  }, [stars])
+  }, [open, stars])
 
   const close = useCallback((restoreFocus: boolean) => {
     setOpen(false)

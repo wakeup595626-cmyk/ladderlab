@@ -333,7 +333,16 @@ describe('renderSfcSvg 压力与几何', () => {
     const labelYs = branchLabels(rendered.svg)
       .map((label) => label.y - 4.5)
       .sort((left, right) => left - right)
-    expect(labelYs).toEqual(entryYs)
+    expect(labelYs).toHaveLength(2)
+    // 条件贴着自己离开的那一步（第 2、3 步），不再统一贴到目标步的入口高度：
+    // 两条回跳都回到 s0，贴在入口端会让两组条件看起来像同一个入口的两段文字。
+    const boxes = stepRects(rendered.svg)
+    expect(boxes.length).toBe(3)
+    expect(labelYs[0]).toBeGreaterThan(boxes[1].y - 6)
+    expect(labelYs[0]).toBeLessThan(boxes[1].y + boxes[1].height + 8)
+    expect(labelYs[1]).toBeGreaterThan(boxes[2].y - 6)
+    expect(labelYs[1]).toBeLessThan(boxes[2].y + boxes[2].height + 8)
+    expect(labelYs[1] - labelYs[0]).toBeGreaterThanOrEqual(MIN_LABEL_GAP)
   })
 
   it('空 actions 的步骤也能渲染，且不生成动作框', () => {

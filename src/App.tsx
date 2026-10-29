@@ -70,7 +70,7 @@ import type {
   Selection,
 } from './engine/types'
 import type { DragPayload, DropTarget } from './lib/dragTypes'
-import { downloadDataUrl, downloadText, parseProgramText, serializeProgram } from './lib/io'
+import { downloadDataUrl, downloadText, downloadTimestamp, parseProgramText, serializeProgram } from './lib/io'
 import { copyText } from './lib/clipboard'
 import {
   buildShareUrl,
@@ -372,10 +372,6 @@ function formatBackupSize(bytes: number): string {
   return bytes < 1024 ? `${bytes} B` : `${(bytes / 1024).toFixed(1)} KB`
 }
 
-function downloadTimestamp(): string {
-  return new Date().toISOString().replace(/[:.]/g, '-')
-}
-
 function archiveProgramVersion(program: Program): boolean {
   try {
     return Boolean(archiveRecoveryCopy(serializeProgram(program)))
@@ -675,6 +671,9 @@ export default function App() {
   const pendingPruneRef = useRef<string[]>([])
   const pruneFlushRef = useRef<number | null>(null)
   const lastRuntimeSignatureRef = useRef<string | null>(null)
+  // 导出请求必须每次唯一：同一毫秒里连点两个不同导出，key 重复会让
+  // ProgramImageExporter 不重新挂载，第二个请求就不会执行。
+  const imageExportSeqRef = useRef(0)
   const program = history.present
   const compileResult = useMemo(() => compile(program), [program])
 
@@ -2706,7 +2705,8 @@ export default function App() {
   }
 
   const handleExportBrokenProject = (record: BrokenSavedProject) => {
-    const stamp = new Date().toISOString().replace(/[-:]/g, '').slice(0, 13)
+    // 与其它导出统一用本地时间，避免凌晨导出落到前一天。
+    const stamp = downloadTimestamp()
     downloadText(`梯形实验室-损坏记录-${safeFileName(record.name)}-${stamp}.txt`, record.raw)
     notify('已导出这条记录的原始数据')
   }
@@ -2818,8 +2818,9 @@ export default function App() {
   }
 
   const startImageExport = (mode: ProgramImageMode, format: ProgramImageFormat) => {
+    imageExportSeqRef.current += 1
     setImageExportRequest({
-      id: Date.now(),
+      id: imageExportSeqRef.current,
       program,
       mode,
       format,

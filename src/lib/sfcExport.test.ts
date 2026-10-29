@@ -149,7 +149,7 @@ describe('rasterizeSfcPng', () => {
     const { createObjectURL } = spyObjectUrl()
     const { createElement } = stubCanvas()
 
-    await expect(rasterizeSfcPng(longChart(1200))).rejects.toThrow('顺序功能图过大')
+    await expect(rasterizeSfcPng(longChart(1200))).rejects.toThrow('请改用 SVG 导出')
     expect(createObjectURL).not.toHaveBeenCalled()
     expect(createElement).not.toHaveBeenCalled()
   })

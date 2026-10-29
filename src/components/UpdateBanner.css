@@ -1,10 +1,62 @@
+.sw-update-banner {
+  position: fixed;
+  top: calc(env(safe-area-inset-top, 0px) + 64px);
+  left: 50%;
+  z-index: 80;
+  display: flex;
+  width: min(560px, calc(100vw - 24px));
+  min-height: 30px;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  padding: 0 4px 0 12px;
+  transform: translateX(-50%);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  color: var(--text);
+  box-shadow:
+    inset 0 0 0 1px var(--accent-ink),
+    var(--shadow-overlay);
+  font-family: var(--sans);
+  font-size: var(--fs-body);
+  line-height: 1.2;
+}
+
+.sw-update-banner__actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
 /* 更新提示条是临时浮层，桌面保持 30px 的紧凑高度不打扰编辑；
    触摸设备上没有鼠标精度，两个按钮必须回到 44px 命中下限。 */
 .sw-update-banner__action {
   min-height: 30px;
+  padding: 0 12px;
+  border: 1px solid var(--control);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.sw-update-banner__action--primary {
+  border-color: var(--accent-ink);
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
 }
 
 @media (pointer: coarse) {
+  .sw-update-banner {
+    min-height: 44px;
+  }
+
   .sw-update-banner__action {
     min-height: 44px;
     padding-inline: 16px;

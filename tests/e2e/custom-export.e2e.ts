@@ -80,7 +80,7 @@ test.describe('自定义工程导出验收', () => {
       const text = file.bytes.toString('utf8')
       if (text.length === 0) throw new Error(`${spec.item} 下载内容为空`)
 
-      const audit = auditSvg(text, { allowRootLabel: spec.kind !== 'sfc' })
+      const audit = auditSvg(text)
       expect(`${spec.item}: ${audit.issues.join('；')}`).toBe(`${spec.item}: `)
 
       console.log(
@@ -110,21 +110,13 @@ test.describe('自定义工程导出验收', () => {
         `${spec.item} 出现内置实验文字: `,
       )
 
-      if (spec.kind === 'sfc') {
-        // 顺序功能图要求“画布上有什么，文件里就只有什么”。
-        expect(audit.rootRole).toBe('')
-        expect(parsed.hasTitle).toBe(false)
-        expect(audit.rootTitle).toBe('')
-        expect(text).not.toContain('role=')
-        expect(text).not.toContain('<title')
-      } else {
-        // 完整程序 / 纯梯形图是给人看的静态图片，根级 role=img + <title> 合法。
-        expect(audit.rootRole).toBe('img')
-        expect(audit.rootTitle).toBe(
-          `${CUSTOM_PROGRAM.name} ` + (spec.kind === 'complete' ? '完整程序' : '梯形图'),
-        )
-        expect(parsed.hasTitle).toBe(true)
-      }
+      // 三种导出共用同一份根节点契约：不带 role，也不带根级 <title>，
+      // 保证同一份图在浏览器、Word、Illustrator 里的语义一致。
+      expect(audit.rootRole).toBe('')
+      expect(audit.rootTitle).toBe('')
+      expect(parsed.hasTitle).toBe(false)
+      expect(text).not.toContain('role=')
+      expect(text).not.toContain('<title')
 
       evidence.push(
         [

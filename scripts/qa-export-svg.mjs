@@ -84,20 +84,21 @@ function inspectSvg(text) {
   }
 }
 
-function assertCleanSvg(item, { allowDocumentTitle }) {
+function assertCleanSvg(item) {
   if (!item.xmlDeclaration || !item.hasSvg || item.nestedSvg !== 1) {
     throw new Error(item.label + ' 不是单根 SVG 文档')
   }
   if (item.embeddedRaster) throw new Error(item.label + ' 含位图或外链图片')
   if (!item.whiteBackground) throw new Error(item.label + ' 没有纯白底色')
-  if (item.roles.some((role) => role !== 'img')) {
-    throw new Error(item.label + ' 残留交互角色：' + JSON.stringify(item.roles))
+  // 三条 SVG 统一契约：根节点不带 role，也不带根级 <title>。
+  if (item.roles.length > 0) {
+    throw new Error(item.label + ' 残留 role 属性：' + JSON.stringify(item.roles))
   }
   if (item.hasForbiddenDomSemantics) {
     throw new Error(item.label + ' 残留 aria/data/tabindex/class/focusable 属性')
   }
-  if (item.titleNodes > (allowDocumentTitle ? 1 : 0)) {
-    throw new Error(item.label + ' 残留多余 <title>：' + item.titleNodes)
+  if (item.titleNodes > 0) {
+    throw new Error(item.label + ' 残留 <title>：' + item.titleNodes)
   }
 }
 
@@ -170,7 +171,7 @@ async function main() {
       if (kind === 'svg') {
         const text = await readFile(file, 'utf8')
         const inspected = { label, file, ...inspectSvg(text) }
-        assertCleanSvg(inspected, { allowDocumentTitle: filename !== 'sfc.svg' })
+        assertCleanSvg(inspected)
         report.exports.push(inspected)
         report.screenshots.push(await screenshotSvg(browser, file, filename.replace('.svg', '')))
       } else {
@@ -202,7 +203,7 @@ async function main() {
         file,
         ...inspectSvg(text),
       }
-      assertCleanSvg(inspected, { allowDocumentTitle: false })
+      assertCleanSvg(inspected)
       report.exports.push(inspected)
       report.screenshots.push(await screenshotSvg(browser, file, 'sfc-' + key))
       report.uniquePerLab[key] = digest(text)

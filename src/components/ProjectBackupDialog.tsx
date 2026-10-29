@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react'
 import type { DragEvent } from 'react'
-import { downloadText } from '../lib/io'
+import { downloadText, downloadTimestamp } from '../lib/io'
 import {
   LIBRARY_BACKUP_MAX_BYTES,
   assertLibraryBackupFits,
@@ -41,11 +41,6 @@ type Step =
 
 function pad(value: number): string {
   return String(value).padStart(2, '0')
-}
-
-function timestampLabel(date = new Date()): string {
-  return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}`
-    + `-${pad(date.getHours())}${pad(date.getMinutes())}`
 }
 
 function formatBackupTime(value: string): string {
@@ -97,7 +92,8 @@ function ProjectBackupDialogContent({
       const text = serializeLibraryBackup(backup)
       // 先确认导出文件自己能读回来，再触发下载；宁可报错，也不留下不能恢复的备份。
       assertLibraryBackupFits(text)
-      downloadText(`梯形实验室-整包备份-${timestampLabel()}.json`, text)
+      // 与其它导出共用一套本地时间戳：yyyy-MM-dd_HH-mm-ss，可直接进文件名。
+      downloadText('梯形实验室-整包备份-' + downloadTimestamp() + '.json', text)
       setError('')
       setNotice(`已导出 ${backup.count} 个工程，校验码 ${backup.checksum}。`)
     } catch (reason) {

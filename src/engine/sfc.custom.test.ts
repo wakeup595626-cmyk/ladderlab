@@ -178,15 +178,14 @@ describe('自建工程顺序功能图：三种不同结构', () => {
       { text: '输送带运行', detail: 'Q0.0=1' },
       { text: 'T5 计时 2s', detail: '' },
     ])
-    expect(chart.steps[2].actions).toEqual([
-      { text: '输送带运行', detail: 'Q0.0=0' },
-      { text: '两秒到', detail: 'M3.1=1' },
-    ])
+    // 梯形图里没有任何网络复位 ConveyorRun，完成步不能凭空写 Q0.0=0。
+    expect(chart.steps[2].actions).toEqual([{ text: '两秒到', detail: 'M3.1=1' }])
     expect(labelOf(chart, '__initial', '__run')).toBe('启动输送')
     expect(labelOf(chart, '__run', '__done')).toBe('两秒到')
     expect(labelOf(chart, '__run', '__initial')).toBe('停止互锁')
-    expect(labelOf(chart, '__done', '__initial')).toBe('复位')
-    expect(chart.edges).toHaveLength(4)
+    // 梯形图里没有复位 ConveyorRun 的网络，完成步就没有回到初始步的出口。
+    expect(labelOf(chart, '__done', '__initial')).toBeUndefined()
+    expect(chart.edges).toHaveLength(3)
   })
 
   it('三步置位流程保留两条进入第 3 步的边与三条动作', () => {
@@ -216,19 +215,20 @@ describe('自建工程顺序功能图：三种不同结构', () => {
     expect(chart.source).toBe('network')
     expect(chart.steps).toHaveLength(5)
     expect(chart.steps[0].initial).toBe(true)
+    // 初始步只保留双边框，不编造输出电平。
     expect(chart.steps[0].actions).toEqual([])
     expect(chart.steps.map((step) => step.title)).toEqual([
       '', '累计四个工件', '累计两个坏件', '批次完成启动堆垛', '坏件报警点亮指示灯',
     ])
-    expect(chart.steps.map((step) => step.actions[0])).toEqual([
-      undefined,
-      { text: '工件计数 计数', detail: '计数到 4' },
-      { text: '坏件计数 计数', detail: '计数到 2' },
+    expect(chart.steps.slice(1).map((step) => step.actions[0])).toEqual([
+      { text: '工件计数 计数', detail: '计数到 4 · 清零 I0.2' },
+      { text: '坏件计数 计数', detail: '计数到 2 · 清零 I0.2' },
       { text: '堆垛电机', detail: 'Q0.0=1' },
       { text: '坏件灯', detail: 'Q0.1=1' },
     ])
     expect(chart.edges.map((edge) => edge.label)).toEqual([
       '工件传感器（I0.0）', '坏件传感器（I0.1）', '批次完成（M2.0）', '坏件报警（M2.1）',
+      '下一扫描周期',
     ])
     // 计数器输入与输出条件都来自本工程，没有混进自保持或步骤位模板。
     const texts = actionTexts(chart)
@@ -559,11 +559,17 @@ describe('状态链与移位链的转移完整性', () => {
   it('末状态的三条复位网络全部留在转移标签里', () => {
     const chart = mustBuild(threeResetProgram())
     expect(chart.source).toBe('state-tags')
-    const exit = chart.edges.find((edge) => edge.to === '__initial')
-    expect(exit).toBeDefined()
-    expect(exit!.label).toContain('全部停止')
-    expect(exit!.label).toContain('复位键')
-    expect(exit!.label).toContain('急停')
+    const exitOf = (state: string) => chart.edges.find(
+      (edge) => edge.from === state && edge.to === '__initial',
+    )
+    const exitC = exitOf('C')
+    expect(exitC).toBeDefined()
+    expect(exitC!.label).toContain('全部停止')
+    expect(exitC!.label).toContain('复位键')
+    expect(exitC!.label).toContain('急停')
+    // A、B 也各自被复位，不能因为 C 有三条复位网络就把它们的出口吞掉。
+    expect(exitOf('A')?.label).toContain('全部停止')
+    expect(exitOf('B')?.label).toContain('复位键')
   })
 
   it('移位链按“哪一步在推进”分开写标签，不同步进条件不会串到别的步上', () => {
