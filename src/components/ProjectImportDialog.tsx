@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react'
 import type { DragEvent } from 'react'
+import { contentRungs } from '../engine/rungInvariant'
 import type { LadderNode, Program } from '../engine/types'
 import { MAX_IMPORT_BYTES, parseProgramText } from '../lib/io'
 import { useModalFocus } from '../lib/useModalFocus'
@@ -79,7 +80,7 @@ function ProjectImportDialogContent({ onClose, onImport }: Omit<ProjectImportDia
   }
 
   const elementCount = preview
-    ? preview.program.rungs.reduce((total, rung) => total + countNodes(rung.nodes) + 1, 0)
+    ? contentRungs(preview.program).reduce((total, rung) => total + countNodes(rung.nodes) + 1, 0)
     : 0
 
   return (
@@ -177,7 +178,7 @@ function ProjectImportDialogContent({ onClose, onImport }: Omit<ProjectImportDia
               <small>{preview.program.profile.toUpperCase()} 指令档案</small>
             </div>
             <dl className="project-import-metrics">
-              <div><dt>程序段</dt><dd>{preview.program.rungs.length}</dd></div>
+              <div><dt>程序段</dt><dd>{contentRungs(preview.program).length}</dd></div>
               <div><dt>变量</dt><dd>{preview.program.tags.length}</dd></div>
               <div><dt>元件</dt><dd>{elementCount}</dd></div>
             </dl>

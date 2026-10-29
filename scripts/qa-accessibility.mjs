@@ -103,6 +103,13 @@ async function pressEscape() {
   await sleep(320)
 }
 
+async function pressEnter() {
+  const base = { key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 }
+  await send('Input.dispatchKeyEvent', { type: 'keyDown', ...base })
+  await send('Input.dispatchKeyEvent', { type: 'keyUp', ...base })
+  await sleep(320)
+}
+
 async function pressTab(backwards = false) {
   const modifiers = backwards ? 8 : 0
   const base = { key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9, modifiers }
@@ -277,10 +284,9 @@ for (const viewport of viewports) {
     check(`${label}/import-dialog-esc-focus`, importClosed.closed && importClosed.focusReturned, importClosed)
 
     const clickResult = await evaluate(`(() => {
-      const buttons = [...document.querySelectorAll('.wb-doc-action')];
-      const target = buttons.find((button) => button.textContent?.trim() === '变量表');
+      const target = document.querySelector('[data-inspector-entry="tags"]');
       if (target) target.click();
-      return { labels: buttons.map((button) => button.textContent?.trim()), clicked: Boolean(target) };
+      return { label: target?.textContent?.trim() ?? null, clicked: Boolean(target) };
     })()`)
     if (process.env.LADDERLAB_DEBUG) console.log('debug doc click', clickResult)
     await sleep(420)
@@ -315,6 +321,41 @@ for (const viewport of viewports) {
     check(`${label}/run-clock-contrast`, contrast.found && contrast.ratio >= 4.5, contrast)
     await evaluate(`document.querySelector('.wb-run-toggle')?.click()`)
     await sleep(200)
+
+    // 桌面参数框不是模态框，关闭时必须把焦点还给触发它的画布元件。
+    // 用启保停示例里的并联选择层验证 SVG 节点也能正确恢复键盘焦点。
+    const demoStarted = await evaluate(`(() => {
+      const button = document.querySelector('.wb-coach-demo');
+      if (!button) return false;
+      button.click();
+      return true;
+    })()`)
+    await sleep(800)
+    await pressEscape()
+    const parallelFocused = await evaluate(`(() => {
+      const target = document.querySelector('.ll-parallel-select');
+      if (!target) return { found: false, focused: false };
+      target.focus({ preventScroll: true });
+      return { found: true, focused: document.activeElement === target };
+    })()`)
+    check(`${label}/parallel-focus-ready`, demoStarted && parallelFocused.found && parallelFocused.focused, parallelFocused)
+    await pressEnter()
+    const quickEditorOpened = await evaluate(`(() => ({
+      open: Boolean(document.querySelector('.qe-panel')),
+      role: document.querySelector('.qe-panel')?.getAttribute('role') ?? null,
+    }))()`)
+    check(`${label}/quick-editor-keyboard-open`, quickEditorOpened.open && quickEditorOpened.role === 'group', quickEditorOpened)
+    await pressEscape()
+    const quickEditorClosed = await evaluate(`(() => ({
+      closed: !document.querySelector('.qe-panel'),
+      focusReturned: document.activeElement?.classList.contains('ll-parallel-select') ?? false,
+      activeClass: document.activeElement?.getAttribute('class') ?? '',
+    }))()`)
+    check(
+      `${label}/quick-editor-esc-focus`,
+      quickEditorClosed.closed && quickEditorClosed.focusReturned,
+      quickEditorClosed,
+    )
   }
 
   if (viewport.width <= 720) {

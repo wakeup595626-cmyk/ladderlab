@@ -1,4 +1,12 @@
-import { useCallback, useLayoutEffect, useRef, useState } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from 'react'
 import { getProfile } from '../engine/profiles'
 import type { ContactKind, OutputKind, ProfileId, Rung } from '../engine/types'
 import type { DragPayload } from '../lib/dragTypes'
@@ -7,8 +15,15 @@ import {
   favoriteInstructionEntry,
   favoriteInstructionId,
 } from '../lib/instructionFavorites'
-import type { FavoriteInsertTarget } from '../lib/insertTarget'
-import { ChevronRightIcon, GripIcon, StarFilledIcon } from './Icons'
+import { favoriteTargetSegmentLabel, type FavoriteInsertTarget } from '../lib/insertTarget'
+import {
+  BranchIcon,
+  ChevronRightIcon,
+  GripIcon,
+  MergeIcon,
+  PlusIcon,
+  StarFilledIcon,
+} from './Icons'
 import InsertTargetControl from './InsertTargetControl'
 import {
   isInstructionAllowed,
@@ -27,8 +42,13 @@ interface InstructionBarProps {
   onToggleFavorite: (family: InstructionFamily, kind: ContactKind | OutputKind) => void
   onInsertContact: (kind: ContactKind) => void
   onChangeOutput: (kind: OutputKind) => void
+  onOpenBranch: () => void
+  onMergeBranch: () => void
   onStartDrag: (event: React.PointerEvent<HTMLElement>, payload: DragPayload, label: string) => void
   onOpenAll: () => void
+  /** 收藏条最右侧的工作区动作，例如打开变量表。放在工具组外边，
+   *  这样点击它仍会结束收藏条的连续插入状态。 */
+  inspectorAction?: ReactNode
 }
 
 /** 指令条空间紧张，沿用原来的两个汉字叫法；目录里的全名留给抽屉和提示。 */
@@ -64,24 +84,69 @@ export default function InstructionBar({
   onToggleFavorite,
   onInsertContact,
   onChangeOutput,
+  onOpenBranch,
+  onMergeBranch,
   onStartDrag,
   onOpenAll,
+  inspectorAction,
 }: InstructionBarProps) {
   const activeProfile = getProfile(profile)
   const allButtonRef = useRef<HTMLButtonElement | null>(null)
   const starRefs = useRef(new Map<string, HTMLButtonElement>())
   const pendingStarFocusRef = useRef<{ targetId: string | null } | null>(null)
   const listRef = useRef<HTMLDivElement | null>(null)
+  const toolsRef = useRef<HTMLDivElement | null>(null)
+  const flashTimerRef = useRef<number | null>(null)
   const [listScroll, setListScroll] = useState({ canScroll: false, atEnd: false })
+  const [flash, setFlash] = useState<{
+    id: string
+    nonce: number
+    x: number
+    y: number
+  } | null>(null)
   const favorites = favoriteIds
     .map((id) => favoriteInstructionEntry(id))
     .filter((entry) => entry !== undefined)
   const favoriteKeys = favorites.map((entry) => favoriteInstructionId(entry.family, entry.kind))
   const segmentLabel = insertTarget
-    ? '程序段 ' + (insertTarget.rungIndex + 1)
+    ? favoriteTargetSegmentLabel(insertTarget)
     : '目标程序段'
 
   const favoriteKey = favoriteIds.join('|')
+
+  useEffect(() => () => {
+    if (flashTimerRef.current !== null) window.clearTimeout(flashTimerRef.current)
+  }, [])
+
+  const pulseFavorite = useCallback((id: string, x: number, y: number) => {
+    setFlash((current) => ({ id, nonce: (current?.nonce ?? 0) + 1, x, y }))
+    if (flashTimerRef.current !== null) window.clearTimeout(flashTimerRef.current)
+    // 光斑、双环和卡片内侧回弹共用同一条时间轴，收尾时一起归零。
+    flashTimerRef.current = window.setTimeout(() => setFlash(null), 700)
+  }, [])
+
+  const hideFollow = useCallback(() => {
+    const host = toolsRef.current
+    if (host) delete host.dataset.follow
+  }, [])
+
+  const moveFollow = useCallback((target: Element | null) => {
+    const host = toolsRef.current
+    if (!host || target === null) return
+    if (window.matchMedia?.('(pointer: coarse)').matches) return
+    const button = target.closest<HTMLElement>(
+      '.wb-instruction-card, .wb-construct-button, .wb-instruction-button.is-all',
+    )
+    if (!button || !host.contains(button)) {
+      hideFollow()
+      return
+    }
+    const hostBox = host.getBoundingClientRect()
+    const box = button.getBoundingClientRect()
+    host.style.setProperty('--follow-x', `${box.left - hostBox.left}px`)
+    host.style.setProperty('--follow-w', `${box.width}px`)
+    host.dataset.follow = 'on'
+  }, [hideFollow])
 
   // 收藏超过一屏时，用箭头把“还能往右看”明说出来，避免半个卡片被当成排版错误。
   useLayoutEffect(() => {
@@ -148,7 +213,23 @@ export default function InstructionBar({
         <h2 id="wb-instruction-title">收藏指令</h2>
       </div>
 
-      <div className="wb-instruction-tools" role="toolbar" aria-label="收藏的梯形图指令">
+      <div
+        className="wb-instruction-tools"
+        ref={toolsRef}
+        data-keep-insert-cursor="true"
+        role="toolbar"
+        aria-label="收藏的梯形图指令"
+        onPointerOver={(event) => {
+          if (event.pointerType === 'touch') return
+          moveFollow(event.target as Element)
+        }}
+        onPointerLeave={hideFollow}
+        onFocusCapture={(event) => moveFollow(event.target as Element)}
+        onBlurCapture={(event) => {
+          if (!event.currentTarget.contains(event.relatedTarget as Node | null)) hideFollow()
+        }}
+      >
+        <span className="wb-instruction-follow" aria-hidden="true" />
         <InsertTargetControl
           rungs={rungs}
           insertTarget={insertTarget}
@@ -156,7 +237,37 @@ export default function InstructionBar({
           onSelectRung={onSelectRung}
           onLocate={onLocateTarget}
         />
-        <div className="wb-instruction-list" ref={listRef}>
+        <div
+          className="wb-instruction-construct"
+          data-keep-insert-cursor="true"
+          role="group"
+          aria-label="线路构造"
+        >
+          <button
+            type="button"
+            className="wb-construct-button"
+            onClick={onOpenBranch}
+            title="在当前插入点向下打开并联分支"
+          >
+            <BranchIcon size={15} />
+            <span>分支</span>
+          </button>
+          <button
+            type="button"
+            className="wb-construct-button"
+            onClick={onMergeBranch}
+            title="闭合当前程序段里未闭合的并联分支"
+          >
+            <MergeIcon size={15} />
+            <span>合并</span>
+          </button>
+        </div>
+        <div
+          className="wb-instruction-list"
+          ref={listRef}
+          data-keep-insert-cursor="true"
+          onScroll={hideFollow}
+        >
           {favorites.length === 0 && (
             <div className="wb-instruction-empty">
               <span>还没有收藏指令</span>
@@ -178,20 +289,33 @@ export default function InstructionBar({
               ? '点击替换' + segmentLabel + '的输出，也可拖动'
               : '点击插入到' + segmentLabel + '，' + targetAnchorLabel + '，也可拖动'
             return (
-              <div className="wb-instruction-card" key={id}>
+              <div
+                className={[
+                  'wb-instruction-card',
+                  flash?.id === id ? 'is-confirmed' : '',
+                ].filter(Boolean).join(' ')}
+                key={id}
+              >
                 <button
                   type="button"
                   className="wb-instruction-button"
                   data-drag-handle
                   disabled={!allowed}
                   title={allowed
-                    ? entry.detail + '。' + placement
+                    ? entry.detail.replace(/。$/, '') + '。' + placement
                     : `${entry.label}在当前 ${activeProfile.shortName} 指令集中不可用`}
                   aria-label={allowed ? entry.label + '，' + placement : entry.label + ' 当前不可用'}
-                  onClick={() => {
+                  onClick={(event) => {
                     if (!allowed) return
                     if (entry.family === 'contact') onInsertContact(entry.kind as ContactKind)
                     else onChangeOutput(entry.kind as OutputKind)
+                    const rect = event.currentTarget.getBoundingClientRect()
+                    const keyboard = event.detail === 0
+                    pulseFavorite(
+                      id,
+                      keyboard ? rect.width / 2 : event.clientX - rect.left,
+                      keyboard ? rect.height / 2 : event.clientY - rect.top,
+                    )
                   }}
                   onPointerDown={(event) => {
                     if (!allowed) return
@@ -201,12 +325,25 @@ export default function InstructionBar({
                     onStartDrag(event, payload, shortLabel)
                   }}
                 >
-                  <span className="wb-instruction-symbol mono" aria-hidden="true">{entry.symbol}</span>
+                  {/* 符号不再用 key 重挂载来重播动画：同一张卡里 key 与
+                      下面的按压光效撞号，React 会把旧节点留在原地，点几次
+                      就叠出几个“( )”。动画改由 .is-confirmed 类负责。 */}
+                  <span className="wb-instruction-symbol mono" aria-hidden="true">
+                    {entry.symbol}
+                  </span>
                   <span className="wb-instruction-label">{shortLabel}</span>
-                  {entry.family === 'output' && (
-                    <span className="wb-instruction-replace">替换</span>
-                  )}
                   <GripIcon size={14} className="wb-drag-mark" />
+                  {flash?.id === id && (
+                    <span
+                      className="wb-instruction-press"
+                      key={'press-' + flash.nonce}
+                      aria-hidden="true"
+                      style={{
+                        '--press-x': `${flash.x}px`,
+                        '--press-y': `${flash.y}px`,
+                      } as CSSProperties}
+                    />
+                  )}
                 </button>
                 <button
                   type="button"
@@ -229,7 +366,7 @@ export default function InstructionBar({
                     onToggleFavorite(entry.family, entry.kind)
                   }}
                 >
-                  <StarFilledIcon size={15} />
+                  <StarFilledIcon size={16} />
                 </button>
               </div>
             )
@@ -260,11 +397,17 @@ export default function InstructionBar({
           aria-label="打开全部指令"
           title="搜索全部指令"
         >
-          <span className="wb-all-mark" aria-hidden="true">+</span>
+          <span className="wb-all-mark" aria-hidden="true">
+            <PlusIcon size={12} strokeWidth={2.1} />
+          </span>
           <span className="wb-instruction-label">全部指令</span>
           <ChevronRightIcon size={15} aria-hidden="true" />
         </button>
       </div>
+
+      {inspectorAction && (
+        <div className="wb-instruction-utility-slot">{inspectorAction}</div>
+      )}
     </section>
   )
 }

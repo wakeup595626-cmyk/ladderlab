@@ -1,0 +1,1030 @@
+/* Motion layer.
+   One vocabulary for the whole workbench: state moves, never the layout.
+   Only transform and opacity animate; colour changes stay short and linear. */
+
+.wb-shell {
+  --ease-fluid: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.inspector-tabs {
+  position: relative;
+  isolation: isolate;
+}
+
+/* A sliding fill sits behind the labels; the existing rule becomes its
+   luminous leading edge. Both move from the same data-tab state, so pointer,
+   keyboard and programme-driven tab changes all feel like one object. */
+.inspector-tabs::before {
+  position: absolute;
+  inset: 3px 3px 3px;
+  z-index: 0;
+  width: calc((100% - 6px) / 3);
+  border: 1px solid color-mix(in srgb, var(--accent) 18%, transparent);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--accent) 9%, var(--raised));
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--surface) 70%, transparent);
+  content: "";
+  pointer-events: none;
+  transform: translateX(0);
+  transition: transform 260ms var(--ease-out);
+}
+
+.inspector-tabs[data-tab="tags"]::before {
+  transform: translateX(100%);
+}
+
+.inspector-tabs[data-tab="diagnostics"]::before {
+  transform: translateX(200%);
+}
+
+.inspector-tabs button {
+  position: relative;
+  z-index: 1;
+  transition:
+    color 150ms linear,
+    background-color 150ms linear;
+}
+
+.inspector-tabs::after {
+  position: absolute;
+  bottom: -1px;
+  left: 0;
+  width: calc(100% / 3);
+  height: 2px;
+  background: var(--accent);
+  box-shadow: 0 0 9px color-mix(in srgb, var(--accent) 52%, transparent);
+  content: "";
+  pointer-events: none;
+  transform: translateX(0);
+  transition: transform 260ms var(--ease-out);
+}
+
+.inspector-tabs[data-tab="tags"]::after {
+  transform: translateX(100%);
+}
+
+.inspector-tabs[data-tab="diagnostics"]::after {
+  transform: translateX(200%);
+}
+
+.inspector-tabs button.active {
+  border-bottom-color: transparent;
+}
+
+.wb-tabbar.mobile-tabbar {
+  position: relative;
+  isolation: isolate;
+}
+
+.wb-tabbar.mobile-tabbar::after {
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  left: 0;
+  z-index: 0;
+  width: 25%;
+  border: 1px solid color-mix(in srgb, var(--accent) 17%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 8%, var(--raised));
+  content: "";
+  opacity: 1;
+  pointer-events: none;
+  transform: translateX(0);
+  transition:
+    transform 260ms var(--ease-out),
+    opacity 140ms linear;
+}
+
+.wb-tabbar.mobile-tabbar[data-panel="instructions"]::after {
+  transform: translateX(100%);
+}
+
+.wb-tabbar.mobile-tabbar[data-panel="tags"]::after {
+  transform: translateX(200%);
+}
+
+.wb-tabbar.mobile-tabbar[data-panel="project"]::after {
+  transform: translateX(300%);
+}
+
+.wb-tabbar.mobile-tabbar[data-panel="none"]::after {
+  opacity: 0;
+}
+
+.wb-tabbar.mobile-tabbar::before {
+  position: absolute;
+  top: -1px;
+  left: 0;
+  z-index: 2;
+  width: 25%;
+  height: 2px;
+  background: var(--accent);
+  content: "";
+  opacity: 1;
+  pointer-events: none;
+  transform: translateX(0);
+  transition:
+    transform 240ms var(--ease-in-out),
+    opacity 140ms linear;
+}
+
+.wb-tabbar.mobile-tabbar[data-panel="instructions"]::before {
+  transform: translateX(100%);
+}
+
+.wb-tabbar.mobile-tabbar[data-panel="tags"]::before {
+  transform: translateX(200%);
+}
+
+.wb-tabbar.mobile-tabbar[data-panel="project"]::before {
+  transform: translateX(300%);
+}
+
+.wb-tabbar.mobile-tabbar[data-panel="none"]::before {
+  opacity: 0;
+}
+
+.wb-tabbar .mobile-tab-action.is-active {
+  border-top-color: transparent;
+}
+
+.wb-tabbar .mobile-tab-action {
+  position: relative;
+  z-index: 1;
+}
+
+.ll-energy {
+  pointer-events: none;
+}
+
+.ll-energy-spark {
+  fill: var(--accent);
+  opacity: 0.82;
+}
+
+.ll-power-state i {
+  position: relative;
+}
+
+.ll-power-state.is-on i::after {
+  position: absolute;
+  inset: -1px;
+  border: 1px solid var(--positive);
+  border-radius: 50%;
+  content: "";
+  opacity: 0;
+  pointer-events: none;
+}
+
+.ll-insert-cursor-halo,
+.ll-insert-cursor-ripple {
+  pointer-events: none;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.ll-insert-cursor-halo {
+  filter: drop-shadow(0 0 3px color-mix(in srgb, var(--accent) 55%, transparent));
+}
+
+.ll-insert-cursor-ripple {
+  fill: none;
+  stroke: color-mix(in srgb, var(--accent) 64%, transparent);
+  stroke-width: 1.25;
+  opacity: 0;
+}
+
+.ll-node.is-just-inserted {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.ll-insert-flash {
+  fill: none;
+  stroke: color-mix(in srgb, var(--accent) 90%, white 10%);
+  stroke-width: 3;
+  stroke-dasharray: none;
+  opacity: 0;
+  pointer-events: none;
+  filter:
+    drop-shadow(0 0 4px color-mix(in srgb, var(--accent) 85%, transparent))
+    drop-shadow(0 0 10px color-mix(in srgb, var(--accent) 45%, transparent));
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .ll-energy-spark {
+    animation: ll-energy-run 1800ms linear infinite;
+  }
+
+  .ll-power-state.is-on i::after {
+    animation: ll-power-pulse 1600ms var(--ease-out) infinite;
+  }
+
+  .ll-insert-cursor-halo {
+    animation: ll-cursor-breathe 1800ms var(--ease-in-out) infinite;
+  }
+
+  .ll-insert-cursor-ripple {
+    animation: ll-cursor-ripple 1200ms var(--ease-out) infinite;
+  }
+
+  .ll-node.is-just-inserted {
+    animation: ll-node-insert-pop 700ms var(--ease-fluid);
+  }
+
+  .ll-insert-flash {
+    animation: ll-insert-ring 680ms var(--ease-out) forwards;
+  }
+}
+
+@keyframes ll-energy-run {
+  from {
+    transform: translateX(0);
+  }
+
+  to {
+    transform: translateX(var(--ll-energy-span, 0px));
+  }
+}
+
+@keyframes ll-power-pulse {
+  0% {
+    opacity: 0.55;
+    transform: scale(1);
+  }
+
+  70%,
+  100% {
+    opacity: 0;
+    transform: scale(2);
+  }
+}
+
+@keyframes ll-node-insert-pop {
+  0% {
+    opacity: 0.2;
+    transform: scale(0.68);
+  }
+
+  38% {
+    opacity: 1;
+    transform: scale(1.11);
+  }
+
+  68% {
+    transform: scale(0.985);
+  }
+
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes ll-insert-ring {
+  0% {
+    opacity: 1;
+    stroke-width: 3.5;
+    transform: scale(0.9);
+  }
+
+  58% { opacity: 0.5; }
+
+  100% {
+    opacity: 0;
+    stroke-width: 0.8;
+    transform: scale(1.52);
+  }
+}
+
+@keyframes ll-cursor-breathe {
+  0%,
+  100% {
+    opacity: 0.7;
+    transform: scale(1);
+  }
+
+  50% {
+    opacity: 1;
+    transform: scale(1.06);
+  }
+}
+
+@keyframes ll-cursor-ripple {
+  0% {
+    opacity: 0.5;
+    transform: scale(1);
+  }
+
+  70%,
+  100% {
+    opacity: 0;
+    transform: scale(1.8);
+  }
+}
+
+/* ------------------------------------------------------- instruction bar */
+
+.wb-instruction-tools {
+  position: relative;
+}
+
+.wb-instruction-follow {
+  position: absolute;
+  bottom: 1px;
+  left: 0;
+  z-index: 2;
+  width: calc(var(--follow-w, 0px) - 16px);
+  height: 3px;
+  border-radius: 999px;
+  background: var(--accent);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 48%, transparent);
+  content: "";
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(calc(var(--follow-x, 0px) + 8px));
+  transition:
+    transform 210ms var(--ease-out),
+    width 210ms var(--ease-out),
+    opacity 120ms linear;
+}
+
+.wb-instruction-tools[data-follow="on"] .wb-instruction-follow {
+  opacity: 1;
+}
+
+.wb-instruction-button {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+}
+
+.wb-instruction-press {
+  --press-x: 50%;
+  --press-y: 50%;
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  background: radial-gradient(
+    circle 92px at var(--press-x) var(--press-y),
+    color-mix(in srgb, var(--accent) 60%, transparent),
+    color-mix(in srgb, var(--accent) 26%, transparent) 34%,
+    transparent 74%
+  );
+  opacity: 0;
+  pointer-events: none;
+}
+
+.wb-instruction-press::before,
+.wb-instruction-press::after {
+  position: absolute;
+  top: var(--press-y);
+  left: var(--press-x);
+  width: 18px;
+  height: 18px;
+  margin: -9px 0 0 -9px;
+  border: 2px solid color-mix(in srgb, var(--accent) 84%, white 16%);
+  border-radius: 50%;
+  box-shadow:
+    0 0 12px color-mix(in srgb, var(--accent) 76%, transparent),
+    inset 0 0 8px color-mix(in srgb, var(--accent) 45%, transparent);
+  content: "";
+  opacity: 0;
+  pointer-events: none;
+  transform: scale(0.35);
+}
+
+.wb-instruction-press::after {
+  border-width: 1px;
+  box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 52%, transparent);
+}
+
+.wb-instruction-card {
+  position: relative;
+  transform: none;
+}
+
+.wb-instruction-card:focus-within {
+  border-color: color-mix(in srgb, var(--accent) 62%, var(--control));
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent),
+    inset 0 1px 0 color-mix(in srgb, var(--surface) 80%, white 20%);
+}
+
+.wb-instruction-card.is-confirmed {
+  border-color: color-mix(in srgb, var(--accent) 74%, var(--control));
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--accent) 18%, transparent),
+    0 7px 22px -10px color-mix(in srgb, var(--accent) 78%, transparent);
+}
+
+.wb-instruction-card.is-confirmed .wb-instruction-button {
+  animation: ll-favorite-press-bump 520ms var(--ease-fluid);
+}
+
+.wb-instruction-card.is-confirmed .wb-instruction-symbol {
+  animation: ll-favorite-symbol-pop 560ms var(--ease-fluid);
+}
+
+.wb-instruction-card::after {
+  position: absolute;
+  inset: -1px;
+  z-index: 0;
+  background: linear-gradient(
+    108deg,
+    transparent 18%,
+    color-mix(in srgb, var(--accent) 20%, transparent) 43%,
+    color-mix(in srgb, var(--surface) 55%, transparent) 51%,
+    transparent 72%
+  );
+  content: "";
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(-125%);
+}
+
+.wb-instruction-card > * {
+  position: relative;
+  z-index: 1;
+}
+
+.wb-instruction-symbol,
+.wb-drag-mark {
+  display: inline-flex;
+  transform-origin: center;
+  transition: transform 180ms var(--ease-out);
+}
+
+.wb-instruction-star {
+  transition:
+    color 140ms linear,
+    background-color 140ms linear;
+}
+
+.wb-instruction-star svg {
+  transform-origin: center;
+  transition:
+    transform 220ms var(--ease-fluid),
+    filter 220ms var(--ease-out);
+}
+
+.wb-construct-button svg,
+.wb-instruction-button.is-all svg,
+.wb-instruction-scroll svg {
+  transform-origin: center;
+  transition: transform 190ms var(--ease-out);
+}
+
+.wb-instruction-button.is-all .wb-all-mark {
+  transform-origin: center;
+  transition: transform 200ms var(--ease-fluid);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .ll-rung:not(.is-placeholder) {
+    animation: ll-rung-enter 200ms var(--ease-out) backwards;
+  }
+
+  .wb-instruction-press {
+    animation: ll-press-flash 680ms var(--ease-out) forwards;
+  }
+
+  .wb-instruction-press::before {
+    animation: ll-press-ring 620ms var(--ease-out) forwards;
+  }
+
+  .wb-instruction-press::after {
+    animation: ll-press-ring-soft 680ms 70ms var(--ease-out) forwards;
+  }
+
+  .wb-construct-button,
+  .wb-instruction-button,
+  .mobile-tab-action {
+    transition:
+      transform var(--dur-press) var(--ease-out),
+      background-color var(--dur-press) linear,
+      border-color var(--dur-press) linear,
+      color var(--dur-press) linear;
+  }
+
+  .wb-instruction-card {
+    animation: ll-card-enter 220ms var(--ease-out) backwards;
+    transition:
+      border-color 170ms linear,
+      background-color 170ms linear,
+      box-shadow 220ms var(--ease-out);
+  }
+
+  .wb-instruction-card:active {
+    transform: none;
+    border-color: color-mix(in srgb, var(--accent) 72%, var(--control));
+    box-shadow:
+      inset 0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent),
+      inset 0 1px 0 color-mix(in srgb, var(--surface) 90%, white 5%);
+  }
+
+  .wb-construct-button:active,
+  .wb-instruction-button:active:not(:disabled),
+  .mobile-tab-action:active {
+    transform: scale(0.98);
+  }
+}
+
+@media (hover: hover) and (pointer: fine) and (prefers-reduced-motion: no-preference) {
+  .wb-construct-button {
+    transition: transform 160ms var(--ease-out);
+  }
+
+  .wb-construct-button:hover {
+    transform: translateY(-1px);
+  }
+
+  .wb-instruction-card:hover {
+    transform: none;
+    border-color: color-mix(in srgb, var(--accent) 66%, var(--control));
+    background: color-mix(in srgb, var(--accent) 4%, var(--surface));
+    box-shadow:
+      inset 0 0 0 1px color-mix(in srgb, var(--accent) 13%, transparent),
+      inset 0 1px 0 color-mix(in srgb, var(--surface) 78%, white 12%),
+      0 0 16px -8px color-mix(in srgb, var(--accent) 72%, transparent);
+  }
+
+  .wb-instruction-card.is-confirmed:hover {
+    border-color: color-mix(in srgb, var(--accent) 74%, var(--control));
+    box-shadow:
+      0 0 0 2px color-mix(in srgb, var(--accent) 18%, transparent),
+      0 7px 22px -10px color-mix(in srgb, var(--accent) 78%, transparent);
+  }
+
+  .wb-instruction-card:hover::after,
+  .wb-instruction-card:focus-within::after {
+    animation: ll-card-sheen 520ms var(--ease-out) both;
+  }
+
+  .wb-instruction-card:hover .wb-instruction-symbol,
+  .wb-instruction-card:focus-within .wb-instruction-symbol {
+    transform: translateY(-1px) scale(1.08);
+  }
+
+  .wb-instruction-card:hover .wb-drag-mark,
+  .wb-instruction-card:focus-within .wb-drag-mark {
+    color: var(--accent);
+    transform: translateX(2px);
+  }
+
+  /* 只放大星形本身：按钮保持不动，右侧那根分隔线才不会跟着倾斜。 */
+  .wb-instruction-star:hover svg {
+    transform: scale(1.34);
+    filter: drop-shadow(0 1px 4px color-mix(in srgb, var(--accent) 62%, transparent));
+  }
+
+  .wb-instruction-star:active svg {
+    transform: scale(0.94);
+    transition-duration: 90ms;
+  }
+
+  .wb-construct-button:hover svg {
+    transform: translateY(-1px) scale(1.12);
+  }
+
+  .wb-instruction-button.is-all:hover .wb-all-mark {
+    transform: rotate(90deg) scale(1.05);
+  }
+
+  .wb-instruction-button.is-all:hover > svg,
+  .wb-instruction-scroll:hover svg {
+    transform: translateX(2px);
+  }
+
+  .wb-instruction-scroll svg.is-flipped {
+    transform: rotate(180deg);
+  }
+
+  .wb-instruction-scroll:hover svg.is-flipped {
+    transform: rotate(180deg) translateX(2px);
+  }
+}
+
+@keyframes ll-rung-enter {
+  from {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes ll-card-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.98);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes ll-card-sheen {
+  0% {
+    opacity: 0;
+    transform: translateX(-125%);
+  }
+
+  32% {
+    opacity: 1;
+  }
+
+  100% {
+    opacity: 0;
+    transform: translateX(125%);
+  }
+}
+
+@keyframes ll-press-flash {
+  0% { opacity: 0.94; }
+
+  48% { opacity: 0.62; }
+
+  100% { opacity: 0; }
+}
+
+@keyframes ll-press-ring {
+  0% {
+    opacity: 0.95;
+    transform: scale(0.35);
+  }
+
+  62% { opacity: 0.42; }
+
+  100% {
+    opacity: 0;
+    transform: scale(5.4);
+  }
+}
+
+@keyframes ll-press-ring-soft {
+  0% {
+    opacity: 0.7;
+    transform: scale(0.2);
+  }
+
+  100% {
+    opacity: 0;
+    transform: scale(3.9);
+  }
+}
+
+@keyframes ll-favorite-press-bump {
+  0% { transform: scale(1); }
+
+  26% { transform: scale(0.955); }
+
+  64% { transform: scale(1.025); }
+
+  100% { transform: scale(1); }
+}
+
+@keyframes ll-favorite-symbol-pop {
+  0% { transform: scale(1); }
+
+  32% { transform: translateY(-1px) scale(1.26) rotate(-2deg); }
+
+  70% { transform: translateY(0) scale(0.97); }
+
+  100% { transform: scale(1); }
+}
+
+/* ------------------------------------------------------ ladder selection */
+
+.ll-rung-header {
+  transition:
+    background-color 190ms linear,
+    box-shadow 210ms var(--ease-out),
+    outline-color 160ms linear;
+}
+
+.ll-rung.is-whole-selected > .ll-rung-header {
+  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--accent) 72%, transparent);
+}
+
+.ll-rung.is-whole-selected > .ll-rung-header .ll-rung-marker {
+  height: 18px;
+  box-shadow: 0 0 9px color-mix(in srgb, var(--accent) 54%, transparent);
+  transform: scaleY(1.42);
+  transform-origin: center;
+  transition: transform 220ms var(--ease-fluid);
+}
+
+.ll-node-hit,
+.ll-slot-hit,
+.ll-drag-handle-hit {
+  transition:
+    fill 160ms linear,
+    stroke 160ms linear,
+    stroke-width 140ms linear;
+}
+
+.ll-selection-box {
+  transition:
+    opacity 170ms linear,
+    stroke-dashoffset 600ms linear;
+}
+
+.ll-node.is-selected > .ll-selection-box,
+.ll-node:focus-visible > .ll-selection-box {
+  animation: ll-selection-flow 900ms linear infinite;
+}
+
+.ll-branch-frame {
+  transition: opacity 170ms linear;
+}
+
+@keyframes ll-selection-flow {
+  to {
+    stroke-dashoffset: -14;
+  }
+}
+
+/* -------------------------------------------------------- first paint */
+
+@media (prefers-reduced-motion: no-preference) {
+  .wb-shell > .wb-topbar {
+    animation: ll-chrome-in 360ms var(--ease-out) both;
+  }
+
+  .wb-shell > .wb-instruction-strip {
+    animation: ll-chrome-in 400ms 50ms var(--ease-out) both;
+  }
+
+  .wb-shell > .wb-workbench {
+    animation: ll-workbench-in 440ms 95ms var(--ease-out) both;
+  }
+
+  .wb-shell > .wb-statusbar {
+    animation: ll-chrome-in 360ms 130ms var(--ease-out) both;
+  }
+}
+
+@keyframes ll-chrome-in {
+  from {
+    opacity: 0;
+    transform: translateY(-5px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes ll-workbench-in {
+  from {
+    opacity: 0;
+    transform: translateY(7px) scale(0.995);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* ------------------------------------------------------------- chrome glow */
+
+/* 品牌灯与运行灯都只用一个小伪元素做呼吸，不碰布局，也不改变按钮尺寸。 */
+.wb-shell .brand-mark {
+  position: relative;
+}
+
+.wb-shell .brand-mark::after {
+  position: absolute;
+  inset: -3px;
+  border: 1px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  border-radius: 9px;
+  content: "";
+  opacity: 0;
+  pointer-events: none;
+}
+
+.wb-shell .wb-run-toggle {
+  position: relative;
+}
+
+.wb-shell .wb-run-toggle::after {
+  position: absolute;
+  inset: -3px;
+  border: 1px solid color-mix(in srgb, var(--accent) 60%, transparent);
+  border-radius: 7px;
+  content: "";
+  opacity: 0;
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .wb-shell .brand-mark::after {
+    animation: ll-brand-breathe 3600ms var(--ease-in-out) infinite;
+  }
+
+  .wb-shell .wb-run-toggle:not(:disabled):not(.is-running)::after {
+    animation: ll-run-glow 2400ms var(--ease-in-out) infinite;
+  }
+}
+
+@keyframes ll-brand-breathe {
+  0%,
+  100% {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+
+  50% {
+    opacity: 0.6;
+    transform: scale(1.02);
+  }
+}
+
+@keyframes ll-run-glow {
+  0%,
+  100% {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+
+  50% {
+    opacity: 0.55;
+    transform: scale(1);
+  }
+}
+
+/* --------------------------------------------------------- theme spotlight */
+
+.wb-theme-button-icon {
+  transition: transform 180ms var(--ease-out);
+}
+
+.wb-theme-button:hover .wb-theme-button-icon,
+.wb-theme-button[aria-expanded='true'] .wb-theme-button-icon {
+  transform: rotate(-12deg);
+}
+
+.wb-theme-menu.topbar-menu {
+  transform-origin: top right;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .wb-theme-menu.topbar-menu {
+    animation: ll-theme-menu-in 200ms var(--ease-out) both;
+  }
+
+  .wb-theme-menu .wb-theme-option {
+    animation: ll-theme-item-in 220ms var(--ease-out) both;
+  }
+
+  .wb-theme-menu .wb-theme-option:nth-child(2) {
+    animation-delay: 12ms;
+  }
+
+  .wb-theme-menu .wb-theme-option:nth-child(3) {
+    animation-delay: 24ms;
+  }
+
+  .wb-theme-menu .wb-theme-option:nth-child(4) {
+    animation-delay: 36ms;
+  }
+
+  .wb-theme-menu .wb-theme-option:nth-child(5) {
+    animation-delay: 48ms;
+  }
+
+  .wb-theme-menu .wb-theme-option:nth-child(6) {
+    animation-delay: 60ms;
+  }
+
+  .wb-theme-menu .wb-theme-option:nth-child(n + 7) {
+    animation-delay: 60ms;
+  }
+
+  /* 换预设时从右上角铺一层很淡的主题光，明确告诉眼睛“整套颜色换过了”。 */
+  .app-shell[data-theme-switching='true']::after {
+    position: fixed;
+    inset: 0;
+    z-index: 200;
+    background: radial-gradient(
+      620px circle at 92% 4%,
+      color-mix(in srgb, var(--accent) 18%, transparent),
+      transparent 68%
+    );
+    content: "";
+    pointer-events: none;
+    animation: ll-theme-bloom 340ms var(--ease-out) both;
+  }
+}
+
+@keyframes ll-theme-menu-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.96);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes ll-theme-item-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes ll-theme-bloom {
+  from {
+    opacity: 0;
+    transform: scale(0.94);
+  }
+
+  45% {
+    opacity: 1;
+  }
+
+  to {
+    opacity: 0;
+    transform: scale(1.02);
+  }
+}
+
+/* The construct buttons are part of the same 44px touch floor as the
+   favourites they sit beside. The strip grows by the two pixels it needs. */
+@media (pointer: coarse) {
+  .wb-instruction-strip {
+    min-height: 58px;
+  }
+
+  .wb-instruction-card,
+  .wb-instruction-button,
+  .wb-instruction-construct,
+  .wb-construct-button {
+    height: 44px;
+  }
+
+  .wb-construct-button {
+    min-height: 44px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .inspector-tabs::before,
+  .inspector-tabs::after,
+  .wb-tabbar.mobile-tabbar::after,
+  .wb-tabbar.mobile-tabbar::before,
+  .wb-instruction-follow,
+  .wb-instruction-card,
+  .wb-construct-button,
+  .wb-instruction-button,
+  .mobile-tab-action {
+    transition: none;
+  }
+
+  .wb-theme-button-icon {
+    transition: none;
+  }
+
+  .ll-energy-spark,
+  .ll-power-state.is-on i::after,
+  .ll-insert-cursor-halo,
+  .ll-insert-cursor-ripple,
+  .ll-rung,
+  .wb-instruction-press,
+  .wb-instruction-card,
+  .wb-theme-menu,
+  .wb-theme-option,
+  .wb-instruction-card::after,
+  .ll-selection-box,
+  .wb-shell .brand-mark::after,
+  .wb-shell .wb-run-toggle::after,
+  .app-shell[data-theme-switching='true']::after,
+  .wb-shell > .wb-topbar,
+  .wb-shell > .wb-instruction-strip,
+  .wb-shell > .wb-workbench,
+  .wb-shell > .wb-statusbar {
+    animation: none;
+  }
+
+  .ll-rung.is-whole-selected > .ll-rung-header .ll-rung-marker {
+    transform: none;
+  }
+}

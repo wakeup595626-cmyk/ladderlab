@@ -11,6 +11,8 @@ import {
   deleteNodesByIds,
   duplicateRung,
   ensureAddressTag,
+  findOpenBranchPath,
+  findOpenBranchPathForChain,
   hasOpenBranch,
   insertContactAt,
   insertNodeAt,
@@ -618,6 +620,44 @@ describe('programOps 分支编排与批量编辑', () => {
       kind: 'NO',
     })
     expect(rungOf(source, 'r1').nodes[0]).toEqual(root)
+  })
+
+  it('嵌套草稿里合并应命中最靠近游标的那一层', () => {
+    const source = program([rung('r1', [
+      contact('a', 'A'),
+      contact('b', 'B'),
+      contact('c', 'C'),
+    ])])
+
+    const outer = openBranchAtSlot(source, 'r1', { chain: [], index: 1 })
+    if (!outer) throw new Error('主线中间应能打开外层分支')
+    // 外层草稿支路：节点 1 的 branch 1。
+    const inner = openBranchAtSlot(outer.program, 'r1', { chain: [1, 1], index: 0 })
+    if (!inner) throw new Error('外层草稿起点应能继续打开内层分支')
+
+    const nodes = rungOf(inner.program, 'r1').nodes
+    // 打开内层后游标停在内层草稿支路的起始触点之后。
+    const cursorChain = [1, 1, 0, 1]
+    expect(findOpenBranchPathForChain(nodes, cursorChain)).toEqual([1, 1, 0])
+    // 旧逻辑取第一条，会先返回外层 [1]——这正是审计复现的问题。
+    expect(findOpenBranchPath(nodes)).toEqual([1])
+
+    // 游标不在任何草稿支路里时才退回第一条。
+    expect(findOpenBranchPathForChain(nodes, [])).toBeNull()
+
+    // 先闭合内层：外层必须仍然保持打开，游标不再被甩到根链。
+    const closedInner = closeOpenBranchAt(inner.program, 'r1', [1, 1, 0], 1)
+    if (!closedInner) throw new Error('内层草稿应在主线上闭合')
+    const afterInner = rungOf(closedInner, 'r1').nodes
+    expect(hasOpenBranch(afterInner)).toBe(true)
+    const outerNode = afterInner[1]
+    if (outerNode.type !== 'parallel') throw new Error('外层并联节点应保留')
+    expect(outerNode.open).toBe(true)
+    const innerNode = outerNode.branches[1][0]
+    if (innerNode.type !== 'parallel') throw new Error('内层并联节点应保留为已闭合结构')
+    expect(innerNode.open).toBe(false)
+    // 内层闭合后，游标回到外层草稿的后面；此时合并应命中外层。
+    expect(findOpenBranchPathForChain(afterInner, [1, 1])).toEqual([1])
   })
 
   it('草稿支路可以连续插入多个节点并保留 open 状态', () => {

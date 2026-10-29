@@ -1,4 +1,5 @@
 import type { LadderNode, Program } from '../engine/types'
+import { contentRungs } from '../engine/rungInvariant'
 
 export function countProgramElements(program: Program): number {
   const countNodes = (nodes: LadderNode[]): number => nodes.reduce((total, node) => (
@@ -7,7 +8,7 @@ export function countProgramElements(program: Program): number {
       : 0)
   ), 0)
 
-  return program.rungs.reduce((total, rung) => total + countNodes(rung.nodes) + 1, 0)
+  return contentRungs(program).reduce((total, rung) => total + countNodes(rung.nodes) + 1, 0)
 }
 
 const projectTimeFormatter = new Intl.DateTimeFormat('zh-CN', {

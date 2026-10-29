@@ -363,23 +363,64 @@ function loadLibraryForWrite(): LibraryView {
 
 let libraryQueue: Promise<void> = Promise.resolve()
 
+const LIBRARY_LOCK_TIMEOUT_MS = 7000
+
+class LibraryLockTimeoutError extends Error {
+  constructor() {
+    super('等待其他标签页释放项目库超时，请关闭正在保存的标签页后再试')
+    this.name = 'LibraryLockTimeoutError'
+  }
+}
+
 /** Web Locks 不可用时，至少让当前页面内的项目库写入串行。 */
 async function withLibraryLock<T>(task: () => T | Promise<T>): Promise<T> {
-  const lockManager = typeof navigator === 'undefined' ? undefined : navigator.locks
-  if (lockManager?.request) {
-    return lockManager.request(LIBRARY_LOCK_NAME, { mode: 'exclusive' }, task)
-  }
-
-  const previous = libraryQueue
-  let release: () => void = () => {}
-  libraryQueue = new Promise<void>((resolve) => {
-    release = resolve
+  const controller = new AbortController()
+  let timedOut = false
+  let timeoutId: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => {
+      timedOut = true
+      controller.abort()
+      reject(new LibraryLockTimeoutError())
+    }, LIBRARY_LOCK_TIMEOUT_MS)
   })
-  await previous
+
   try {
-    return await task()
+    const lockManager = typeof navigator === 'undefined' ? undefined : navigator.locks
+    if (lockManager?.request) {
+      try {
+        return await Promise.race([
+          lockManager.request(LIBRARY_LOCK_NAME, { mode: 'exclusive', signal: controller.signal }, task),
+          timeout,
+        ])
+      } catch (error) {
+        // AbortController 会在 timeout 拒绝后的同一轮微任务里让 Web Locks
+        // 以 DOMException 结束；这里统一还原成用户能照着处理的提示。
+        if (timedOut) throw new LibraryLockTimeoutError()
+        throw error
+      }
+    }
+
+    const previous = libraryQueue
+    let release: () => void = () => {}
+    libraryQueue = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    try {
+      await Promise.race([previous, timeout])
+    } catch (error) {
+      // 自己排队的位置也必须释放，否则页面内后续保存会一起卡死。
+      release()
+      throw error
+    }
+    if (timedOut) throw new LibraryLockTimeoutError()
+    try {
+      return await Promise.race([Promise.resolve().then(task), timeout])
+    } finally {
+      release()
+    }
   } finally {
-    release()
+    if (timeoutId !== undefined) clearTimeout(timeoutId)
   }
 }
 

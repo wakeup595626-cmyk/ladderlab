@@ -1,15 +1,26 @@
+import { contentRungs, isBlankRung } from '../engine/rungInvariant'
 import type { LadderNode, Program, Selection } from '../engine/types'
 
 /** 收藏指令点击时使用的明确落点：程序段、线路、下标，以及给用户看的锚点。 */
 export interface FavoriteInsertTarget {
   rungId: string
   rungIndex: number
+  /** 画布与下拉框中给用户看的编号；末尾占位段固定为「新程序段」。 */
+  segmentLabel: string
+  isPlaceholder: boolean
   chain: number[]
   index: number
   anchor:
     | { type: 'element'; path: number[] }
     | { type: 'wire'; index: number }
     | { type: 'end' }
+}
+
+/** 画布上的一个「+」插入位。收藏指令和顶部构造按钮都从这里取落点。 */
+export interface InsertSlotRef {
+  rungId: string
+  chain: number[]
+  index: number
 }
 
 const CONTACT_PREFIX: Record<string, string> = {
@@ -80,9 +91,14 @@ export function resolveFavoriteInsertTarget(
   if (!rung) return null
 
   const rungIndex = program.rungs.indexOf(rung)
+  const contentIndex = contentRungs(program).findIndex((item) => item.id === rung.id)
+  const segmentLabel = contentIndex >= 0 ? '程序段 ' + (contentIndex + 1) : '新程序段'
+  const isPlaceholder = isBlankRung(rung)
   const end = (): FavoriteInsertTarget => ({
     rungId: rung.id,
     rungIndex,
+    segmentLabel,
+    isPlaceholder,
     chain: [],
     index: rung.nodes.length,
     anchor: { type: 'end' },
@@ -102,6 +118,8 @@ export function resolveFavoriteInsertTarget(
       return {
         rungId: rung.id,
         rungIndex,
+        segmentLabel,
+        isPlaceholder,
         chain: [...selection.wire.chain],
         index: wireIndex,
         anchor: { type: 'wire', index: wireIndex },
@@ -116,6 +134,8 @@ export function resolveFavoriteInsertTarget(
     return {
       rungId: rung.id,
       rungIndex,
+      segmentLabel,
+      isPlaceholder,
       chain,
       index: last + 1,
       anchor: { type: 'element', path: [...selection.path] },
@@ -125,14 +145,42 @@ export function resolveFavoriteInsertTarget(
   return end()
 }
 
+/**
+ * 把用户刚点过的「+」固定成落点。与 resolveFavoriteInsertTarget 不同，
+ * 这里不做「退到段末」的猜测：位置失效时返回 null，由调用方清除游标。
+ */
+export function resolveSlotInsertTarget(
+  program: Program,
+  slot: InsertSlotRef | null,
+): FavoriteInsertTarget | null {
+  if (!slot) return null
+  const rungIndex = program.rungs.findIndex((rung) => rung.id === slot.rungId)
+  if (rungIndex < 0) return null
+  const rung = program.rungs[rungIndex]
+  const scope = chainAt(rung.nodes, slot.chain)
+  if (!scope) return null
+  if (!Number.isInteger(slot.index) || slot.index < 0 || slot.index > scope.length) return null
+
+  const contentIndex = contentRungs(program).findIndex((item) => item.id === rung.id)
+  return {
+    rungId: rung.id,
+    rungIndex,
+    segmentLabel: contentIndex >= 0 ? '程序段 ' + (contentIndex + 1) : '新程序段',
+    isPlaceholder: isBlankRung(rung),
+    chain: [...slot.chain],
+    index: slot.index,
+    anchor: { type: 'wire', index: slot.index },
+  }
+}
+
 /** 一句话说明触点会落在哪里；输出收藏则替换整个程序段的输出。 */
 export function describeFavoriteInsertTarget(
   program: Program,
   target: FavoriteInsertTarget | null,
 ): string {
-  if (!target) return '先添加程序段'
+  if (!target) return '没有可用的程序段'
   const rung = program.rungs.find((item) => item.id === target.rungId)
-  if (!rung) return '先添加程序段'
+  if (!rung) return '没有可用的程序段'
 
   const prefix = branchPrefix(target.chain)
   if (target.anchor.type === 'end') return '段末（输出前）'
@@ -151,5 +199,5 @@ export function describeFavoriteInsertTarget(
 
 /** 通知栏里统一使用「程序段 N」的编号。 */
 export function favoriteTargetSegmentLabel(target: FavoriteInsertTarget): string {
-  return '程序段 ' + (target.rungIndex + 1)
+  return target.segmentLabel
 }

@@ -206,6 +206,31 @@ button:not(:disabled) {
   border: 0;
 }
 
+/* 键盘 Tab 第一下先落在「跳到梯形图」，鼠标用户看不到它。 */
+.skip-link {
+  position: fixed;
+  top: 10px;
+  left: 50%;
+  z-index: 200;
+  padding: 7px 14px;
+  border: 1px solid var(--accent-ink);
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-family: var(--sans);
+  font-size: 12.5px;
+  font-weight: 600;
+  text-decoration: none;
+  transform: translate(-50%, -180%);
+  transition: transform var(--dur-quick) var(--ease-out);
+}
+
+.skip-link:focus-visible {
+  outline: 2px solid var(--accent-ink);
+  outline-offset: 2px;
+  transform: translate(-50%, 0);
+}
+
 .mono {
   font-family: var(--mono);
 }

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { blankProgram } from '../engine/samples'
+import { starterProgram } from '../engine/samples'
 import {
   archiveRecoveryCopy,
   getDraftTabId,
@@ -73,7 +73,7 @@ describe('storage', () => {
   })
 
   it('round-trips a project and its saved time', () => {
-    const program = blankProgram()
+    const program = starterProgram()
 
     const result = saveProgram(program, { projectId: 'project-1', baseSavedAt: 1234 })
     expect(result.ok).toBe(true)
@@ -155,7 +155,7 @@ describe('storage', () => {
       throw new Error('The quota has been exceeded.')
     })
 
-    const result = saveProgram(blankProgram())
+    const result = saveProgram(starterProgram())
     expect(result.ok).toBe(false)
     if (result.ok) throw new Error('expected a write failure')
     expect(result.error).toContain('The quota has been exceeded')
@@ -164,7 +164,7 @@ describe('storage', () => {
   })
 
   it('prefers the tab draft and falls back to the last committed mirror', () => {
-    const program = blankProgram()
+    const program = starterProgram()
     const result = saveProgram(program)
     if (!result.ok) throw new Error('expected a successful save')
 
@@ -191,7 +191,7 @@ describe('storage', () => {
   })
 
   it('falls back past malformed tab drafts without hiding a valid mirror', () => {
-    const program = blankProgram()
+    const program = starterProgram()
     const saved = saveProgram(program)
     if (!saved.ok) throw new Error('expected a successful save')
     session.setItem(SESSION_STORAGE_KEY, '{"schema":2,"program":{')
@@ -246,7 +246,7 @@ describe('storage', () => {
   })
 
   it('archives a corrupt tab draft when a valid mirror can still start the app', () => {
-    const program = blankProgram()
+    const program = starterProgram()
     const saved = saveProgram(program)
     if (!saved.ok) throw new Error('expected a successful save')
     const brokenTab = '{"schema":2,"program":{"rungs":['
@@ -261,7 +261,7 @@ describe('storage', () => {
   })
 
   it('keeps legacy projects readable and backs up malformed legacy data', () => {
-    const program = blankProgram()
+    const program = starterProgram()
     storage.setItem(LEGACY_STORAGE_KEY, JSON.stringify(program))
     storage.setItem(SAVED_AT_KEY, '1700000000000')
 
@@ -274,7 +274,7 @@ describe('storage', () => {
   })
 
   it('parses and rejects schema 2 drafts based on their actual project contents', () => {
-    const program = blankProgram()
+    const program = starterProgram()
     const snapshot = parseProgramDraft(JSON.stringify({
       schema: 2,
       tabId: 'tab-a',
@@ -294,7 +294,7 @@ describe('storage', () => {
   })
 
   it('does not trust draft timestamps far beyond the local clock', () => {
-    const program = blankProgram()
+    const program = starterProgram()
     const now = Date.now()
     const snapshot = parseProgramDraft(JSON.stringify({
       schema: 2,

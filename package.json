@@ -1,7 +1,7 @@
 {
   "name": "ladderlab",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "engines": {
     "node": "^22.12.0 || ^24.0.0 || >=26.0.0"
@@ -22,7 +22,11 @@
     "qa:stress": "node scripts/qa-storage-stress.mjs",
     "qa:hardening": "node scripts/qa-hardening.mjs",
     "qa:accessibility": "node scripts/qa-accessibility.mjs",
+    "qa:badge": "node scripts/qa-support-badge.mjs",
     "qa:touch": "node scripts/qa-responsive-touch.mjs",
+    "qa:tags": "node scripts/qa-tags.mjs",
+    "qa:save": "node scripts/qa-save-button.mjs",
+    "qa:share": "node scripts/qa-share-link.mjs",
     "preview": "vite preview --strictPort"
   },
   "dependencies": {
@@ -30,7 +34,7 @@
     "react-dom": "^19.3.1"
   },
   "devDependencies": {
-    "@types/node": "^24.19.2",
+    "@types/node": "^26.6.5",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.2",

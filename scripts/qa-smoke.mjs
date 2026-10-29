@@ -116,6 +116,33 @@ async function pressKey(key, code, vk, modifiers = 0) {
   await sleep(360)
 }
 
+async function clickAt(x, y) {
+  await send('Page.bringToFront')
+  await send('Input.dispatchMouseEvent', {
+    type: 'mouseMoved',
+    x,
+    y,
+    button: 'none',
+  })
+  await send('Input.dispatchMouseEvent', {
+    type: 'mousePressed',
+    x,
+    y,
+    button: 'left',
+    buttons: 1,
+    clickCount: 1,
+  })
+  await send('Input.dispatchMouseEvent', {
+    type: 'mouseReleased',
+    x,
+    y,
+    button: 'left',
+    buttons: 0,
+    clickCount: 1,
+  })
+  await sleep(320)
+}
+
 const checks = {}
 const details = {}
 const check = (name, value, note) => {
@@ -247,6 +274,8 @@ await evaluate(`document.querySelector('.wb-more .icon-button')?.click()`)
 await sleep(200)
 
 // 点 StartBtn 切换仿真输入，电机应自锁。
+// 新开的验收标签页可能在后台被浏览器节流 requestAnimationFrame；先激活页签，再轮询结果。
+await send('Page.bringToFront')
 const started = await evaluate(`(() => {
   const card = [...document.querySelectorAll('.tag-card')]
     .find((item) => item.querySelector('input')?.value === 'StartBtn')
@@ -255,16 +284,91 @@ const started = await evaluate(`(() => {
   button.click(); return true
 })()`)
 check('desktop/start-button-reachable', started)
-await sleep(600)
-const motor = await evaluate(`({
-  value: [...document.querySelectorAll('.tag-card')]
-    .find((card) => card.querySelector('input')?.value === 'Motor')
-    ?.querySelector('.live-value')?.textContent?.trim(),
-  powered: document.querySelectorAll('.ll-rung.is-powered').length,
-})`)
+let motor = { value: null, powered: 0 }
+const motorDeadline = Date.now() + 2500
+while (Date.now() < motorDeadline) {
+  motor = await evaluate(`({
+    value: [...document.querySelectorAll('.tag-card')]
+      .find((card) => card.querySelector('input')?.value === 'Motor')
+      ?.querySelector('.live-value')?.textContent?.trim(),
+    powered: document.querySelectorAll('.ll-rung.is-powered').length,
+  })`)
+  if (motor.value === 'TRUE' && motor.powered >= 1) break
+  await sleep(100)
+}
 check('desktop/motor-latches', motor.value === 'TRUE' && motor.powered >= 1, motor)
 await screenshot('docs/qa/desktop-1440.png')
 await screenshot('docs/screenshot.png')
+
+// 真实指针选中元件后再点图纸留白：虚线焦点框必须随选中态一起消失。
+const nodePoint = await evaluate(`(() => {
+  const node = document.querySelector('.ll-node[data-node-id]')
+  if (!node) return null
+  node.scrollIntoView({ block: 'center', inline: 'nearest' })
+  const rect = node.getBoundingClientRect()
+  return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
+})()`)
+if (nodePoint) await clickAt(nodePoint.x, nodePoint.y)
+await sleep(350)
+const editorBeforeEscape = await evaluate(`({
+  open: !!document.querySelector('.qe-panel'),
+  nodeId: document.querySelector('.ll-node.is-selected')?.getAttribute('data-node-id') ?? null,
+})`)
+await pressEscape()
+const focusAfterEscape = await evaluate(`({
+  open: !!document.querySelector('.qe-panel'),
+  activeNodeId: document.activeElement?.getAttribute?.('data-node-id') ?? null,
+})`)
+check(
+  'desktop/escape-restores-canvas-focus',
+  editorBeforeEscape.open
+    && focusAfterEscape.open === false
+    && Boolean(editorBeforeEscape.nodeId)
+    && focusAfterEscape.activeNodeId === editorBeforeEscape.nodeId,
+  { editorBeforeEscape, focusAfterEscape },
+)
+
+// 重新打开编辑器并再次聚焦元件，验证点空白会清掉键盘焦点与虚线框。
+await evaluate(`document.querySelector('.ll-node.is-selected')?.focus()`)
+const selectedByPointer = await evaluate(`({
+  activeInCanvas: document.activeElement?.closest?.('.ll-canvas') !== null,
+  selected: document.querySelectorAll('.ll-node.is-selected').length,
+  frameOpacity: (() => {
+    const box = document.querySelector('.ll-node.is-selected > .ll-selection-box')
+    return box ? Number(getComputedStyle(box).opacity) : 0
+  })(),
+})`)
+const blankPoint = await evaluate(`(() => {
+  const canvas = document.querySelector('.ll-canvas')
+  if (!canvas) return null
+  const rect = canvas.getBoundingClientRect()
+  const blocked = 'button, input, textarea, select, a, summary, [role="button"], [role="menu"], [data-node-id], [data-output-id], .ll-slot, .ll-merge-chip, .ll-node-grip, [data-drag-handle], .ll-rung-header'
+  for (let y = Math.max(0, rect.top) + 16; y < Math.min(innerHeight, rect.bottom) - 16; y += 12) {
+    for (let x = Math.max(0, rect.left) + 16; x < Math.min(innerWidth, rect.right) - 16; x += 12) {
+      const hit = document.elementFromPoint(x, y)
+      if (hit?.closest('.ll-canvas') && !hit.closest(blocked)) return { x, y }
+    }
+  }
+  return null
+})()`)
+if (blankPoint) await clickAt(blankPoint.x, blankPoint.y)
+const afterBlankClick = await evaluate(`({
+  activeInCanvas: document.activeElement?.closest?.('.ll-canvas') !== null,
+  selected: document.querySelectorAll('.ll-node.is-selected').length,
+  frameOpacities: [...document.querySelectorAll('.ll-selection-box')]
+    .map((box) => Number(getComputedStyle(box).opacity)),
+})`)
+check(
+  'desktop/blank-click-clears-selection-frame',
+  Boolean(nodePoint && blankPoint)
+    && selectedByPointer.selected >= 1
+    && selectedByPointer.activeInCanvas === true
+    && selectedByPointer.frameOpacity === 1
+    && afterBlankClick.activeInCanvas === false
+    && afterBlankClick.selected === 0
+    && afterBlankClick.frameOpacities.every((opacity) => opacity === 0),
+  { selectedByPointer, blankPoint, afterBlankClick },
+)
 
 // 点画布元件：参数编辑面板要开、插入位要显影。
 const nodeClick = await evaluate(`(() => {
@@ -365,8 +469,7 @@ await screenshot('docs/qa/desktop-quick-editor.png')
 
 // 反方向也必须是单层：就近参数框开着时点「变量表」，参数框要收起，
 // 不能让同一个触点同时出现在浮动框和右侧属性栏里。
-await evaluate(`[...document.querySelectorAll('.wb-doc-action')]
-  .find((button) => button.textContent?.includes('变量表'))?.click()`)
+await evaluate(`document.querySelector('[data-inspector-entry="tags"]')?.click()`)
 await sleep(320)
 const inspectorSwitch = await evaluate(`({
   editor: !!document.querySelector('.qe-panel'),
@@ -393,14 +496,14 @@ await sleep(250)
 const wireSelection = await evaluate(`({
   nodes: document.querySelectorAll('.ll-node[data-node-id]').length,
   wires: document.querySelectorAll('.ll-slot.is-wire-selected').length,
-  chip: document.querySelector('.ll-selected-chip')?.textContent?.trim() ?? null,
+  chips: document.querySelectorAll('.ll-selected-chip').length,
 })`)
 check(
   'desktop/slot-wire-selects-without-insert',
   wireSelected
     && wireSelection.nodes === beforeInsert
     && wireSelection.wires === 1
-    && String(wireSelection.chip ?? '').includes('已选线路'),
+    && wireSelection.chips === 0,
   wireSelection,
 )
 
@@ -518,7 +621,7 @@ check(
   { menuBeforeEscape, menuAfterEscape },
 )
 
-// 选线路后再用段头「插入触点」，触点必须落在这条线上，而不是跑到段尾。
+// 先选线路，再点同一位置的 +：触点必须准确落在这条线上，而不是跑到段尾。
 await evaluate(`(() => {
   const rung = document.querySelectorAll('.ll-rung')[0]
   const slot = rung?.querySelector('.ll-slot[data-chain=""][data-index="1"]')
@@ -530,11 +633,16 @@ await evaluate(`(() => {
 await sleep(280)
 const wireForToolbar = await evaluate(`({
   selectedWires: document.querySelectorAll('.ll-slot.is-wire-selected').length,
-  chip: document.querySelector('.ll-selected-chip')?.textContent?.trim() ?? null,
+  chips: document.querySelectorAll('.ll-selected-chip').length,
 })`)
-await evaluate(`document.querySelector('.ll-insert-trigger')?.click()`)
+await evaluate(`(() => {
+  const plus = document.querySelector('.ll-slot[data-chain=""][data-index="1"] .ll-slot-plus')
+  if (!plus) return false
+  plus.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+  return true
+})()`)
 await sleep(280)
-await evaluate(`[...document.querySelectorAll('.ll-insert-panel button')]
+await evaluate(`[...document.querySelectorAll('.ll-slot-menu-item')]
   .find((button) => button.textContent?.includes('常开触点'))?.click()`)
 await sleep(420)
 const wireInserted = await evaluate(`(() => {
@@ -547,9 +655,9 @@ const wireInserted = await evaluate(`(() => {
   }
 })()`)
 check(
-  'desktop/toolbar-insert-uses-selected-wire',
+  'desktop/inline-insert-uses-selected-wire',
   wireForToolbar.selectedWires === 1
-    && String(wireForToolbar.chip ?? '').includes('已选线路')
+    && wireForToolbar.chips === 0
     && wireInserted.selectedIndex === 1
     && wireInserted.selectedCount === 1,
   { wireForToolbar, wireInserted },
@@ -557,7 +665,7 @@ check(
 await evaluate(`document.querySelector('.wb-history-actions [aria-label="撤销上一步"]')?.click()`)
 await sleep(420)
 
-/* 程序段工具栏：插入与删除是常显按钮，不再只靠画布角上的小加号。 */
+/* 程序段工具栏只保留删除；插入统一走收藏栏、线路 + 和元件之间的 +。 */
 await pressEscape()
 await evaluate(`document.querySelectorAll('.ll-node[data-node-id]')[0]
   ?.dispatchEvent(new MouseEvent('click', { bubbles: true }))`)
@@ -566,13 +674,12 @@ await pressEscape()
 
 const rungTools = await evaluate(`(() => {
   const tools = document.querySelector('.ll-rung-tools')
-  const trigger = tools?.querySelector('.ll-insert-trigger')
   const remove = tools?.querySelector('.ll-tool-remove')
-  if (!tools || !trigger || !remove) return { present: false }
+  if (!tools || !remove) return { present: false }
   const rect = tools.getBoundingClientRect()
   return {
     present: true,
-    insertLabel: trigger.textContent?.trim() ?? '',
+    insertAbsent: !tools.querySelector('.ll-insert-trigger, .ll-insert'),
     removeLabel: remove.textContent?.trim() ?? '',
     removeEnabled: remove.disabled === false,
     removeTitle: remove.getAttribute('title'),
@@ -583,19 +690,24 @@ const rungTools = await evaluate(`(() => {
 check(
   'desktop/rung-toolbar-visible',
   rungTools.present
-    && rungTools.insertLabel.includes('插入触点')
+    && rungTools.insertAbsent
     && rungTools.removeLabel.includes('删除元件'),
   rungTools,
 )
 check('desktop/rung-toolbar-in-viewport', rungTools.inViewport)
 check('desktop/delete-enabled-on-selection', rungTools.removeEnabled, rungTools.removeTitle)
 
-// 打开「插入触点」菜单，选常开触点：元件 +1，新元件保持选中，删除键随之可用。
+// 线路上的 + 打开插入菜单，选常开触点：元件 +1，新元件保持选中，删除键随之可用。
 const beforeBarInsert = await evaluate(`document.querySelectorAll('.ll-node[data-node-id]').length`)
-await evaluate(`document.querySelector('.ll-insert-trigger')?.click()`)
+await evaluate(`(() => {
+  const plus = document.querySelector('.ll-slot[data-chain=""][data-index="1"] .ll-slot-plus')
+  if (!plus) return false
+  plus.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+  return true
+})()`)
 await sleep(320)
 const insertMenu = await evaluate(`(() => {
-  const panel = document.querySelector('.ll-insert-panel')
+  const panel = document.querySelector('.ll-slot-menu')
   if (!panel) return { open: false }
   const rect = panel.getBoundingClientRect()
   return {
@@ -607,17 +719,17 @@ const insertMenu = await evaluate(`(() => {
 check('desktop/insert-menu-opens', insertMenu.open && insertMenu.items.length >= 5, insertMenu.items)
 check('desktop/insert-menu-fits', insertMenu.fits)
 
-await evaluate(`[...document.querySelectorAll('.ll-insert-panel button')]
+await evaluate(`[...document.querySelectorAll('.ll-slot-menu-item')]
   .find((button) => button.textContent?.includes('常开触点'))?.click()`)
 await sleep(420)
 const barInserted = await evaluate(`({
   count: document.querySelectorAll('.ll-node[data-node-id]').length,
   selected: document.querySelectorAll('.ll-node.is-selected').length,
   deleteEnabled: document.querySelector('.ll-tool-remove')?.disabled === false,
-  menuOpen: document.querySelector('details.ll-insert')?.open === true,
+  menuOpen: !!document.querySelector('.ll-slot-menu'),
 })`)
 check(
-  'desktop/toolbar-insert-adds-contact',
+  'desktop/inline-insert-adds-contact',
   barInserted.count === beforeBarInsert + 1,
   { beforeBarInsert, ...barInserted },
 )
@@ -991,16 +1103,52 @@ check(
   restoredParallel,
 )
 
-// 程序段号跟着位置走：新增一段显示「程序段 2」，上移后仍是 1、2。
+// 有内容的程序段后自动保留一个「新程序段」；填满它后继续自动补下一个。
 const firstTitle = await evaluate(`document.querySelector('.ll-rung-name')?.value ?? null`)
-await evaluate(`document.querySelector('.ll-add-rung')?.click()`)
+const initialSegments = await evaluate(`({
+  labels: [...document.querySelectorAll('.ll-rung-index')].map((item) => item.textContent?.trim()),
+  rungs: document.querySelectorAll('.ll-rung').length,
+  placeholders: document.querySelectorAll('.ll-rung.is-placeholder').length,
+  lastIsPlaceholder: [...document.querySelectorAll('.ll-rung')].at(-1)?.classList.contains('is-placeholder') === true,
+})`)
+check(
+  'desktop/segment-auto-placeholder',
+  initialSegments.rungs === 2
+    && initialSegments.labels.join('|') === '程序段 1|新程序段'
+    && initialSegments.placeholders === 1
+    && initialSegments.lastIsPlaceholder,
+  initialSegments,
+)
+const openedPlaceholderMenu = await evaluate(`(() => {
+  const plus = document.querySelector('.ll-rung.is-placeholder .ll-slot-plus')
+  if (!plus) return false
+  plus.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 0 }))
+  return true
+})()`)
+await sleep(260)
+const pickedPlaceholderContact = await evaluate(`(() => {
+  const item = document.querySelector('.ll-slot-menu-item[data-kind="NO"]')
+  if (!item) return false
+  item.click(); return true
+})()`)
 await sleep(500)
 const twoSegments = await evaluate(`({
   labels: [...document.querySelectorAll('.ll-rung-index')].map((item) => item.textContent?.trim()),
   rungs: document.querySelectorAll('.ll-rung').length,
   ids: [...document.querySelectorAll('.ll-rung')].map((item) => item.getAttribute('data-rung-id')),
+  placeholders: document.querySelectorAll('.ll-rung.is-placeholder').length,
+  lastIsPlaceholder: [...document.querySelectorAll('.ll-rung')].at(-1)?.classList.contains('is-placeholder') === true,
 })`)
-check('desktop/segment-numbering-new', twoSegments.rungs === 2 && twoSegments.labels.join('|') === '程序段 1|程序段 2', twoSegments)
+check(
+  'desktop/segment-numbering-new',
+  openedPlaceholderMenu
+    && pickedPlaceholderContact
+    && twoSegments.rungs === 3
+    && twoSegments.labels.join('|') === '程序段 1|程序段 2|新程序段'
+    && twoSegments.placeholders === 1
+    && twoSegments.lastIsPlaceholder,
+  twoSegments,
+)
 await screenshot('docs/qa/desktop-segments.png')
 
 await evaluate(`document.querySelectorAll('.ll-rung')[1]?.querySelector('.ll-rung-menu summary')?.click()`)
@@ -1021,8 +1169,8 @@ const reordered = await evaluate(`({
 check(
   'desktop/segment-numbering-reorder',
   moveClicked
-    && reordered.labels.join('|') === '程序段 1|程序段 2'
-    && reordered.ids.join(',') === [twoSegments.ids[1], twoSegments.ids[0]].join(','),
+    && reordered.labels.join('|') === '程序段 1|程序段 2|新程序段'
+    && reordered.ids.join(',') === [twoSegments.ids[1], twoSegments.ids[0], twoSegments.ids[2]].join(','),
   reordered,
 )
 
@@ -1034,11 +1182,19 @@ await pressKey('y', 'KeyY', 89, 2)
 const keyboardRedo = await evaluate(`[...document.querySelectorAll('.ll-rung')].map((item) => item.getAttribute('data-rung-id'))`)
 check('desktop/ctrl-y-redo', keyboardRedo.join(',') === reordered.ids.join(','), keyboardRedo)
 
-// 收尾：撤回上移、撤回新增，让后续截图回到单程序段。
+// 收尾：撤回上移、撤回填充，让后续截图回到「一个内容段 + 新程序段」。
 await pressKey('z', 'KeyZ', 90, 2)
 await pressKey('z', 'KeyZ', 90, 2)
-const restoredRungs = await evaluate(`document.querySelectorAll('.ll-rung').length`)
-check('desktop/segments-restored', restoredRungs === 1, restoredRungs)
+const restoredRungs = await evaluate(`({
+  count: document.querySelectorAll('.ll-rung').length,
+  placeholders: document.querySelectorAll('.ll-rung.is-placeholder').length,
+  lastIsPlaceholder: [...document.querySelectorAll('.ll-rung')].at(-1)?.classList.contains('is-placeholder') === true,
+})`)
+check(
+  'desktop/segments-restored',
+  restoredRungs.count === 2 && restoredRungs.placeholders === 1 && restoredRungs.lastIsPlaceholder,
+  restoredRungs,
+)
 
 // 定时器按博途布局：IN / Q 在主功率线上，PT / ET 的值放在框外左右两侧。
 const openedLibrary = await evaluate(`(() => {
@@ -1220,10 +1376,12 @@ const mobileFirst = await evaluate(`({
   overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth + 1,
   coach: !!document.querySelector('.wb-coach'),
   tabbar: !!document.querySelector('.wb-tabbar'),
-  heights: ['.wb-topbar', '.wb-documentbar'].map((selector) => Math.round(document.querySelector(selector)?.getBoundingClientRect().height ?? 0)),
+  documentbar: !!document.querySelector('.wb-documentbar'),
+  heights: ['.wb-topbar'].map((selector) => Math.round(document.querySelector(selector)?.getBoundingClientRect().height ?? 0)),
 })`)
 check('mobile/no-page-overflow', !mobileFirst.overflow)
 check('mobile/tabbar-present', mobileFirst.tabbar)
+check('mobile/no-legacy-documentbar', !mobileFirst.documentbar)
 
 // 手机顶栏的「更多」浮层也必须完整落在视口内，且每个菜单项都点得到。
 await evaluate(`document.querySelector('.wb-more .icon-button')?.click()`)
@@ -1280,13 +1438,13 @@ const mobileTools = await evaluate(`(() => {
   const rect = tools.getBoundingClientRect()
   return {
     present: true,
-    insert: !!tools.querySelector('.ll-insert-trigger'),
+    insertAbsent: !tools.querySelector('.ll-insert-trigger, .ll-insert'),
     remove: !!tools.querySelector('.ll-tool-remove'),
     inViewport: rect.left >= -1 && rect.right <= innerWidth + 1,
     height: Math.round(rect.height),
   }
 })()`)
-check('mobile/rung-toolbar-visible', mobileTools.present && mobileTools.insert && mobileTools.remove, mobileTools)
+check('mobile/rung-toolbar-visible', mobileTools.present && mobileTools.insertAbsent && mobileTools.remove, mobileTools)
 check('mobile/rung-toolbar-in-viewport', mobileTools.inViewport)
 
 // 窄屏段头工具很多，程序段菜单必须固定在可见位置，不能被挤出屏幕。
@@ -1381,6 +1539,19 @@ const mobileEditor = await evaluate(`({
     const rect = panel.getBoundingClientRect()
     return rect.left >= 0 && rect.right <= innerWidth + 1 && rect.bottom <= innerHeight + 1
   })(),
+  rect: (() => {
+    const panel = document.querySelector('.qe-panel')
+    if (!panel) return null
+    const rect = panel.getBoundingClientRect()
+    return {
+      left: Math.round(rect.left * 10) / 10,
+      right: Math.round(rect.right * 10) / 10,
+      top: Math.round(rect.top * 10) / 10,
+      bottom: Math.round(rect.bottom * 10) / 10,
+      innerWidth,
+      innerHeight,
+    }
+  })(),
 })`)
 check('mobile/node-opens-sheet', mobileEditor.open && mobileEditor.dialog === 'dialog', mobileEditor)
 check('mobile/only-one-modal-layer', mobileEditor.modals === 1 && !mobileEditor.propertiesOpen, mobileEditor)
@@ -1404,6 +1575,7 @@ const mobilePanel = await evaluate(`(() => {
   const panel = document.querySelector('.wb-context-panel')
   const node = document.querySelector('.ll-node.is-selected, .ll-output.is-selected')
   if (!panel || !node) return { panel: !!panel, node: !!node }
+  const pane = document.querySelector('.wb-program-pane')
   const panelRect = panel.getBoundingClientRect()
   const nodeRect = node.getBoundingClientRect()
   return {
@@ -1412,6 +1584,9 @@ const mobilePanel = await evaluate(`(() => {
     panelTop: Math.round(panelRect.top),
     nodeTop: Math.round(nodeRect.top),
     nodeBottom: Math.round(nodeRect.bottom),
+    paneScrollTop: Math.round(pane?.scrollTop ?? -1),
+    paneScrollHeight: pane?.scrollHeight ?? -1,
+    paneClientHeight: pane?.clientHeight ?? -1,
     visible: nodeRect.top >= 0 && nodeRect.bottom <= panelRect.top + 1,
   }
 })()`)

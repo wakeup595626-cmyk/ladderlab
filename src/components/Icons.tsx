@@ -273,12 +273,47 @@ export function ArrowRightIcon(props: IconProps) {
   )
 }
 
+export function ArrowUpRightIcon(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <path d="M7.5 16.5 16.5 7.5M9.2 7.5h7.3v7.3" />
+    </IconBase>
+  )
+}
+
+/** GitHub 品牌标是实心路径，单独画一层，免得 IconBase 的描边在小尺寸下发虚。 */
+export function GithubIcon({ size = 16, ...props }: IconProps) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      aria-hidden="true"
+      {...props}
+    >
+      <path d="M12 .3a12 12 0 0 0-3.8 23.4c.6.1.8-.3.8-.6v-2.2c-3.3.7-4-1.6-4-1.6-.6-1.4-1.4-1.8-1.4-1.8-1.1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1.1 1.9 2.8 1.3 3.5 1 .1-.8.4-1.3.8-1.6-2.7-.3-5.5-1.3-5.5-5.9 0-1.3.5-2.4 1.2-3.2-.1-.3-.5-1.5.1-3.2 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0c2.3-1.5 3.3-1.2 3.3-1.2.6 1.7.2 2.9.1 3.2.8.8 1.2 1.9 1.2 3.2 0 4.6-2.8 5.6-5.5 5.9.4.4.8 1.1.8 2.2v3.3c0 .3.2.7.8.6A12 12 0 0 0 12 .3Z" />
+    </svg>
+  )
+}
+
 /** 打开分支：主线路末尾向下分出一条支路。 */
 export function BranchIcon(props: IconProps) {
   return (
     <IconBase {...props}>
       <path d="M3 6h18" />
       <path d="M8 6v9a4 4 0 0 0 4 4h9" />
+    </IconBase>
+  )
+}
+
+/** 合并分支：两条支路重新汇回主线。 */
+export function MergeIcon(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <path d="M3 6h8a4 4 0 0 1 4 4v2" />
+      <path d="M3 18h8a4 4 0 0 0 4-4v-2" />
+      <path d="M15 12h6" />
     </IconBase>
   )
 }
@@ -400,5 +435,66 @@ export function CpuIcon(props: IconProps) {
       <rect x="9" y="9" width="6" height="6" rx="1" />
       <path d="M9 3v3M15 3v3M9 18v3M15 18v3M3 9h3M3 15h3M18 9h3M18 15h3" />
     </IconBase>
+  )
+}
+
+export function PaletteIcon(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <path d="M12 3.6a8.4 8.4 0 0 0 0 16.8c1.1 0 1.9-.7 1.9-1.7 0-.5-.2-.9-.5-1.2-.3-.3-.5-.7-.5-1.1 0-.9.8-1.6 1.7-1.6h1.1a4.7 4.7 0 0 0 4.7-4.7c0-3.6-3.8-6.5-8.4-6.5Z" />
+      <circle cx="8.3" cy="9.6" r="1.15" fill="currentColor" stroke="none" />
+      <circle cx="12.1" cy="7.6" r="1.15" fill="currentColor" stroke="none" />
+      <circle cx="15.8" cy="9.7" r="1.15" fill="currentColor" stroke="none" />
+    </IconBase>
+  )
+}
+
+/**
+ * 咖啡杯：杯身 + 杯把 + 杯垫横线，小尺寸下也能一眼认出是“喝一杯”。
+ * 杯身用奶咖渐变填充、杯口压一层奶沫，热气用暖橙，比纯线稿更像是
+ * 一杯真的咖啡；外轮廓仍跟随 currentColor，深浅主题都不会糊掉。
+ */
+export function CoffeeIcon({ size = 16, ...props }: IconProps) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      {...props}
+    >
+      <defs>
+        <linearGradient
+          id="ll-coffee-brew"
+          x1="4.6"
+          y1="8.2"
+          x2="17.7"
+          y2="18.4"
+          gradientUnits="userSpaceOnUse"
+        >
+          <stop stopColor="#F0D3AC" />
+          <stop offset="0.38" stopColor="#C88C58" />
+          <stop offset="1" stopColor="#8A5533" />
+        </linearGradient>
+      </defs>
+      <path
+        d="M4.6 8.4h13.1v4.5a5.1 5.1 0 0 1-5.1 5.1h-2.9a5.1 5.1 0 0 1-5.1-5.1V8.4Z"
+        fill="url(#ll-coffee-brew)"
+        stroke="currentColor"
+        strokeWidth="1.5"
+      />
+      <path d="M5.7 9.5h10.9" stroke="#F8E7CE" strokeWidth="1.5" strokeOpacity="0.92" />
+      <path d="M17.7 10.2h1.5a2.7 2.7 0 0 1 0 5.4h-1.5" stroke="#B5794A" strokeWidth="1.6" />
+      <path d="M3.1 20.7h13.6" stroke="#B5794A" strokeWidth="1.6" />
+      <path
+        d="M8.4 3.1c-.8.9.8 1.4 0 2.4M12.3 3.1c-.8.9.8 1.4 0 2.4"
+        stroke="#E08A3C"
+        strokeWidth="1.5"
+        strokeOpacity="0.92"
+      />
+    </svg>
   )
 }

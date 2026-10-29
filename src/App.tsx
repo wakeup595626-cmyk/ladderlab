@@ -19,20 +19,34 @@ import { FolderIcon, GripIcon, LadderIcon, TagIcon } from './components/Icons'
 import Inspector, { type InspectorTab } from './components/Inspector'
 import InstructionBar from './components/InstructionBar'
 import InstructionDrawer from './components/InstructionDrawer'
-import LadderCanvas, { type SlotRef } from './components/LadderCanvas'
+import LadderCanvas, { type MergeArmed, type SlotRef } from './components/LadderCanvas'
 import LibraryDialog from './components/LibraryDialog'
 import { useMediaQuery } from './lib/useMediaQuery'
+import {
+  persistThemePreference,
+  readThemePreference,
+  resolveTheme,
+  themeCssVars,
+  type ThemePreference,
+} from './lib/theme'
 import ProjectDrawer from './components/ProjectDrawer'
 import ProjectImportDialog from './components/ProjectImportDialog'
 import SaveProjectDialog from './components/SaveProjectDialog'
 import ProgramImageExporter, { type ProgramImageMode } from './components/ProgramImageExporter'
 import QuickEditor from './components/QuickEditor'
 import StatusBar from './components/StatusBar'
+import SupportBadge from './components/SupportBadge'
 import WorkspaceTopBar from './components/WorkspaceTopBar'
 import { instructionLabel, type InstructionFamily } from './components/instructionCatalog'
 import { compile } from './engine/compile'
 import { normalizeReference } from './engine/references'
 import { blankProgram, buildSample } from './engine/samples'
+import {
+  contentRungs,
+  ensureTrailingBlankRung,
+  isBlankRung,
+  programsEqualIgnoringPlaceholder,
+} from './engine/rungInvariant'
 import { createRuntime, step, writeRuntimeValue } from './engine/simulate'
 import type {
   ContactKind,
@@ -45,6 +59,8 @@ import type {
 } from './engine/types'
 import type { DragPayload, DropTarget } from './lib/dragTypes'
 import { downloadDataUrl, downloadText, parseProgramText, serializeProgram } from './lib/io'
+import { decodeProgramShare, isShareProgramHash } from './lib/shareLink'
+import { saveLatestNamedProject } from './lib/latestProjectSave'
 import {
   deleteSavedProject as removeSavedProjectFromLibrary,
   isProjectLibraryStorageKey,
@@ -84,6 +100,8 @@ import {
   describeFavoriteInsertTarget,
   favoriteTargetSegmentLabel,
   resolveFavoriteInsertTarget,
+  resolveSlotInsertTarget,
+  type InsertSlotRef,
 } from './lib/insertTarget'
 import {
   archiveRecoveryCopy,
@@ -100,7 +118,6 @@ import {
   type RecoveryBackup,
 } from './lib/storage'
 import {
-  addRung,
   changeOutputKind,
   cloneNodesForPaste,
   closeOpenBranchAt,
@@ -109,13 +126,14 @@ import {
   deleteNodesAtPaths,
   deleteRung,
   duplicateRung,
+  findOpenBranchPath,
+  findOpenBranchPathForChain,
   getNodeAtPath,
   insertNodeAt,
   insertNodesAt,
   insertRungCopies,
   makeContactNode,
   moveNode,
-  moveNodeBy,
   moveRung,
   moveRungTo,
   moveRungToBoundary,
@@ -139,6 +157,8 @@ interface ToastState {
   /** 错误类提示不自动消失，必须由用户关闭。 */
   sticky: boolean
   action?: { label: string; run: () => void }
+  /** 带操作按钮的提示出现时把焦点交给按钮，键盘用户删除后不会失去落点。 */
+  focusAction?: boolean
 }
 
 type CorruptSavedProgram = Extract<LoadSavedProgramResult, { status: 'corrupt' }>
@@ -155,7 +175,20 @@ interface StartupState {
 }
 
 function programsEqual(left: Program, right: Program): boolean {
-  return JSON.stringify(left) === JSON.stringify(right)
+  return programsEqualIgnoringPlaceholder(left, right)
+}
+
+/** 默认操作段：优先第一个有内容的程序段，空白工程才落到末尾占位段。 */
+function preferredRung(program: Program): Rung | undefined {
+  return contentRungs(program)[0] ?? program.rungs[0]
+}
+
+/** 内容段按内容顺序编号；自动补出的末尾段永远叫「新程序段」。 */
+function rungSegmentLabel(program: Program, rungId: string): string {
+  const rung = program.rungs.find((item) => item.id === rungId)
+  if (!rung || isBlankRung(rung)) return '新程序段'
+  const index = contentRungs(program).findIndex((item) => item.id === rungId)
+  return index >= 0 ? `程序段 ${index + 1}` : '程序段'
 }
 
 /**
@@ -344,7 +377,7 @@ function runtimeSignature(program: Program): string {
     tags: program.tags.map((tag) => [
       tag.id, tag.name, tag.kind, tag.address, tag.bitOf ?? null, tag.initial,
     ]),
-    rungs: program.rungs.map((rung) => [
+    rungs: contentRungs(program).map((rung) => [
       rung.id,
       rung.nodes.map(encodeNode),
       [
@@ -419,9 +452,19 @@ function chainLengthAtPath(nodes: LadderNode[], chain: number[]): number | null 
 
 export default function App() {
   const { confirm, dialog: confirmDialog } = useConfirmDialog()
-  const [startupState] = useState<StartupState>(() =>
-    resolveStartupState(loadSavedProgram(), readProjectLibrary()),
-  )
+  const [startupState] = useState<StartupState>(() => {
+    const resolved = resolveStartupState(loadSavedProgram(), readProjectLibrary())
+    return {
+      ...resolved,
+      initialProgram: ensureTrailingBlankRung(resolved.initialProgram),
+      baselineProgram: resolved.baselineProgram
+        ? ensureTrailingBlankRung(resolved.baselineProgram)
+        : null,
+      initialConflict: resolved.initialConflict
+        ? { ...resolved.initialConflict, program: ensureTrailingBlankRung(resolved.initialConflict.program) }
+        : null,
+    }
+  })
   const startup = startupState.startup
   const startupLibrary = startupState.library
   const [initialProgram] = useState<Program>(() => startupState.initialProgram)
@@ -433,8 +476,35 @@ export default function App() {
   const [runtime, setRuntime] = useState<Runtime>(() => createRuntime(initialProgram))
   const [running, setRunning] = useState(false)
   const [speed, setSpeed] = useState(50)
+  const [theme, setTheme] = useState<ThemePreference>(() => readThemePreference(window.localStorage))
+  const [themeSwitching, setThemeSwitching] = useState(false)
+  const themeVars = useMemo(() => themeCssVars(resolveTheme(theme)), [theme])
+  // 预设之间切换时短暂开启颜色过渡；拖拽取色器时保持即时反馈，避免跟手迟滞。
+  const handleTheme = useCallback((next: ThemePreference) => {
+    if (next.preset !== 'custom') setThemeSwitching(true)
+    setTheme(next)
+  }, [])
+  useEffect(() => {
+    if (!themeSwitching) return
+    const timer = window.setTimeout(() => setThemeSwitching(false), 360)
+    return () => window.clearTimeout(timer)
+  }, [themeSwitching])
+  useEffect(() => {
+    persistThemePreference(window.localStorage, theme)
+  }, [theme])
+  // 快速编辑器与插入菜单是 portal 到 body 的，必须让令牌也落在文档根上。
+  useEffect(() => {
+    const root = document.documentElement
+    const entries = Object.entries(themeVars)
+    for (const [name, value] of entries) root.style.setProperty(name, value)
+    return () => {
+      for (const [name] of entries) root.style.removeProperty(name)
+    }
+  }, [themeVars])
   const [selectionState, setSelection] = useState<Selection | null>(() =>
-    initialProgram.rungs[0] ? { rungId: initialProgram.rungs[0].id, path: null } : null,
+    preferredRung(initialProgram)
+      ? { rungId: preferredRung(initialProgram)!.id, path: null }
+      : null,
   )
   const [toast, setToast] = useState<ToastState | null>(null)
   const [corruptProject, setCorruptProject] = useState<CorruptSavedProgram | null>(() =>
@@ -456,6 +526,7 @@ export default function App() {
   )
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>('properties')
   const [quickEdit, setQuickEdit] = useState<QuickEditState | null>(null)
+  const quickEditReturnFocusRef = useRef<Selection | null>(null)
   // 复制的是“快照”而不是选区引用：复制后再改原元件，粘贴出来的仍是复制时的样子。
   const [clipboard, setClipboard] = useState<DocumentClipboard | null>(null)
   const [mobilePanel, setMobilePanel] = useState<MobilePanel>('none')
@@ -469,12 +540,15 @@ export default function App() {
    * 没有元件时保留这个值，连续点击收藏指令不会莫名跳回第一段。
    */
   const [favoriteTargetRungId, setFavoriteTargetRungId] = useState<string | null>(
-    () => initialProgram.rungs[0]?.id ?? null,
+    () => preferredRung(initialProgram)?.id ?? null,
   )
-  // 画布上的落点高亮是“临时提示”，不是常驻装饰：换程序段或点「定位」时
-  // 亮一下，约 2 秒后退回正常线路；点空白处也会立即收起。
+  // 顶部「定位」的落点高亮是临时提示；用户亲手点过的「+」则固定成
+  // insertCursor，一直亮到再次换落点或点画布空白处。
   const [favoriteTargetPreview, setFavoriteTargetPreview] = useState(false)
   const favoriteTargetPreviewTimerRef = useRef<number | null>(null)
+  /** 用户刚点的 + 是收藏指令的连续插入游标，直到点空白或换落点。 */
+  const [insertCursor, setInsertCursor] = useState<InsertSlotRef | null>(null)
+  const [mergeArmed, setMergeArmed] = useState<MergeArmed | null>(null)
   const [inspectorOpen, setInspectorOpen] = useState(false)
   const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth)
   const [inspectorWidth, setInspectorWidth] = useState(() => {
@@ -528,6 +602,8 @@ export default function App() {
   const activeSavedProjectVersion = activeSavedProject?.savedAt ?? null
   const [saveDialogOpen, setSaveDialogOpen] = useState(false)
   const [saveDialogError, setSaveDialogError] = useState<string | null>(null)
+  const [manualSaveStatus, setManualSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
+  const manualSaveStatusTimerRef = useRef<number | null>(null)
   const editorRef = useRef<HTMLElement>(null)
   const tagsButtonRef = useRef<HTMLButtonElement>(null)
   const inspectorResizePointerRef = useRef<number | null>(null)
@@ -566,6 +642,26 @@ export default function App() {
   const lastRuntimeSignatureRef = useRef<string | null>(null)
   const program = history.present
   const compileResult = useMemo(() => compile(program), [program])
+
+  const showManualSaveStatus = useCallback((status: 'idle' | 'saving' | 'saved' | 'error', resetMs?: number) => {
+    if (manualSaveStatusTimerRef.current !== null) {
+      window.clearTimeout(manualSaveStatusTimerRef.current)
+      manualSaveStatusTimerRef.current = null
+    }
+    setManualSaveStatus(status)
+    if (resetMs !== undefined) {
+      manualSaveStatusTimerRef.current = window.setTimeout(() => {
+        manualSaveStatusTimerRef.current = null
+        setManualSaveStatus('idle')
+      }, resetMs)
+    }
+  }, [])
+
+  useEffect(() => () => {
+    if (manualSaveStatusTimerRef.current !== null) {
+      window.clearTimeout(manualSaveStatusTimerRef.current)
+    }
+  }, [])
 
   // 删除支路或撤销后，旧路径可能指向已消失的元件；保留程序段选择，
   // 但清掉元件路径，避免后续插入操作落到错误位置。这里直接按当前程序派生，
@@ -622,7 +718,12 @@ export default function App() {
 
   const notify = useCallback((
     message: string,
-    options?: { tone?: 'info' | 'error'; sticky?: boolean; action?: { label: string; run: () => void } },
+    options?: {
+      tone?: 'info' | 'error'
+      sticky?: boolean
+      action?: { label: string; run: () => void }
+      focusAction?: boolean
+    },
   ) => {
     setToast({
       id: Date.now() + Math.random(),
@@ -630,7 +731,17 @@ export default function App() {
       tone: options?.tone ?? 'info',
       sticky: options?.sticky ?? options?.tone === 'error',
       action: options?.action,
+      focusAction: options?.focusAction,
     })
+  }, [])
+
+  /** 收掉提示时如果焦点还在提示里（撤销按钮），把它交回画布，别落到 body。 */
+  const dismissToast = useCallback(() => {
+    const active = document.activeElement
+    if (active instanceof HTMLElement && active.closest('.toast')) {
+      document.getElementById('wb-main')?.focus({ preventScroll: true })
+    }
+    setToast(null)
   }, [])
 
   const stopToastTimer = useCallback(() => {
@@ -644,9 +755,9 @@ export default function App() {
     const duration = Math.max(minDuration, Math.min(5200, Math.max(2400, 1200 + message.length * 45)))
     toastTimerRef.current = window.setTimeout(() => {
       toastTimerRef.current = null
-      setToast(null)
+      dismissToast()
     }, duration)
-  }, [stopToastTimer])
+  }, [dismissToast, stopToastTimer])
 
   /** 停止或报错时把「仿真已开始」那条提示一起收掉，避免界面互相打脸。 */
   const clearRunToast = useCallback(() => {
@@ -776,140 +887,224 @@ export default function App() {
   }, [favoriteInstructions, notify])
 
   const commit = useCallback((next: Program) => {
+    const normalized = ensureTrailingBlankRung(next)
     setHistory((previous) => {
-      if (next === previous.present) return previous
+      if (normalized === previous.present) return previous
       const past = [...previous.past, previous.present].slice(-HISTORY_LIMIT)
-      return { past, present: next, future: [] }
+      return { past, present: normalized, future: [] }
     })
   }, [])
 
+  const persistLatestNamedProject = useCallback((name: string) => {
+    const active = activeSavedProjectRef.current
+    return saveLatestNamedProject({
+      context: active
+        ? { id: active.id, savedAt: active.savedAt }
+        : { id: null, savedAt: null },
+      name,
+      getLatestProgram: () => latestProgramRef.current,
+      getCurrentContext: () => {
+        const current = activeSavedProjectRef.current
+        return current
+          ? { id: current.id, savedAt: current.savedAt }
+          : { id: null, savedAt: null }
+      },
+      save: saveNamedProject,
+      onSaved: (project) => {
+        setActiveProject(project.id, project.savedAt, project.program)
+        // 每次写入都同步草稿信封里的版本号，storage 事件才能及时传播版本变化。
+        saveLatestProgram()
+      },
+    })
+  }, [saveLatestProgram, setActiveProject])
+
+  const commitSavedProjectName = useCallback((project: SavedProject) => {
+    const current = latestProgramRef.current
+    if (project.program.name === current.name) return
+    const next = setProjectName(current, project.program.name)
+    latestProgramRef.current = next
+    commit(next)
+  }, [commit])
+
+  const finishNamedSave = useCallback((project: SavedProject, closeDialog: boolean) => {
+    commitSavedProjectName(project)
+    saveLatestProgram()
+    const settlement = settleSupersededConflict(project.savedAt)
+    if (closeDialog) {
+      setSaveDialogOpen(false)
+      setSaveDialogError(null)
+    }
+    if (settlement === 'cleared') {
+      notify(`已保存「${project.name}」到本机项目库；另一标签页的版本已存为恢复副本`)
+    } else if (settlement === 'archive-failed') {
+      notify(`已保存「${project.name}」，但另一标签页版本暂存失败；请先导出本页工程备份`, { tone: 'error' })
+    } else {
+      notify(`已保存「${project.name}」到本机项目库`)
+    }
+  }, [commitSavedProjectName, notify, saveLatestProgram, settleSupersededConflict])
+
+  const handleSaveNamedProject = useCallback(async (name: string): Promise<SaveNamedProjectResult> => {
+    const outcome = await persistLatestNamedProject(name)
+    if (outcome.projects) setSavedProjects(outcome.projects)
+    if (outcome.status === 'saved') {
+      finishNamedSave(outcome.project, true)
+      showManualSaveStatus('saved', 1600)
+      return {
+        ok: true,
+        project: outcome.project,
+        projects: outcome.projects,
+      }
+    }
+    if (outcome.status === 'context-changed') {
+      if (outcome.project && outcome.projects) {
+        notify(`已保存「${outcome.project.name}」，当前编辑区已切换到其他项目，因此未改动当前内容`)
+        return { ok: true, project: outcome.project, projects: outcome.projects }
+      }
+      const failure: SaveNamedProjectResult = {
+        ok: false,
+        reason: 'storage',
+        message: '保存过程中当前项目已切换，本次内容没有写回编辑区。请重新保存。',
+      }
+      setSaveDialogError(failure.message)
+      return failure
+    }
+
+    saveLatestProgram()
+    if (outcome.project) settleSupersededConflict(outcome.project.savedAt)
+    if (outcome.status === 'unsettled') {
+      const failure: SaveNamedProjectResult = {
+        ok: false,
+        reason: 'storage',
+        message: '保存期间仍有编辑，最后一版尚未提交。请再次保存。',
+      }
+      setSaveDialogError(failure.message)
+      return failure
+    }
+
+    const failure = outcome.failure
+    if (failure.reason === 'corrupt-library') setProjectLibraryError(failure.message)
+    if (failure.reason === 'save-conflict') {
+      const latest = readProjectLibrary()
+      if (latest.status === 'ok') setSavedProjects(latest.projects)
+    }
+    if (failure.reason === 'missing-project') {
+      setActiveProject(null)
+      const latest = readProjectLibrary()
+      if (latest.status === 'ok') setSavedProjects(latest.projects)
+    }
+    const message = outcome.project
+      ? `${failure.message} 最新编辑已留在本机草稿，但尚未写入项目库。`
+      : failure.message
+    setSaveDialogError(message)
+    return { ...failure, message }
+  }, [
+    finishNamedSave,
+    notify,
+    persistLatestNamedProject,
+    saveLatestProgram,
+    setActiveProject,
+    settleSupersededConflict,
+    showManualSaveStatus,
+  ])
+
   const requestSaveProject = useCallback(async () => {
     setSaveDialogError(null)
+    if (manualSavePendingRef.current) {
+      notify('正在保存，请稍候', { tone: 'info' })
+      return
+    }
     if (projectLibraryError || !activeSavedProjectId) {
+      showManualSaveStatus('idle')
       setSaveDialogOpen(true)
       return
     }
-    if (manualSavePendingRef.current) return
-
-    const context = activeSavedProjectRef.current
-    if (!context) {
-      setSaveDialogOpen(true)
-      return
-    }
-    const snapshot = latestProgramRef.current
     manualSavePendingRef.current = true
+    showManualSaveStatus('saving')
     try {
-      const result = await saveNamedProject({
-        id: context.id,
-        name: snapshot.name,
-        program: snapshot,
-        expectedSavedAt: context.savedAt,
-      })
-      if (result.ok) {
-        setSavedProjects(result.projects)
-        const current = activeSavedProjectRef.current
-        if (!current || current.id !== context.id || current.savedAt !== context.savedAt) {
-          notify(`已保存「${result.project.name}」，当前编辑区已切换到其他项目，因此未改动当前内容`)
-          return
-        }
-        setActiveProject(result.project.id, result.project.savedAt, result.project.program)
-        if (result.project.program.name !== latestProgramRef.current.name) {
-          commit(setProjectName(latestProgramRef.current, result.project.program.name))
-        }
-        // 项目库版本已经前进，但内容可能在上一次自动保存后没有变化。
-        // 仍需用新版本号重写本标签页草稿，storage 事件才能让其他标签页
-        // 及时跟随或进入冲突；否则对方下一次保存才会撞上过期版本。
-        saveLatestProgram()
-        const settlement = settleSupersededConflict(result.project.savedAt)
-        if (settlement === 'cleared') {
-          notify(`已保存「${result.project.name}」到本机项目库；另一标签页的版本已存为恢复副本`)
-        } else if (settlement === 'archive-failed') {
-          notify(`已保存「${result.project.name}」，但另一标签页版本暂存失败；请先导出本页工程备份`, { tone: 'error' })
-        } else {
-          notify(`已保存「${result.project.name}」到本机项目库`)
-        }
+      const outcome = await persistLatestNamedProject(latestProgramRef.current.name)
+      if (outcome.projects) setSavedProjects(outcome.projects)
+      if (outcome.status === 'saved') {
+        finishNamedSave(outcome.project, false)
+        showManualSaveStatus('saved', 1600)
+        return
+      }
+      if (outcome.status === 'context-changed') {
+        notify(
+          outcome.project
+            ? `已保存「${outcome.project.name}」，当前编辑区已切换到其他项目，因此未改动当前内容`
+            : '保存过程中当前项目已切换，本次内容没有写回编辑区。',
+          { tone: outcome.project ? 'info' : 'error' },
+        )
+        showManualSaveStatus(outcome.project ? 'saved' : 'error', outcome.project ? 1600 : undefined)
         return
       }
 
-      if (result.reason === 'corrupt-library') setProjectLibraryError(result.message)
-      if (result.reason === 'save-conflict') {
+      saveLatestProgram()
+      if (outcome.project) settleSupersededConflict(outcome.project.savedAt)
+      if (outcome.status === 'unsettled') {
+        const message = '保存期间仍有编辑，最后一版尚未提交。请再次保存。'
+        setSaveDialogError(message)
+        setSaveDialogOpen(true)
+        notify(message, { tone: 'error' })
+        showManualSaveStatus('error')
+        return
+      }
+
+      const failure = outcome.failure
+      if (failure.reason === 'corrupt-library') setProjectLibraryError(failure.message)
+      if (failure.reason === 'save-conflict') {
         const latest = readProjectLibrary()
         if (latest.status === 'ok') setSavedProjects(latest.projects)
       }
-      const current = activeSavedProjectRef.current
-      if (!current || current.id !== context.id || current.savedAt !== context.savedAt) {
-        notify(result.message, { tone: 'error' })
-        return
-      }
-      if (result.reason === 'missing-project') {
+      if (failure.reason === 'missing-project') {
         setActiveProject(null)
         const latest = readProjectLibrary()
         if (latest.status === 'ok') setSavedProjects(latest.projects)
       }
-      setSaveDialogError(result.message)
+      const message = outcome.project
+        ? `${failure.message} 最新编辑已留在本机草稿，但尚未写入项目库。`
+        : failure.message
+      setSaveDialogError(message)
       setSaveDialogOpen(true)
+      showManualSaveStatus('error')
+    } catch (error) {
+      const message = error instanceof Error
+        ? error.message
+        : '保存过程中发生未知错误，请导出工程 JSON 备份。'
+      setSaveDialogError(message)
+      setSaveDialogOpen(true)
+      notify(`保存失败：${message}`, { tone: 'error' })
+      showManualSaveStatus('error')
     } finally {
       manualSavePendingRef.current = false
     }
-  }, [activeSavedProjectId, commit, notify, projectLibraryError, saveLatestProgram, setActiveProject, settleSupersededConflict])
-
-  const handleSaveNamedProject = useCallback(async (name: string): Promise<SaveNamedProjectResult> => {
-    const context = activeSavedProjectRef.current
-    const snapshot = latestProgramRef.current
-    const result = await saveNamedProject({
-      id: context?.id ?? null,
-      name,
-      program: snapshot,
-      expectedSavedAt: context?.savedAt ?? null,
-    })
-    const current = activeSavedProjectRef.current
-    const sameContext = context
-      ? current?.id === context.id && current.savedAt === context.savedAt
-      : current === null
-    if (!result.ok) {
-      if (result.reason === 'corrupt-library') setProjectLibraryError(result.message)
-      if (result.reason === 'save-conflict') {
-        const latest = readProjectLibrary()
-        if (latest.status === 'ok') setSavedProjects(latest.projects)
-      }
-      if (sameContext && result.reason === 'missing-project') setActiveProject(null)
-      return result
-    }
-
-    setSavedProjects(result.projects)
-    if (!sameContext) {
-      notify(`已保存「${result.project.name}」，当前编辑区已切换到其他项目，因此未改动当前内容`)
-      return result
-    }
-    setActiveProject(result.project.id, result.project.savedAt, result.project.program)
-    if (result.project.program.name !== latestProgramRef.current.name) {
-      commit(setProjectName(latestProgramRef.current, result.project.program.name))
-    }
-    // 保存命名项目后同步刷新草稿信封中的版本基准，见 requestSaveProject 中的说明。
-    saveLatestProgram()
-    const settlement = settleSupersededConflict(result.project.savedAt)
-    setSaveDialogOpen(false)
-    setSaveDialogError(null)
-    if (settlement === 'cleared') {
-      notify(`已保存「${result.project.name}」到本机项目库；另一标签页的版本已存为恢复副本`)
-    } else if (settlement === 'archive-failed') {
-      notify(`已保存「${result.project.name}」，但另一标签页版本暂存失败；请先导出本页工程备份`, { tone: 'error' })
-    } else {
-      notify(`已保存「${result.project.name}」到本机项目库`)
-    }
-    return result
-  }, [commit, notify, saveLatestProgram, setActiveProject, settleSupersededConflict])
+  }, [
+    activeSavedProjectId,
+    finishNamedSave,
+    notify,
+    persistLatestNamedProject,
+    projectLibraryError,
+    saveLatestProgram,
+    setActiveProject,
+    settleSupersededConflict,
+    showManualSaveStatus,
+  ])
 
   // Toast 上的「撤销」只能把这一段插回当前工程，不能回滚成删除那一刻的整份快照，
   // 否则用户在删除后继续做的编辑会被悄悄丢掉。
   const restoreRung = useCallback((rung: Rung, index: number) => {
     setHistory((previous) => {
-      if (previous.present.rungs.some((item) => item.id === rung.id)) return previous
+      if (isBlankRung(rung) || previous.present.rungs.some((item) => item.id === rung.id)) {
+        return previous
+      }
       const rungs = [...previous.present.rungs]
-      const at = Math.max(0, Math.min(index, rungs.length))
+      const placeholderIndex = rungs.findIndex(isBlankRung)
+      const boundary = placeholderIndex >= 0 ? placeholderIndex : rungs.length
+      const at = Math.max(0, Math.min(index, boundary))
       rungs.splice(at, 0, rung)
+      const present = ensureTrailingBlankRung({ ...previous.present, rungs })
       const past = [...previous.past, previous.present].slice(-HISTORY_LIMIT)
-      return { past, present: { ...previous.present, rungs }, future: [] }
+      return { past, present, future: [] }
     })
   }, [])
 
@@ -946,9 +1141,12 @@ export default function App() {
       const previousProgram = previous.past.at(-1)
       if (!previousProgram) return previous
       return {
-        past: previous.past.slice(0, -1),
-        present: previousProgram,
-        future: [previous.present, ...previous.future].slice(0, HISTORY_LIMIT),
+        past: previous.past.slice(0, -1).map(ensureTrailingBlankRung),
+        present: ensureTrailingBlankRung(previousProgram),
+        future: [
+          ensureTrailingBlankRung(previous.present),
+          ...previous.future.map(ensureTrailingBlankRung),
+        ].slice(0, HISTORY_LIMIT),
       }
     })
   }, [])
@@ -958,9 +1156,12 @@ export default function App() {
       const nextProgram = previous.future[0]
       if (!nextProgram) return previous
       return {
-        past: [...previous.past, previous.present].slice(-HISTORY_LIMIT),
-        present: nextProgram,
-        future: previous.future.slice(1),
+        past: [
+          ...previous.past.map(ensureTrailingBlankRung),
+          ensureTrailingBlankRung(previous.present),
+        ].slice(-HISTORY_LIMIT),
+        present: ensureTrailingBlankRung(nextProgram),
+        future: previous.future.slice(1).map(ensureTrailingBlankRung),
       }
     })
   }, [])
@@ -969,12 +1170,21 @@ export default function App() {
   const deleteRungWithUndo = useCallback((rungId: string, message = '程序段已删除') => {
     const index = program.rungs.findIndex((rung) => rung.id === rungId)
     const removed = program.rungs[index]
+    if (!removed || isBlankRung(removed)) {
+      notify('新程序段会自动生成，不能删除')
+      return false
+    }
+    const contentIndex = contentRungs(program).findIndex((rung) => rung.id === rungId)
+    const segment = rungSegmentLabel(program, rungId)
     const next = deleteRung(program, rungId)
     if (next === program) return false
     commit(next)
-    const fallback = next.rungs[Math.max(0, index - 1)] ?? next.rungs[0]
+    const remaining = contentRungs(next)
+    const fallback = remaining[
+      Math.min(remaining.length - 1, Math.max(0, contentIndex - 1))
+    ] ?? preferredRung(next)
     setSelection(fallback ? { rungId: fallback.id, path: null, wholeRung: true } : null)
-    notify(message, {
+    notify(message === '程序段已删除' ? `${segment}已删除` : message, {
       action: {
         label: '撤销',
         run: () => {
@@ -983,6 +1193,7 @@ export default function App() {
           setSelection({ rungId: removed.id, path: null, wholeRung: true })
         },
       },
+      focusAction: true,
     })
     return true
   }, [commit, notify, program, restoreRung])
@@ -995,8 +1206,12 @@ export default function App() {
       notify('这段程序已经不存在')
       return
     }
+    if (isBlankRung(rung)) {
+      notify('新程序段会自动生成，不需要复制')
+      return
+    }
     setClipboard({ kind: 'rungs', rungs: [snapshotRung(rung)] })
-    notify('已复制程序段 ' + (index + 1) + '，选中目标段后按 Ctrl+V')
+    notify(`已复制${rungSegmentLabel(program, rungId)}，选中目标段后按 Ctrl+V`)
   }, [notify, program])
 
   const cutRungToClipboard = useCallback((rungId: string) => {
@@ -1006,10 +1221,14 @@ export default function App() {
       notify('这段程序已经不存在')
       return
     }
+    if (isBlankRung(rung)) {
+      notify('新程序段会自动生成，不需要剪切')
+      return
+    }
     setClipboard({ kind: 'rungs', rungs: [snapshotRung(rung)] })
     deleteRungWithUndo(
       rungId,
-      '已剪切程序段 ' + (index + 1) + '，选中目标段后按 Ctrl+V',
+      `已剪切${rungSegmentLabel(program, rungId)}，选中目标段后按 Ctrl+V`,
     )
   }, [deleteRungWithUndo, notify, program])
 
@@ -1022,7 +1241,15 @@ export default function App() {
     const index = afterRungId
       ? program.rungs.findIndex((rung) => rung.id === afterRungId)
       : -1
-    const boundary = index >= 0 ? index + 1 : program.rungs.length
+    const placeholderIndex = program.rungs.findIndex(isBlankRung)
+    const targetIsPlaceholder = index >= 0 && isBlankRung(program.rungs[index])
+    const boundary = targetIsPlaceholder
+      ? index
+      : index >= 0
+        ? index + 1
+        : placeholderIndex >= 0
+          ? placeholderIndex
+          : program.rungs.length
     const result = insertRungCopies(program, clipboard.rungs, boundary)
     if (result.rungs.length === 0) {
       notify('这里不能粘贴程序段')
@@ -1132,7 +1359,7 @@ export default function App() {
     }
     let target = slot ?? null
     if (!target) {
-      const rungId = selection?.rungId ?? program.rungs[0]?.id
+      const rungId = selection?.rungId ?? preferredRung(program)?.id
       const rung = program.rungs.find((item) => item.id === rungId)
       if (!rung || !rungId) {
         notify('先选一个程序段')
@@ -1302,7 +1529,7 @@ export default function App() {
       // 未命名草稿没有可靠的项目身份，不能被另一个标签页覆盖。
       if (!currentProjectId || draft.projectId !== currentProjectId) return
       if (draft.tabId === getDraftTabId()) return
-      const incoming = draft.program
+      const incoming = ensureTrailingBlankRung(draft.program)
 
       if (programsEqual(incoming, latestProgramRef.current)) {
         lastDraftStampRef.current = draft.savedAt
@@ -1387,9 +1614,10 @@ export default function App() {
 
   useEffect(() => {
     const keepSelection = () => setSelection((current) => {
-      if (!current) return program.rungs[0] ? { rungId: program.rungs[0].id, path: null } : null
+      const fallback = preferredRung(program)
+      if (!current) return fallback ? { rungId: fallback.id, path: null } : null
       if (program.rungs.some((rung) => rung.id === current.rungId)) return current
-      return program.rungs[0] ? { rungId: program.rungs[0].id, path: null } : null
+      return fallback ? { rungId: fallback.id, path: null } : null
     })
     const signature = runtimeSignature(program)
     if (lastRuntimeSignatureRef.current === signature) {
@@ -1510,10 +1738,15 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKeyDown, true)
   }, [requestSaveProject])
 
-  const insertTarget = useMemo(
+  const cursorInsertTarget = useMemo(
+    () => resolveSlotInsertTarget(program, insertCursor),
+    [insertCursor, program],
+  )
+  const fallbackInsertTarget = useMemo(
     () => resolveFavoriteInsertTarget(program, selection, favoriteTargetRungId),
     [favoriteTargetRungId, program, selection],
   )
+  const insertTarget = cursorInsertTarget ?? fallbackInsertTarget
   const activeRungId = insertTarget?.rungId ?? null
   const targetAnchorLabel = useMemo(
     () => describeFavoriteInsertTarget(program, insertTarget),
@@ -1521,7 +1754,8 @@ export default function App() {
   )
   // 落点标记只在切换程序段或点「定位」后短暂出现；平时线路保持干净。
   // 顶部“· 段末 / 某个触点后”的文字始终保留，不靠高亮也能确认落点。
-  const visibleInsertTarget = favoriteTargetPreview ? insertTarget : null
+  const visibleInsertTarget = cursorInsertTarget
+    ?? (favoriteTargetPreview ? fallbackInsertTarget : null)
 
   const scrollFavoriteTargetIntoView = useCallback((rungId: string) => {
     window.requestAnimationFrame(() => {
@@ -1559,6 +1793,16 @@ export default function App() {
     setFavoriteTargetPreview(false)
   }, [])
 
+  /** 点画布上的 +：固定落点并持续高亮，收藏指令随后按这个位置连续插入。 */
+  const armInsert = useCallback((slot: SlotRef) => {
+    setInsertCursor({ rungId: slot.rungId, chain: [...slot.chain], index: slot.index })
+    setFavoriteTargetRungId(slot.rungId)
+    setSelection(null)
+    setQuickEdit(null)
+    setMobilePanel('none')
+    dismissFavoriteTargetPreview()
+  }, [dismissFavoriteTargetPreview])
+
   useEffect(() => () => {
     if (favoriteTargetPreviewTimerRef.current !== null) {
       window.clearTimeout(favoriteTargetPreviewTimerRef.current)
@@ -1571,6 +1815,7 @@ export default function App() {
     // 换程序段时清掉元件选择，收藏触点就落在该段段末；
     // 高亮只闪一下，之后顶部仍保留目标文字，不妨碍看线路。
     setSelection(null)
+    setInsertCursor(null)
     setFavoriteTargetRungId(rungId)
     setQuickEdit(null)
     revealFavoriteInsertTarget(rungId)
@@ -1639,6 +1884,17 @@ export default function App() {
     notify('仿真已复位，变量恢复初值')
   }
 
+  /** 插入或开分支后，把游标推进到新元件之后的「+」；连续点收藏即可一路往后排。 */
+  const advanceCursorAfter = useCallback((next: Program, rungId: string, nodeId: string) => {
+    const path = findNodePath(next, rungId, nodeId)
+    if (!path || path.length === 0) return
+    setInsertCursor({
+      rungId,
+      chain: path.slice(0, -1),
+      index: path[path.length - 1] + 1,
+    })
+  }, [])
+
   const insert = useCallback((kind: ContactKind, slot?: { rungId: string; chain: number[]; index: number }) => {
     if (slot) {
       const made = makeContactNode(program, kind)
@@ -1650,19 +1906,16 @@ export default function App() {
       commit(next)
       const path = findNodePath(next, slot.rungId, made.node.id)
       setSelection({ rungId: slot.rungId, path })
+      advanceCursorAfter(next, slot.rungId, made.node.id)
       setFavoriteTargetRungId(slot.rungId)
       setQuickEdit(null)
       setMobilePanel('none')
-      const dropIndex = program.rungs.findIndex((rung) => rung.id === slot.rungId)
-      notify(
-        instructionLabel('contact', kind)
-        + (dropIndex >= 0 ? '已放置到程序段 ' + (dropIndex + 1) : '已放置'),
-      )
+      notify(instructionLabel('contact', kind) + '已放置到' + rungSegmentLabel(program, slot.rungId))
       return
     }
 
     if (!insertTarget) {
-      notify('请先添加程序段，再插入触点')
+      notify('请先选择一个程序段，再插入触点')
       return
     }
 
@@ -1680,6 +1933,7 @@ export default function App() {
     // 新触点立即成为选中项：下一次点收藏指令就会接在它后面，
     // 连续点几下自然形成一条串联回路。
     setSelection(selectionForNode)
+    advanceCursorAfter(next, insertTarget.rungId, made.node.id)
     setFavoriteTargetRungId(insertTarget.rungId)
     setQuickEdit(null)
     setMobilePanel('none')
@@ -1688,7 +1942,7 @@ export default function App() {
       + '已插入到' + favoriteTargetSegmentLabel(insertTarget)
       + ' · ' + targetAnchorLabel,
     )
-  }, [commit, insertTarget, notify, program, targetAnchorLabel])
+  }, [advanceCursorAfter, commit, insertTarget, notify, program, targetAnchorLabel])
 
   // 插入点菜单选中的触点：精确落在刚点的那个“+”，不做二次猜测。
   const insertAt = useCallback((slot: SlotRef, kind: ContactKind) => {
@@ -1701,38 +1955,13 @@ export default function App() {
     commit(next)
     const selectionForNode = { rungId: slot.rungId, path: findNodePath(next, slot.rungId, made.node.id) }
     setSelection(selectionForNode)
+    advanceCursorAfter(next, slot.rungId, made.node.id)
     setFavoriteTargetRungId(slot.rungId)
     // 博途放下元件后可以直接输入操作数；这里把焦点送到新元件的操作数字段。
     setQuickEdit({ selection: selectionForNode, anchor: null, autoFocus: true })
     setMobilePanel('none')
     notify(instructionLabel('contact', kind) + '已插入，可直接输入变量或 M4.0 地址')
-  }, [commit, notify, program])
-
-  // 段头工具栏没有拖放落点时，按博途的习惯接到已选元件后面；
-  // 没有选中元件就接到这一段的末尾，始终留在用户当前正在编辑的程序段里。
-  const insertContactInRung = useCallback((rungId: string, kind: ContactKind) => {
-    const rung = program.rungs.find((item) => item.id === rungId)
-    if (!rung) return
-    const localSelection = selection?.rungId === rungId ? selection : null
-    const wire = localSelection?.wire ?? null
-    const path = localSelection?.path ?? null
-    // 线段也是有效的插入位置：先点线，再从段头插入，触点就落在所点的那一段导线上。
-    const chain = wire ? wire.chain : path ? path.slice(0, -1) : []
-    const index = wire ? wire.index : path ? path[path.length - 1] + 1 : rung.nodes.length
-    const made = makeContactNode(program, kind)
-    const next = insertNodeAt(made.program, rungId, { chain, index }, made.node)
-    if (next === made.program) {
-      notify('这个位置放不下新的触点')
-      return
-    }
-    commit(next)
-    const selectionForNode = { rungId, path: findNodePath(next, rungId, made.node.id) }
-    setSelection(selectionForNode)
-    setFavoriteTargetRungId(rungId)
-    setQuickEdit({ selection: selectionForNode, anchor: null, autoFocus: true })
-    setMobilePanel('none')
-    notify(`${instructionLabel('contact', kind)}已插入，可直接输入变量或地址`)
-  }, [commit, notify, program, selection])
+  }, [advanceCursorAfter, commit, notify, program])
 
   // 博途式「打开分支」：在元件之后的插入点向下分叉，后续元件留在主线，
   // 新支路先作为草稿存在；画完后点支路右侧「合并分支」，再点主线的 + 闭合。
@@ -1748,6 +1977,7 @@ export default function App() {
       path: findNodePath(opened.program, slot.rungId, opened.nodeId),
     }
     setSelection(selectionForNode)
+    advanceCursorAfter(opened.program, slot.rungId, opened.nodeId)
     if (opened.mode === 'sibling') {
       setQuickEdit({ selection: selectionForNode, anchor: null, autoFocus: true })
     } else {
@@ -1756,8 +1986,8 @@ export default function App() {
     setMobilePanel('none')
     notify(opened.mode === 'sibling'
       ? '已在同一并联组新增支路，可直接输入变量或地址'
-      : '并联分支已打开：点 + 继续加元件，画完点右侧「合并分支」')
-  }, [commit, notify, program])
+      : '并联分支已打开：点 + 继续加元件，画完点顶部「合并」')
+  }, [advanceCursorAfter, commit, notify, program])
 
   const mergeBranch = useCallback((rungId: string, parallelPath: number[], closeIndex: number) => {
     const next = closeOpenBranchAt(program, rungId, parallelPath, closeIndex)
@@ -1767,9 +1997,50 @@ export default function App() {
     }
     commit(next)
     setSelection({ rungId, path: parallelPath })
+    // 闭合后游标停在并联组后面，继续点收藏就是沿主线往后排。
+    setInsertCursor({
+      rungId,
+      chain: parallelPath.slice(0, -1),
+      index: parallelPath[parallelPath.length - 1] + 1,
+    })
     setQuickEdit(null)
     notify('并联分支已闭合')
   }, [commit, notify, program])
+
+  /** 收藏条上的「分支」：以当前游标（或选择推算出的落点）作为分叉点。 */
+  const openBranchFromBar = useCallback(() => {
+    if (!insertTarget) {
+      notify('请先选择一个程序段和插入位置')
+      return
+    }
+    openBranchAt({
+      rungId: insertTarget.rungId,
+      chain: insertTarget.chain,
+      index: insertTarget.index,
+    })
+  }, [insertTarget, notify, openBranchAt])
+
+  /** 收藏条上的「合并」：让画布进入主线取点状态，点「合」完成闭合。 */
+  const mergeBranchFromBar = useCallback(() => {
+    const rungId = insertTarget?.rungId ?? selection?.rungId ?? null
+    const rung = rungId ? program.rungs.find((item) => item.id === rungId) : null
+    if (!rung) {
+      notify('请先选择要闭合分支的程序段')
+      return
+    }
+    // 嵌套分支时优先闭合包含当前游标的那一层；游标不在任何未闭合
+    // 分支里（或还没设落点）才退回第一条，保持原来的行为。
+    const parallelPath = (insertTarget && insertTarget.rungId === rung.id
+      ? findOpenBranchPathForChain(rung.nodes, insertTarget.chain)
+      : null) ?? findOpenBranchPath(rung.nodes)
+    if (!parallelPath) {
+      notify('这一段没有待合并的分支：先点元件旁的 +，选择「打开分支」')
+      return
+    }
+    setMergeArmed({ rungId: rung.id, parallelPath })
+    setMobilePanel('none')
+    notify('请点主线上标「合」的 + 选择合并位置')
+  }, [insertTarget, notify, program, selection])
 
   const removeNode = useCallback((rungId: string, path: number[]) => {
     const rung = program.rungs.find((item) => item.id === rungId)
@@ -1805,7 +2076,7 @@ export default function App() {
       if (event.ctrlKey || event.metaKey || event.altKey) return
       const target = event.target
       if (target instanceof Element && target.closest(
-        'input, textarea, select, [contenteditable="true"], .ll-insert-panel, .ll-rung-menu-panel',
+        'input, textarea, select, [contenteditable="true"], .ll-rung-menu-panel',
       )) return
       if (document.querySelector('[role="dialog"][aria-modal="true"]')) return
       if (!selection) return
@@ -1841,7 +2112,7 @@ export default function App() {
 
   const changeOutput = (kind: OutputKind, targetRungId = insertTarget?.rungId ?? null) => {
     if (!targetRungId) {
-      notify('请先添加程序段，再选择输出指令')
+      notify('请先选择一个程序段，再选择输出指令')
       return
     }
 
@@ -1852,7 +2123,7 @@ export default function App() {
       return
     }
 
-    const segment = '程序段 ' + (targetIndex + 1)
+    const segment = rungSegmentLabel(program, targetRungId)
     const label = instructionLabel('output', kind)
     if (targetRung.output.kind === kind) {
       setSelection({ rungId: targetRungId, path: null })
@@ -1873,6 +2144,13 @@ export default function App() {
 
   const handleDrop = useCallback((payload: DragPayload, target: DropTarget) => {
     if (mobilePanel === 'instructions') setMobilePanel('none')
+    if (payload.type === 'rung') {
+      const source = program.rungs.find((rung) => rung.id === payload.rungId)
+      if (source && isBlankRung(source)) {
+        notify('新程序段会自动生成，不能拖动')
+        return
+      }
+    }
     if (target.type === 'rung-boundary') {
       if (payload.type !== 'rung') {
         notify('段间插入线只能放整个程序段')
@@ -2012,22 +2290,16 @@ export default function App() {
     },
   })
 
-  const insertRung = () => {
-    const next = addRung(program)
-    const rung = next.rungs.at(-1)
-    commit(next)
-    if (rung) {
-      setSelection({ rungId: rung.id, path: null })
-      setFavoriteTargetRungId(rung.id)
-    }
-    notify('已新增程序段')
-  }
-
   const removeRung = (rungId: string) => {
     deleteRungWithUndo(rungId)
   }
 
   const duplicateRungAt = (rungId: string) => {
+    const source = program.rungs.find((rung) => rung.id === rungId)
+    if (!source || isBlankRung(source)) {
+      notify('新程序段会自动生成，不能创建副本')
+      return
+    }
     const sourceIndex = program.rungs.findIndex((rung) => rung.id === rungId)
     const next = duplicateRung(program, rungId)
     const copy = sourceIndex >= 0 ? next.rungs[sourceIndex + 1] : undefined
@@ -2039,14 +2311,16 @@ export default function App() {
   const loadSample = async (id: string) => {
     const sample = buildSample(id)
     if (!sample) return false
+    const next = ensureTrailingBlankRung(sample)
     const accepted = await confirm({
       title: '载入这个实验？',
       description: '当前工程会被替换，载入后可以用撤销恢复。',
       confirmLabel: '载入',
     })
     if (!accepted) return false
-    commit(sample)
-    setSelection(sample.rungs[0] ? { rungId: sample.rungs[0].id, path: null } : null)
+    commit(next)
+    const first = preferredRung(next)
+    setSelection(first ? { rungId: first.id, path: null } : null)
     setActiveProject(null)
     notify('实验 / 示例已载入，可直接编辑和运行')
     return true
@@ -2055,9 +2329,11 @@ export default function App() {
   const startDemo = () => {
     const sample = buildSample('motor-hold')
     if (!sample) return
+    const next = ensureTrailingBlankRung(sample)
     pendingAutoRunRef.current = true
-    commit(sample)
-    setSelection(sample.rungs[0] ? { rungId: sample.rungs[0].id, path: null } : null)
+    commit(next)
+    const first = preferredRung(next)
+    setSelection(first ? { rungId: first.id, path: null } : null)
     setActiveProject(null)
     setMobilePanel('none')
     openInspector('tags')
@@ -2166,7 +2442,9 @@ export default function App() {
     setRunning(false)
     setHistory({ past: [], present: next, future: [] })
     setRuntime(createRuntime(next))
-    setSelection(next.rungs[0] ? { rungId: next.rungs[0].id, path: null } : null)
+    setSelection(preferredRung(next)
+      ? { rungId: preferredRung(next)!.id, path: null }
+      : null)
     setBackups(listRecoveryBackups())
     setRawDownloaded(false)
     setActiveProject(null)
@@ -2195,7 +2473,7 @@ export default function App() {
       notify('无法暂存本页修改，尚未切换版本；请先从工具栏导出本页 JSON', { tone: 'error' })
       return
     }
-    const incoming = remoteConflict.program
+    const incoming = ensureTrailingBlankRung(remoteConflict.program)
     const active = activeSavedProjectRef.current
     const library = active ? readProjectLibrary() : null
     const activeId = active?.id ?? null
@@ -2230,7 +2508,9 @@ export default function App() {
     latestProgramRef.current = incoming
     saveDirtyRef.current = false
     setHistory({ past: [], present: incoming, future: [] })
-    setSelection(incoming.rungs[0] ? { rungId: incoming.rungs[0].id, path: null } : null)
+    setSelection(preferredRung(incoming)
+      ? { rungId: preferredRung(incoming)!.id, path: null }
+      : null)
     setLastSavedAt(persisted.savedAt)
     setSaveError(null)
     setSavePending(false)
@@ -2277,8 +2557,11 @@ export default function App() {
       return
     }
     setBackups(listRecoveryBackups())
-    commit(restored)
-    setSelection(restored.rungs[0] ? { rungId: restored.rungs[0].id, path: null } : null)
+    const opened = ensureTrailingBlankRung(restored)
+    commit(opened)
+    setSelection(preferredRung(opened)
+      ? { rungId: preferredRung(opened)!.id, path: null }
+      : null)
     setActiveProject(null)
     notify(corruptProject
       ? '已载入恢复副本；请确认恢复横幅中的「接受当前工程」以恢复自动保存'
@@ -2309,13 +2592,14 @@ export default function App() {
 
     setBackups(listRecoveryBackups())
     setBackupsDismissed(false)
-    commit(saved.program)
-    setSelection(saved.program.rungs[0]
-      ? { rungId: saved.program.rungs[0].id, path: null }
+    const opened = ensureTrailingBlankRung(saved.program)
+    commit(opened)
+    setSelection(preferredRung(opened)
+      ? { rungId: preferredRung(opened)!.id, path: null }
       : null)
     setRunning(false)
     setMobilePanel('none')
-    setActiveProject(saved.id, saved.savedAt, saved.program)
+    setActiveProject(saved.id, saved.savedAt, opened)
     notify(`已打开「${saved.name}」`)
   }
 
@@ -2348,7 +2632,7 @@ export default function App() {
     if (!accepted) return
     const next = blankProgram()
     commit(next)
-    setSelection(next.rungs[0] ? { rungId: next.rungs[0].id, path: null } : null)
+    setSelection(preferredRung(next) ? { rungId: preferredRung(next)!.id, path: null } : null)
     setActiveProject(null)
     notify('已新建空白工程', {
       action: {
@@ -2372,14 +2656,15 @@ export default function App() {
   }
 
   const applyImportedProject = (imported: Program) => {
-    commit(imported)
-    setSelection(imported.rungs[0] ? { rungId: imported.rungs[0].id, path: null } : null)
+    const opened = ensureTrailingBlankRung(imported)
+    commit(opened)
+    setSelection(preferredRung(opened) ? { rungId: preferredRung(opened)!.id, path: null } : null)
     setActiveProject(null)
     setImportOpen(false)
     setMobilePanel('none')
     notify(corruptProject
-      ? `已导入「${imported.name}」；现在可点「接受当前工程并恢复自动保存」`
-      : `已导入「${imported.name}」`, {
+      ? `已导入「${opened.name}」；现在可点「接受当前工程并恢复自动保存」`
+      : `已导入「${opened.name}」`, {
         action: corruptProject
           ? undefined
           : {
@@ -2400,6 +2685,50 @@ export default function App() {
     })
     notify(mode === 'complete' ? '正在生成完整程序 PNG…' : '正在生成纯梯形图 PNG…')
   }
+
+  // 分享链接（#p=…）由 AI 或同学生成，内容全在地址里，服务器不参与。
+  // 一定先问一句再导入：直接顶掉学生没保存的草稿是最伤人的失败方式。
+  const applyImportedRef = useRef(applyImportedProject)
+  useEffect(() => {
+    applyImportedRef.current = applyImportedProject
+  })
+  const consumeShareHash = useCallback((rawHash: string) => {
+    if (!isShareProgramHash(rawHash)) return
+    // 先抹掉片段：刷新不会再弹一次，地址栏也不会被上千字符撑着。
+    // 这一步本身就是去重——StrictMode 重复执行时第二次读到的已经是空片段。
+    window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`)
+    void (async () => {
+      let incoming: Program
+      try {
+        incoming = await decodeProgramShare(rawHash)
+      } catch (reason) {
+        notify(reason instanceof Error ? reason.message : '分享链接读不出来，可能在复制时被截断了。', {
+          tone: 'error',
+        })
+        return
+      }
+      const report = compile(incoming)
+      const trouble = report.errors.length > 0
+        ? ` 目前还有 ${report.errors.length} 处编译错误，导入后需要你自己改。`
+        : ''
+      const accepted = await confirm({
+        title: `导入分享的工程「${incoming.name}」？`,
+        description: `共 ${contentRungs(incoming).length} 段梯形图、${incoming.tags.length} 个变量。当前工程会被替换（可撤销）。${trouble}`,
+        confirmLabel: '导入',
+        cancelLabel: '先不导入',
+      })
+      if (!accepted) return
+      applyImportedRef.current(incoming)
+    })()
+  }, [confirm, notify])
+
+  // 直接打开链接，和「页面开着时再点开链接」都要能用，所以同时盯住 hashchange。
+  useEffect(() => {
+    consumeShareHash(window.location.hash)
+    const onHashChange = () => consumeShareHash(window.location.hash)
+    window.addEventListener('hashchange', onHashChange)
+    return () => window.removeEventListener('hashchange', onHashChange)
+  }, [consumeShareHash])
 
   // 先按变量类型判断能不能写，再看写入是否真的产生了新状态。
   // 用户把 INT 写成和当前相同的数值时，运行时本就会返回新对象，
@@ -2448,6 +2777,39 @@ export default function App() {
           && (quickSelection.path === null || getNodeAtPath(program, rung.id, quickSelection.path) !== null),
       ),
   )
+  /**
+   * 桌面参数框是悬浮组而非模态框，关闭时浏览器不会自动把焦点还给元件。
+   * 按当前选区找回画布里的可聚焦节点，保证 Esc / 关闭按钮之后键盘操作连续。
+   */
+  const focusQuickEditAnchor = useCallback((targetSelection: Selection) => {
+    const pane = editorRef.current
+    if (!pane) return
+    const rung = Array.from(pane.querySelectorAll<HTMLElement>('.ll-rung'))
+      .find((item) => item.dataset.rungId === targetSelection.rungId)
+    if (!rung) return
+
+    let target: SVGGraphicsElement | null = null
+    if (targetSelection.path) {
+      const path = targetSelection.path.join('.')
+      const node = Array.from(
+        rung.querySelectorAll<SVGGraphicsElement>('[data-node-id][data-node-path]'),
+      ).find((item) => item.dataset.nodePath === path)
+      if (node) {
+        target = node.matches('[role="button"][tabindex="0"]')
+          ? node
+          : node.querySelector<SVGGraphicsElement>('[role="button"][tabindex="0"]')
+      }
+    }
+    target ??= rung.querySelector<SVGGraphicsElement>('[data-output-id][tabindex="0"]')
+    if (target?.isConnected) target.focus({ preventScroll: true })
+  }, [])
+  useLayoutEffect(() => {
+    if (quickEdit) return
+    const targetSelection = quickEditReturnFocusRef.current
+    if (!targetSelection) return
+    quickEditReturnFocusRef.current = null
+    focusQuickEditAnchor(targetSelection)
+  }, [focusQuickEditAnchor, quickEdit])
   const inspectorVisible = inspectorOpen || mobilePanel === 'properties'
   const inspectorDocked = useMediaQuery('(min-width: 1025px)')
   const inspectorMaxWidth = maxInspectorWidth(viewportWidth)
@@ -2624,6 +2986,19 @@ export default function App() {
     setProgramSheetWidth(PROGRAM_SHEET_DEFAULT_WIDTH)
   }
 
+  /**
+   * 插入标记只服务于“连着插几条收藏指令”。除了收藏条本身和图纸上的
+   * 目标位置，点界面任何地方（顶栏、侧栏、变量表、留白）都算这次插入结束。
+   * 用捕获阶段是因为 `.ll-slot` 会 stopPropagation，冒泡阶段收不到。
+   */
+  const clearInsertCursorOnAnyPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0 || !(event.target instanceof Element)) return
+    if (event.target.closest('[data-keep-insert-cursor="true"], .ll-slot')) return
+    if (!insertCursor && !favoriteTargetPreview) return
+    setInsertCursor(null)
+    dismissFavoriteTargetPreview()
+  }
+
   /** 点界面任意非交互留白都取消元件选中并收起落点提示；图纸内部仍由画布处理。 */
   const clearSelectionOnBlankPointerDown = (event: {
     button: number
@@ -2638,6 +3013,8 @@ export default function App() {
       + '[role="listbox"], [role="complementary"], [role="separator"], '
       + '.wb-context-resizer, .wb-program-resizer',
     )) return
+    const active = document.activeElement
+    if (active instanceof HTMLElement && active !== document.body) active.blur()
     setSelection(null)
     setQuickEdit(null)
     dismissFavoriteTargetPreview()
@@ -2679,14 +3056,18 @@ export default function App() {
   return (
     <div
       className="app-shell wb-shell"
+      data-theme={theme.preset}
+      data-theme-switching={themeSwitching ? 'true' : undefined}
       data-mobile-panel={mobilePanel}
       data-sheet={sheetOpen ? 'open' : 'closed'}
       data-inspector={inspectorVisible ? 'open' : 'closed'}
       data-inspector-resizing={resizingInspector ? 'true' : undefined}
       data-program-sheet-resizing={resizingProgramSheetSide ? 'true' : undefined}
-      style={{ '--inspector-width': `${inspectorWidth}px` } as CSSProperties}
+      style={{ '--inspector-width': `${inspectorWidth}px`, ...themeVars } as CSSProperties}
+      onPointerDownCapture={clearInsertCursorOnAnyPointerDown}
       onPointerDown={clearSelectionOnBlankPointerDown}
     >
+      <a className="skip-link" href="#wb-main">跳到梯形图</a>
       <WorkspaceTopBar
         projectName={program.name}
         profile={program.profile}
@@ -2706,52 +3087,16 @@ export default function App() {
         onOpenProject={() => setMobilePanel('project')}
         onSaveProject={requestSaveProject}
         saveBlocked={Boolean(projectLibraryError)}
+        saveStatus={manualSaveStatus}
         onNewProject={() => void newProject()}
         onImportProject={() => setImportOpen(true)}
         onExportProject={exportProject}
         onExportImage={startImageExport}
         onGuide={() => setGuideOpen(true)}
         onAbout={() => setAboutOpen(true)}
+        theme={theme}
+        onTheme={handleTheme}
       />
-
-      <div className="wb-documentbar" role="region" aria-label="程序编辑器工具栏">
-        <div className="wb-doc-tab">
-          <LadderIcon size={15} />
-          <h1>Main [OB1]</h1>
-        </div>
-        <div className="wb-doc-actions">
-          {compileResult.errors.length > 0 && (
-            <button
-              type="button"
-              className="wb-doc-errors is-error"
-              title="打开诊断并修复错误"
-              aria-label={`有 ${compileResult.errors.length} 个错误，打开诊断`}
-              onClick={() => openInspector('diagnostics')}
-            >
-              {compileResult.errors.length} 个错误
-            </button>
-          )}
-          <button
-            type="button"
-            ref={tagsButtonRef}
-            className={
-              inspectorVisible && inspectorTab === 'tags' ? 'wb-doc-action is-active' : 'wb-doc-action'
-            }
-            aria-pressed={inspectorVisible && inspectorTab === 'tags'}
-            onClick={() => {
-              if (inspectorVisible && inspectorTab === 'tags') {
-                setInspectorOpen(false)
-                setMobilePanel('none')
-                return
-              }
-              openInspector('tags')
-            }}
-          >
-            <TagIcon size={16} />
-            <span>变量表</span>
-          </button>
-        </div>
-      </div>
 
       <InstructionBar
         profile={program.profile}
@@ -2764,14 +3109,42 @@ export default function App() {
         onToggleFavorite={toggleInstructionFavorite}
         onInsertContact={insert}
         onChangeOutput={changeOutput}
+        onOpenBranch={openBranchFromBar}
+        onMergeBranch={mergeBranchFromBar}
         onStartDrag={drag.start}
         onOpenAll={() => setMobilePanel('instructions')}
+        inspectorAction={(
+          <button
+            type="button"
+            ref={tagsButtonRef}
+            className={
+              inspectorVisible && inspectorTab === 'tags'
+                ? 'wb-instruction-utility is-active'
+                : 'wb-instruction-utility'
+            }
+            data-inspector-entry="tags"
+            aria-pressed={inspectorVisible && inspectorTab === 'tags'}
+            aria-label="变量表"
+            title="打开或收起变量表"
+            onClick={() => {
+              if (inspectorVisible && inspectorTab === 'tags') {
+                setInspectorOpen(false)
+                setMobilePanel('none')
+                return
+              }
+              openInspector('tags')
+            }}
+          >
+            <TagIcon size={16} />
+            <span>变量表</span>
+          </button>
+        )}
       />
 
       {!coachDismissed && <CoachStrip onDismiss={dismissCoach} onStartDemo={startDemo} />}
 
       <div className="wb-workbench">
-        <main className="wb-program-pane" ref={editorRef}>
+        <main className="wb-program-pane" id="wb-main" tabIndex={-1} ref={editorRef}>
           <div
             id="wb-program-sheet"
             className="wb-program-frame"
@@ -2949,6 +3322,8 @@ export default function App() {
                 dragTarget={drag.target}
                 isDragging={Boolean(drag.drag)}
                 onSelect={(next) => {
+                  // 点画布上的元件/线路/空白都算重新指定落点：收起 + 的常驻游标。
+                  setInsertCursor(null)
                   if (!next) {
                     setSelection(null)
                     setQuickEdit(null)
@@ -2985,13 +3360,14 @@ export default function App() {
                 rungClipboardCount={clipboard?.kind === 'rungs' ? clipboard.rungs.length : 0}
                 onDeleteRung={removeRung}
                 onMoveRung={(rungId, delta) => commit(moveRung(program, rungId, delta))}
-                onMoveNode={(rungId, path, delta) => commit(moveNodeBy(program, rungId, path, delta))}
-                onAddRung={insertRung}
                 onInsertAt={insertAt}
-                onInsertContact={insertContactInRung}
                 onDeleteNode={removeNode}
+                onArmInsert={armInsert}
                 onOpenBranchAt={openBranchAt}
                 onMergeBranchAt={mergeBranch}
+                mergeArmed={mergeArmed}
+                onMergeArmedChange={setMergeArmed}
+                onNotice={notify}
                 onPasteAt={(slot) => pasteAt(slot)}
                 clipboardCount={clipboard?.kind === 'nodes' ? clipboard.nodes.length : 0}
                 onExtendSelect={extendSelection}
@@ -3040,7 +3416,17 @@ export default function App() {
         saveBlocked={Boolean(corruptProject) || Boolean(remoteConflict)}
       />
 
-      <nav className="mobile-tabbar wb-tabbar" aria-label="工作区面板">
+      <nav
+        className="mobile-tabbar wb-tabbar"
+        aria-label="工作区面板"
+        data-panel={
+          mobilePanel === 'none'
+            ? 'program'
+            : mobilePanel === 'properties'
+              ? inspectorTab === 'tags' ? 'tags' : 'none'
+              : mobilePanel
+        }
+      >
         <button
           type="button"
           className={mobilePanel === 'none' ? 'mobile-tab-action is-active' : 'mobile-tab-action'}
@@ -3142,7 +3528,6 @@ export default function App() {
           onInsertContact={insert}
           onChangeOutput={changeOutput}
           onStartDrag={drag.start}
-          onAddRung={insertRung}
           onOpenLibrary={() => {
             setMobilePanel('none')
             setLibraryOpen(true)
@@ -3249,6 +3634,10 @@ export default function App() {
           setSaveDialogError(null)
         }}
         onSave={handleSaveNamedProject}
+        onExportProject={() => {
+          exportProject()
+          setSaveDialogOpen(false)
+        }}
       />
 
       <LibraryDialog
@@ -3292,7 +3681,10 @@ export default function App() {
           anchor={quickEdit.anchor}
           autoFocus={quickEdit.autoFocus}
           onProgram={commit}
-          onClose={() => setQuickEdit(null)}
+          onClose={() => {
+            quickEditReturnFocusRef.current = quickEdit.selection
+            setQuickEdit(null)
+          }}
           onNotify={notify}
           onDeleteNode={() => {
             if (quickEdit.selection.path) {
@@ -3332,9 +3724,10 @@ export default function App() {
             <button
               type="button"
               className="toast-action"
+              autoFocus={toast.focusAction}
               onClick={() => {
                 const run = toast.action?.run
-                setToast(null)
+                dismissToast()
                 run?.()
               }}
             >
@@ -3346,13 +3739,15 @@ export default function App() {
               type="button"
               className="toast-close"
               aria-label="关闭提示"
-              onClick={() => setToast(null)}
+              onClick={dismissToast}
             >
               ×
             </button>
           )}
         </div>
       )}
+
+      <SupportBadge />
     </div>
   )
 

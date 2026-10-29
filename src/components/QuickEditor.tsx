@@ -1,7 +1,8 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { supportsContact, supportsOutput } from '../engine/profiles'
-import { looksLikeAddress, normalizeBitAddress, normalizeByteAddress } from '../engine/references'
+import { parseAddress } from '../engine/address'
+import { looksLikeAddress, normalizeBitAddress, normalizeByteAddress, normalizeReference } from '../engine/references'
 import { FIELD_LIMITS } from '../lib/limits'
 import type {
   ContactKind,
@@ -21,7 +22,6 @@ import {
   deleteBranch,
   ensureAddressTag,
   getNodeAtPath,
-  moveNodeBy,
   updateContact,
   updateOutput,
   updateTag,
@@ -249,6 +249,16 @@ function NumberField({
   )
 }
 
+/** 移位/旋转次数的输入上限跟着目标变量位宽走（%MB=8、%MW=16、%MD=32）。 */
+function shiftCountMax(program: Program, tagName: string | undefined): number {
+  const tag = program.tags.find(
+    (item) => normalizeReference(item.name) === normalizeReference(tagName ?? ''),
+  )
+  const width = tag ? parseAddress(tag.address)?.width : null
+  const bits = width && width > 1 ? width : tag?.kind === 'BOOL' ? 8 : 16
+  return bits - 1
+}
+
 export default function QuickEditor({
   program,
   runtime,
@@ -457,14 +467,21 @@ export default function QuickEditor({
   const outputTag = hasInstance(output.kind) ? null : tagForReference(program, output.tag)
   const outputOptions = hasInstance(output.kind) ? refs.boolRefs : isInteger(output.kind) ? refs.intRefs : refs.boolRefs
 
-  // 拖拽换位之外再给一条键盘/点击路径：QuickEditor 里的两个按钮，
-  // 和画布上聚焦触点后按左右方向键是同一个操作。
-  const canMove = (delta: -1 | 1) =>
-    contactPath !== null && moveNodeBy(program, rung.id, contactPath, delta) !== program
-  const moveContact = (delta: -1 | 1) => {
-    if (!contactPath) return
-    onProgram(moveNodeBy(program, rung.id, contactPath, delta))
-    onNotify(delta === -1 ? '元件已向左移动一位' : '元件已向右移动一位')
+  // 桌面悬浮框不是模态层，关闭后要把焦点还给刚才编辑的画布元件；
+  // 否则按 Esc 后 document.activeElement 会掉到 body，键盘用户丢失位置。
+  const closeAndRestoreCanvasFocus = () => {
+    const rungElement = Array.from(document.querySelectorAll<HTMLElement>('.ll-rung'))
+      .find((element) => element.dataset.rungId === selection.rungId)
+    const focusTarget = selection.path
+      ? Array.from(rungElement?.querySelectorAll<SVGGraphicsElement>('[data-node-id]') ?? [])
+        .find((element) => element.dataset.nodeId === node?.id)
+      : Array.from(rungElement?.querySelectorAll<SVGGraphicsElement>('[data-output-id]') ?? [])
+        .find((element) => element.dataset.outputId === rung?.output.id)
+    onClose()
+    if (mobile) return
+    window.setTimeout(() => {
+      if (focusTarget?.isConnected) focusTarget.focus({ preventScroll: true })
+    }, 0)
   }
 
   return createPortal(
@@ -490,14 +507,19 @@ export default function QuickEditor({
         onKeyDown={(event) => {
           if (mobile || event.key !== 'Escape') return
           event.stopPropagation()
-          onClose()
+          closeAndRestoreCanvasFocus()
         }}
       >
         <header className="qe-head">
           <div>
             <h2>{title}</h2>
           </div>
-          <button type="button" className="qe-close" onClick={onClose} aria-label="关闭参数编辑">
+          <button
+            type="button"
+            className="qe-close"
+            onClick={closeAndRestoreCanvasFocus}
+            aria-label="关闭参数编辑"
+          >
             <CloseIcon size={18} />
           </button>
         </header>
@@ -578,34 +600,12 @@ export default function QuickEditor({
             <div className="qe-actions">
               <button
                 type="button"
-                className="qe-quiet"
-                disabled={!canMove(-1)}
-                aria-label="向前移动一位"
-                onClick={() => moveContact(-1)}
-              >
-                ← 左移
-              </button>
-              <button
-                type="button"
-                className="qe-quiet"
-                disabled={!canMove(1)}
-                aria-label="向后移动一位"
-                onClick={() => moveContact(1)}
-              >
-                右移 →
-              </button>
-              <button
-                type="button"
                 className="qe-danger"
                 onClick={() => onDeleteNode?.()}
               >
                 删除
               </button>
             </div>
-            <p className="qe-note">
-              并联：点两个元件之间的 +，选「加入并联分支」；
-              选中元件后 Ctrl+C / Ctrl+V 可按顺序复制。
-            </p>
           </div>
         )}
 
@@ -647,10 +647,6 @@ export default function QuickEditor({
             </div>
             {node.open === true ? (
               <>
-                <p className="qe-note">
-                  点分支右侧「合并分支」，再点主线上的 + 完成闭合；
-                  仿真只按主线计算。
-                </p>
                 <div className="qe-actions">
                   <button
                     type="button"
@@ -667,10 +663,6 @@ export default function QuickEditor({
               </>
             ) : (
               <>
-                <p className="qe-note">
-                  任一并联支路接通时，能流继续向右传递。
-                  再并联一条：点线路之间的 +，选「加入并联分支」。
-                </p>
                 <div className="qe-actions">
                   <button
                     type="button"
@@ -790,8 +782,8 @@ export default function QuickEditor({
                 <NumberField
                   label={output.kind === 'MOVE' ? '常量' : output.kind === 'SHL' || output.kind === 'ROL' ? '移位次数' : '操作数'}
                   value={output.value ?? 0}
-                  min={0}
-                  max={output.kind === 'SHL' ? 15 : output.kind === 'ROL' ? 7 : undefined}
+                  min={output.kind === 'SHL' || output.kind === 'ROL' ? 0 : -32768}
+                  max={output.kind === 'SHL' || output.kind === 'ROL' ? shiftCountMax(program, output.tag) : 32767}
                   onCommit={(value) => onProgram(updateOutput(program, rung.id, { value }))}
                 />
                 <label className="qe-field">

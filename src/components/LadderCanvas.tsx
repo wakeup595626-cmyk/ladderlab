@@ -1,10 +1,13 @@
-import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type {
+  CSSProperties,
+  Dispatch,
   KeyboardEvent as ReactKeyboardEvent,
   MouseEvent as ReactMouseEvent,
   PointerEvent as ReactPointerEvent,
   ReactNode,
+  SetStateAction,
 } from 'react'
 import type {
   ContactKind,
@@ -19,17 +22,15 @@ import type {
 import type { DragPayload, DropTarget } from '../lib/dragTypes'
 import type { FavoriteInsertTarget } from '../lib/insertTarget'
 import { FIELD_LIMITS } from '../lib/limits'
+import { contentRungs, isBlankRung } from '../engine/rungInvariant'
 import {
   compactContactHitHeight,
   hasCompactParallelPitch,
   parallelBranchOffsets,
 } from '../lib/parallelLayout'
-import { hasOpenBranch } from '../state/programOps'
 import {
-  ChevronDownIcon,
   GripIcon,
   MoreIcon,
-  PlusIcon,
   TrashIcon,
 } from './Icons'
 import './LadderCanvas.css'
@@ -48,8 +49,6 @@ export interface LadderCanvasProps {
   rungClipboardCount?: number
   onDeleteRung: (rungId: string) => void
   onMoveRung: (rungId: string, delta: -1 | 1) => void
-  onMoveNode: (rungId: string, path: number[], delta: -1 | 1) => void
-  onAddRung: () => void
   dragTarget?: DropTarget | null
   isDragging?: boolean
   onEdit?: (selection: Selection, anchor: DOMRect) => void
@@ -61,6 +60,8 @@ export interface LadderCanvasProps {
   onRenameRung?: (rungId: string, label: string) => void
   /** 插入点菜单：选中触点种类后插到这个位置。 */
   onInsertAt?: (slot: SlotRef, kind: ContactKind) => void
+  /** 用户点了某个「+」：记住该位置并持续标色，供收藏指令连续插入。 */
+  onArmInsert?: (slot: SlotRef) => void
   /** 插入点菜单：在这个位置向下打开一条并联分支。 */
   onOpenBranchAt?: (slot: SlotRef) => void
   /** 已打开的并联分支，在主线插入位处闭合。 */
@@ -70,12 +71,18 @@ export interface LadderCanvasProps {
   clipboardCount?: number
   /** Ctrl/Shift 点击元件时扩展选择。 */
   onExtendSelect?: (rungId: string, path: number[], mode: 'toggle' | 'range') => void
-  /** 程序段工具栏的“插入触点”：插在已选元件之后，没有选中就接到段尾。 */
-  onInsertContact?: (rungId: string, kind: ContactKind) => void
   /** 删除当前选中的元件；删除整个程序段仍走 onDeleteRung。 */
   onDeleteNode?: (rungId: string, path: number[]) => void
   /** 只读提示：菜单项不可用、快捷键缺少选中项时告诉用户下一步。 */
   onNotice?: (message: string) => void
+  /** 当前正在取点的并联分支；由工作区持有，切换图纸或换落点时统一清除。 */
+  mergeArmed?: MergeArmed | null
+  onMergeArmedChange?: Dispatch<SetStateAction<MergeArmed | null>>
+}
+
+export interface MergeArmed {
+  rungId: string
+  parallelPath: number[]
 }
 
 export interface SlotRef {
@@ -110,7 +117,6 @@ interface DrawContext {
   contactHitHeight?: number
   onSelect: (selection: Selection) => void
   onEdit?: (selection: Selection, anchor: DOMRect) => void
-  onMoveNode: (rungId: string, path: number[], delta: -1 | 1) => void
   onOpenSlotMenu: (request: SlotMenuRequest) => void
   onMergeSlotClick: (slot: SlotRef, closeIndex: number) => void
   onMergeChipClick: (rungId: string, parallelPath: number[]) => void
@@ -582,6 +588,51 @@ function renderSlot(
     }
     openMenu(element)
   }
+  const activateNearestPlus = (event: ReactMouseEvent<SVGGElement>) => {
+    // The 44px touch target intentionally overlaps tightly packed slots. Resolve
+    // a real pointer click to the nearest visible + so the enlarged target can
+    // never open the neighbouring insertion point by accident.
+    if (event.detail === 0) {
+      activatePlus(event.currentTarget)
+      return
+    }
+    const rungElement = event.currentTarget.closest('.ll-rung')
+    if (!rungElement) {
+      activatePlus(event.currentTarget)
+      return
+    }
+    const chainKey = chain.join('.')
+    let nearest: SVGGElement | null = null
+    let nearestDistance = Number.POSITIVE_INFINITY
+    for (const slot of rungElement.querySelectorAll<SVGGElement>('.ll-slot')) {
+      if (slot.dataset.chain !== chainKey) continue
+      const plus = slot.querySelector<SVGGElement>('.ll-slot-plus')
+      if (!plus) continue
+      const style = window.getComputedStyle(plus)
+      if (style.pointerEvents === 'none' || Number(style.opacity) === 0) continue
+      const hit = plus.querySelector<SVGGraphicsElement>('.ll-slot-plus-hit') ?? plus
+      const bounds = hit.getBoundingClientRect()
+      const distance = Math.hypot(
+        event.clientX - (bounds.left + bounds.width / 2),
+        event.clientY - (bounds.top + bounds.height / 2),
+      )
+      if (distance >= nearestDistance) continue
+      nearestDistance = distance
+      nearest = plus
+    }
+    if (nearest && nearest !== event.currentTarget) {
+      // Re-enter through the nearest +'s own handler so its slot closure opens
+      // the menu with the correct chain, index and anchor rectangle.
+      nearest.dispatchEvent(new MouseEvent('click', {
+        bubbles: true,
+        cancelable: true,
+        clientX: event.clientX,
+        clientY: event.clientY,
+      }))
+      return
+    }
+    activatePlus(event.currentTarget)
+  }
   const plusLabel = mergeCandidate
     ? '在这里闭合并联分支'
     : favoriteTarget
@@ -657,7 +708,7 @@ function renderSlot(
         aria-label={plusLabel}
         onClick={(event) => {
           event.stopPropagation()
-          activatePlus(event.currentTarget)
+          activateNearestPlus(event)
         }}
         onKeyDown={(event) => {
           if (
@@ -673,9 +724,10 @@ function renderSlot(
         }}
       >
         <title>{plusLabel}</title>
-        {/* 相邻插入点（尤其是并联支路起点与主线插入点）只隔十几像素。
-            命中区必须比视觉加号略宽但不能互相盖住，否则点主线会误开支路菜单。 */}
-        <rect className="ll-slot-plus-hit" x="-12" y="-22" width="24" height="44" />
+        {/* 44×44 is the product's touch floor. The transparent target
+            overlaps tightly packed slots by design; activateNearestPlus
+            resolves a pointer click to the closest visible +. */}
+        <rect className="ll-slot-plus-hit" x="-22" y="-22" width="44" height="44" />
         {mergeCandidate ? (
           <>
             <rect x="-10" y="-10" width="20" height="20" rx="4" />
@@ -683,6 +735,12 @@ function renderSlot(
           </>
         ) : (
           <>
+            {favoriteTarget && (
+              <>
+                <circle className="ll-insert-cursor-halo" r="13" aria-hidden="true" />
+                <circle className="ll-insert-cursor-ripple" r="13" aria-hidden="true" />
+              </>
+            )}
             <rect x="-8" y="-8" width="16" height="16" rx="3" />
             <path d="M -5 0 H 5 M 0 -5 V 5" />
           </>
@@ -767,7 +825,6 @@ function renderContact(
         CONTACT_LABELS[node.kind] + '，' + details.name + '，'
         + details.address + '，点击编辑'
       }
-      aria-keyshortcuts="ArrowLeft ArrowRight"
       data-node-id={node.id}
       data-node-path={path.join('.')}
       onClick={(event) => {
@@ -785,11 +842,6 @@ function renderContact(
         selectAndEdit(context, selection, event.currentTarget)
       }}
       onKeyDown={(event) => {
-        if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
-          event.preventDefault()
-          context.onMoveNode(context.rungId, path, event.key === 'ArrowLeft' ? -1 : 1)
-          return
-        }
         activateWithKeyboard(
           event,
           () => selectAndEdit(context, selection, event.currentTarget),
@@ -1427,6 +1479,7 @@ function renderOutput(
   output: OutputElement,
   context: DrawContext,
   rungId: string,
+  placeholder = false,
 ): ReactNode {
   const m = context.metrics
   const size = outputSize(output, m)
@@ -1462,8 +1515,10 @@ function renderOutput(
       role="button"
       tabIndex={0}
       aria-label={
-        OUTPUT_LABELS[output.kind] + '输出，' + details.name + '，'
-        + details.address + '，点击编辑'
+        placeholder
+          ? '输出，尚未绑定变量，点击编辑'
+          : OUTPUT_LABELS[output.kind] + '输出，' + details.name + '，'
+            + details.address + '，点击编辑'
       }
       onClick={(event) => {
         event.stopPropagation()
@@ -1475,9 +1530,11 @@ function renderOutput(
       )}
     >
       <title>
-        {OUTPUT_LABELS[output.kind] + ' · ' + details.name + ' · '
-          + details.kind + ' · ' + details.address + ' · ' + details.comment
-          + ' · ' + (q ? 'Q=TRUE' : 'Q=FALSE')}
+        {placeholder
+          ? '输出 · 尚未绑定变量 · 点击编辑'
+          : OUTPUT_LABELS[output.kind] + ' · ' + details.name + ' · '
+            + details.kind + ' · ' + details.address + ' · ' + details.comment
+            + ' · ' + (q ? 'Q=TRUE' : 'Q=FALSE')}
       </title>
       <rect
         className="ll-node-hit"
@@ -1530,14 +1587,16 @@ function renderOutput(
               {shorten(address, m.addressChars)}
             </text>
           )}
-          <text
-            className="ll-output-name"
-            x={symbolX}
-            y={address ? 28 : 15}
-            textAnchor="middle"
-          >
-            {shorten(symbol, m.nameChars)}
-          </text>
+          {!placeholder && (
+            <text
+              className="ll-output-name"
+              x={symbolX}
+              y={address ? 28 : 15}
+              textAnchor="middle"
+            >
+              {shorten(symbol, m.nameChars)}
+            </text>
+          )}
         </g>
       ) : (
         renderInstructionGraphic(output, context, size, centerY, powered, symbol, address)
@@ -1561,11 +1620,16 @@ function measureRung(
   m: LadderMetrics,
 ) {
   const measureMemo: LayoutMemo = new Map()
-  const chain = measureChain(rung.nodes, m, undefined, measureMemo)
-  const output = outputSize(rung.output, m)
+  const placeholder = isBlankRung(rung)
+  const measuredChain = measureChain(rung.nodes, m, undefined, measureMemo)
+  // An empty rung is a draft wire, not an empty network with an invisible coil.
+  const chain = placeholder ? { ...measuredChain, width: m.slotW } : measuredChain
+  const output = placeholder ? { width: 0, height: 0, lineY: 0 } : outputSize(rung.output, m)
   const chainX = m.railLeft + m.chainLeft
-  const naturalWidth = chainX + chain.width + m.chainToOutput
-    + output.width + m.outputToRail + m.railRight
+  const naturalWidth = placeholder
+    ? Math.max(m.minWidth, chainX + chain.width + m.slotW + m.railRight)
+    : chainX + chain.width + m.chainToOutput
+      + output.width + m.outputToRail + m.railRight
   const width = Math.max(m.minWidth, naturalWidth, Math.ceil(availableWidth))
   const top = Math.max(chain.lineY, output.lineY)
   const bottom = Math.max(chain.height - chain.lineY, output.height - output.lineY)
@@ -1592,6 +1656,37 @@ function collectNodeIds(nodes: LadderNode[]): string[] {
       ? [node.id]
       : [node.id, ...node.branches.flatMap(collectNodeIds)]
   ))
+}
+
+const insertPulseTimers = new WeakMap<SVGGraphicsElement, number>()
+
+/** 收藏指令写入画布后的确认动效：元件轻弹一次，外圈再扩散一圈。 */
+function pulseInsertedNode(node: Element) {
+  if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return
+  const graphic = node as SVGGraphicsElement
+  const previousTimer = insertPulseTimers.get(graphic)
+  if (previousTimer !== undefined) window.clearTimeout(previousTimer)
+  graphic.classList.remove('is-just-inserted')
+  // 连续快速插入同一个位置时，强制浏览器重新开始这次关键帧。
+  void graphic.getBoundingClientRect()
+  graphic.classList.add('is-just-inserted')
+  const pulseTimer = window.setTimeout(() => {
+    graphic.classList.remove('is-just-inserted')
+    insertPulseTimers.delete(graphic)
+  }, 760)
+  insertPulseTimers.set(graphic, pulseTimer)
+
+  const selection = graphic.querySelector<SVGRectElement>(':scope > .ll-selection-box')
+  if (!selection) return
+  graphic.querySelectorAll(':scope > .ll-insert-flash').forEach((ring) => ring.remove())
+  const ring = selection.cloneNode(true) as SVGRectElement
+  ring.classList.remove('ll-selection-box')
+  ring.classList.add('ll-insert-flash')
+  ring.setAttribute('aria-hidden', 'true')
+  graphic.appendChild(ring)
+  const cleanup = () => ring.remove()
+  ring.addEventListener('animationend', cleanup, { once: true })
+  window.setTimeout(cleanup, 900)
 }
 
 /** 插入后把新元件和输出一起带入视野，窄屏下不会只露出元件的一半。 */
@@ -1632,6 +1727,7 @@ interface RungSectionProps {
   rung: Program['rungs'][number]
   index: number
   total: number
+  segmentLabel: string
   context: DrawContext
   onDuplicateRung: (rungId: string) => void
   onCopyRung: (rungId: string) => void
@@ -1641,99 +1737,7 @@ interface RungSectionProps {
   onDeleteRung: (rungId: string) => void
   onMoveRung: (rungId: string, delta: -1 | 1) => void
   onRenameRung?: (rungId: string, label: string) => void
-  onInsertContact?: (rungId: string, kind: ContactKind) => void
   onDeleteNode?: (rungId: string, path: number[]) => void
-}
-
-/** 程序段的“插入触点”下拉菜单，行为与右上角的程序段菜单保持一致。 */
-function RungInsertMenu({
-  rungId,
-  segmentLabel,
-  onInsert,
-}: {
-  rungId: string
-  segmentLabel: string
-  onInsert: (rungId: string, kind: ContactKind) => void
-}) {
-  const detailsRef = useRef<HTMLDetailsElement>(null)
-
-  function close(restoreFocus: boolean) {
-    const details = detailsRef.current
-    if (!details) return
-    details.removeAttribute('open')
-    if (restoreFocus) details.querySelector<HTMLElement>('summary')?.focus()
-  }
-
-  return (
-    <details
-      className="ll-insert"
-      data-no-rung-drag
-      ref={detailsRef}
-      onToggle={(event) => {
-        if (!event.currentTarget.open) return
-        window.requestAnimationFrame(() => {
-          detailsRef.current
-            ?.querySelector<HTMLButtonElement>('.ll-insert-panel button')
-            ?.focus()
-        })
-      }}
-      onBlur={(event) => {
-        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
-          event.currentTarget.removeAttribute('open')
-        }
-      }}
-      onKeyDown={(event) => {
-        if (event.key === 'Escape') {
-          event.preventDefault()
-          close(true)
-          return
-        }
-        if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return
-        const items = Array.from(
-          detailsRef.current?.querySelectorAll<HTMLButtonElement>('.ll-insert-panel button') ?? [],
-        )
-        if (items.length === 0) return
-        event.preventDefault()
-        if (!detailsRef.current?.open) {
-          detailsRef.current?.setAttribute('open', '')
-          window.requestAnimationFrame(() => items[0]?.focus())
-          return
-        }
-        const index = items.indexOf(document.activeElement as HTMLButtonElement)
-        let next = 0
-        if (event.key === 'ArrowDown') next = index < 0 ? 0 : (index + 1) % items.length
-        else if (event.key === 'ArrowUp') next = index < 0 ? items.length - 1 : (index - 1 + items.length) % items.length
-        else if (event.key === 'End') next = items.length - 1
-        items[next]?.focus()
-      }}
-    >
-      <summary
-        className="ll-tool ll-insert-trigger"
-        aria-label={segmentLabel + '：插入触点'}
-        title={'在' + segmentLabel + '插入触点'}
-      >
-        <PlusIcon size={15} />
-        <span className="ll-tool-label">插入触点</span>
-        <ChevronDownIcon size={13} />
-      </summary>
-      <div className="ll-insert-panel" role="menu" aria-label="插入触点">
-        {CONTACT_CHOICES.map((choice) => (
-          <button
-            key={choice.kind}
-            type="button"
-            role="menuitem"
-            onClick={() => {
-              close(true)
-              onInsert(rungId, choice.kind)
-            }}
-          >
-            <span className="ll-insert-symbol" aria-hidden="true">{choice.symbol}</span>
-            <span>{choice.label}</span>
-          </button>
-        ))}
-      </div>
-    </details>
-  )
 }
 
 /** 两段之间的插入线：只有拖动整段时才接收指针，平时不改变布局也不挡点击。 */
@@ -1768,6 +1772,7 @@ function RungSection({
   rung,
   index,
   total,
+  segmentLabel,
   context,
   onDuplicateRung,
   onCopyRung,
@@ -1777,7 +1782,6 @@ function RungSection({
   onDeleteRung,
   onMoveRung,
   onRenameRung,
-  onInsertContact,
   onDeleteNode,
 }: RungSectionProps) {
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -1786,9 +1790,7 @@ function RungSection({
   const seenOutputRef = useRef<string | null>(null)
   const [availableWidth, setAvailableWidth] = useState(0)
   const [titleDraft, setTitleDraft] = useState<string | null>(null)
-  // 与博途一致：每一段固定显示「程序段 N」，标题只是可选的补充说明。
-  // 编号永远由位置决定，复制、排序之后也不会带着旧编号跑。
-  const segmentLabel = '程序段 ' + (index + 1)
+  const placeholder = isBlankRung(rung)
   const titleValue = titleDraft ?? rung.label
   const metrics = metricsFor(availableWidth)
   const layout = measureRung(rung, availableWidth, metrics)
@@ -1806,7 +1808,7 @@ function RungSection({
   const draggedRungId = context.dragSource?.startsWith('rung:')
     ? context.dragSource.slice(5)
     : null
-  const isDropTarget = context.dragTarget?.type === 'rung'
+  const isDropTarget = !placeholder && context.dragTarget?.type === 'rung'
     && context.dragTarget.index === index
     && draggedRungId !== rung.id
   // 段内工具栏只在“这一段里有选中元件”时启用删除：用户先点元件，再按删除，
@@ -1820,32 +1822,9 @@ function RungSection({
       ? CONTACT_LABELS[selectedNode.kind] + (selectedNode.tag ? ' · ' + selectedNode.tag : '')
       : '并联分支 · ' + selectedNode.branches.length + ' 路'
     : ''
-  const localWire = context.selection?.rungId === rung.id && !context.selection.wholeRung
-    ? context.selection.wire ?? null
-    : null
   // 整段选择是显式状态，避免和“选中输出线圈”的 path:null 混淆。
   const wholeRungSelected = rungSelected && context.selection?.wholeRung === true
-  const armedHere = context.mergeTarget?.rungId === rung.id
   const favoriteTargetHere = context.insertTarget?.rungId === rung.id
-  const multiCount = context.selection?.rungId === rung.id
-    ? context.selection.paths?.length ?? 0
-    : 0
-  // 段头只保留一条最相关的提示：正在合并 > 有未闭合分支 > 多选 > 单选。
-  const statusLabel = armedHere
-    ? '点主线上的 + 合并（Esc 取消）'
-    : hasOpenBranch(rung.nodes)
-      ? '分支未闭合 · 点右侧「合并分支」'
-      : multiCount > 1
-        ? '已选 ' + multiCount + ' 个元件 · Ctrl+C 复制'
-        : wholeRungSelected
-          ? '整段已选 · 拖动排序 · Ctrl+C 复制'
-          : selectedLabel || (localWire
-            ? '已选线路 ' + (localWire.index + 1)
-            : favoriteTargetHere
-              ? '收藏指令 · ' + (context.insertTargetLabel || '插入本段')
-              : '')
-  const statusTip = Boolean(armedHere) || hasOpenBranch(rung.nodes) || multiCount > 1
-
   useLayoutEffect(() => {
     const element = scrollRef.current
     if (!element) return
@@ -1877,6 +1856,7 @@ function RungSection({
     const target = addedId ? nodes.find((node) => node.dataset.nodeId === addedId) : null
     const focus = target ?? (outputChanged ? output : null)
     if (!focus) return
+    pulseInsertedNode(focus)
     revealInserted(container, focus, output && focus !== output ? output : null)
   }, [rung.nodes, rung.output.id])
 
@@ -1897,13 +1877,16 @@ function RungSection({
     <article
       className={[
         'll-rung',
+        placeholder ? 'is-placeholder' : '',
         powered ? 'is-powered' : '',
         rungSelected ? 'is-selected' : '',
         wholeRungSelected ? 'is-whole-selected' : '',
         favoriteTargetHere ? 'is-favorite-target' : '',
       ].filter(Boolean).join(' ')}
       data-rung-id={rung.id}
-      aria-label={segmentLabel + '：' + (rung.label || '未命名')}
+      aria-label={placeholder
+        ? '新程序段：在插入点添加元件后自动生成下一段'
+        : segmentLabel + '：' + (rung.label || '未命名')}
     >
       <header
         className={[
@@ -1911,7 +1894,7 @@ function RungSection({
           isDropTarget ? 'is-drop-target' : '',
           draggedRungId === rung.id ? 'is-drag-source' : '',
         ].filter(Boolean).join(' ')}
-        data-drop={JSON.stringify({ type: 'rung', index })}
+        data-drop={placeholder ? undefined : JSON.stringify({ type: 'rung', index })}
         onPointerDown={(event) => {
           const target = event.target
           if (target instanceof Element
@@ -1919,6 +1902,7 @@ function RungSection({
             return
           }
           context.onSelect({ rungId: rung.id, path: null, wholeRung: true })
+          if (placeholder) return
           context.beginDrag(
             event as unknown as ReactPointerEvent<SVGGElement>,
             { type: 'rung', rungId: rung.id },
@@ -1932,11 +1916,13 @@ function RungSection({
             type="button"
             className="ll-rung-drag"
             data-drag-handle
-            title="拖动程序段"
-            aria-label={'选择并拖动' + segmentLabel}
+            disabled={placeholder}
+            title={placeholder ? '新程序段会自动生成，不能拖动' : '拖动程序段'}
+            aria-label={placeholder ? '新程序段，自动生成，不能拖动' : '选择并拖动' + segmentLabel}
             onPointerDown={(event) => {
               event.stopPropagation()
               context.onSelect({ rungId: rung.id, path: null, wholeRung: true })
+              if (placeholder) return
               context.beginDrag(
                 event as unknown as ReactPointerEvent<SVGGElement>,
                 { type: 'rung', rungId: rung.id },
@@ -1957,7 +1943,7 @@ function RungSection({
             className="ll-rung-name"
             value={titleValue}
             readOnly={!onRenameRung}
-            placeholder={onRenameRung ? '添加标题（可选）' : ''}
+            placeholder={onRenameRung ? '标题' : ''}
             aria-label={'给 ' + segmentLabel + ' 添加标题'}
             maxLength={FIELD_LIMITS.rungLabel}
             data-no-rung-drag
@@ -1979,13 +1965,6 @@ function RungSection({
         </div>
         <div className="ll-rung-header-right">
           <div className="ll-rung-tools" role="toolbar" aria-label={segmentLabel + ' 编辑工具'}>
-            {onInsertContact && (
-              <RungInsertMenu
-                rungId={rung.id}
-                segmentLabel={segmentLabel}
-                onInsert={onInsertContact}
-              />
-            )}
             <button
               type="button"
               className="ll-tool ll-tool-remove"
@@ -2002,21 +1981,14 @@ function RungSection({
               <span className="ll-tool-label">删除元件</span>
             </button>
           </div>
-          {statusLabel && (
+          {!placeholder && (
             <span
-              className={'ll-selected-chip' + (statusTip ? ' is-branch-tip' : '')}
-              title={statusLabel}
-              role="status"
+              className={'ll-power-state' + (powered ? ' is-on' : '')}
+              title={powered ? '回路通电' : '回路断开'}
             >
-              {statusLabel}
+              <i /><span className="ll-power-text">{powered ? '通电' : '断开'}</span>
             </span>
           )}
-          <span
-            className={'ll-power-state' + (powered ? ' is-on' : '')}
-            title={powered ? '回路通电' : '回路断开'}
-          >
-            <i /><span className="ll-power-text">{powered ? '通电' : '断开'}</span>
-          </span>
           <details
             className="ll-rung-menu"
             data-no-rung-drag
@@ -2039,7 +2011,7 @@ function RungSection({
             }}
           >
             <summary aria-label="程序段操作" title="程序段操作">
-              <MoreIcon size={17} />
+              <MoreIcon size={19} />
             </summary>
             <div
               className="ll-rung-menu-panel"
@@ -2070,6 +2042,8 @@ function RungSection({
               <button
                 type="button"
                 role="menuitem"
+                disabled={placeholder}
+                title={placeholder ? '新程序段会自动生成，不能剪切' : undefined}
                 onClick={(event) => {
                   const details = event.currentTarget.closest('details')
                   details?.removeAttribute('open')
@@ -2082,6 +2056,8 @@ function RungSection({
               <button
                 type="button"
                 role="menuitem"
+                disabled={placeholder}
+                title={placeholder ? '新程序段会自动生成，不能复制' : undefined}
                 onClick={(event) => {
                   const details = event.currentTarget.closest('details')
                   details?.removeAttribute('open')
@@ -2108,7 +2084,7 @@ function RungSection({
               <button
                 type="button"
                 role="menuitem"
-                disabled={index === 0}
+                disabled={placeholder || index === 0}
                 onClick={(event) => {
                   const details = event.currentTarget.closest('details')
                   details?.removeAttribute('open')
@@ -2121,7 +2097,7 @@ function RungSection({
               <button
                 type="button"
                 role="menuitem"
-                disabled={index === total - 1}
+                disabled={placeholder || index === total - 1}
                 onClick={(event) => {
                   const details = event.currentTarget.closest('details')
                   details?.removeAttribute('open')
@@ -2135,6 +2111,8 @@ function RungSection({
               <button
                 type="button"
                 role="menuitem"
+                disabled={placeholder}
+                title={placeholder ? '新程序段会自动生成，不能创建副本' : undefined}
                 onClick={(event) => {
                   const details = event.currentTarget.closest('details')
                   details?.removeAttribute('open')
@@ -2148,6 +2126,8 @@ function RungSection({
                 type="button"
                 role="menuitem"
                 className="is-danger"
+                disabled={placeholder}
+                title={placeholder ? '新程序段会自动生成，不能删除' : undefined}
                 onClick={(event) => {
                   const details = event.currentTarget.closest('details')
                   const rungElement = details?.closest<HTMLElement>('.ll-rung')
@@ -2160,7 +2140,6 @@ function RungSection({
                     const rungs = Array.from(document.querySelectorAll<HTMLElement>('.ll-rung'))
                     const fallback = rungs[Math.max(0, rungIndex - 1)] ?? rungs[0]
                     const target = fallback?.querySelector<HTMLElement>('.ll-rung-menu summary')
-                      ?? document.querySelector<HTMLElement>('.ll-empty-board button, .ll-add-rung')
                     target?.focus()
                   })
                 }}
@@ -2189,26 +2168,55 @@ function RungSection({
             x2={metrics.railLeft}
             y2={layout.height}
           />
-          <line
-            className="ll-power-wire is-on"
-            x1={metrics.railLeft}
-            y1={layout.centerY}
-            x2={layout.chainX}
-            y2={layout.centerY}
-          />
+          {placeholder ? (
+            <line
+              className="ll-power-wire is-on"
+              x1={metrics.railLeft}
+              y1={layout.centerY}
+              x2={layout.width - metrics.railRight}
+              y2={layout.centerY}
+            />
+          ) : (
+            <line
+              className="ll-power-wire is-on"
+              x1={metrics.railLeft}
+              y1={layout.centerY}
+              x2={layout.chainX}
+              y2={layout.centerY}
+            />
+          )}
           <g transform={'translate(' + layout.chainX + ', ' + layout.chainY + ')'}>
             {renderChain(rung.nodes, rungContext, [], true)}
           </g>
-          <line
-            className={'ll-power-wire' + (powered ? ' is-on' : '')}
-            x1={layout.chainX + layout.chain.width}
-            y1={layout.centerY}
-            x2={layout.outputX}
-            y2={layout.centerY}
-          />
-          <g transform={'translate(' + layout.outputX + ', ' + layout.outputY + ')'}>
-            {renderOutput(rung.output, rungContext, rung.id)}
-          </g>
+          {!placeholder && (
+            <>
+              <line
+                className={'ll-power-wire' + (powered ? ' is-on' : '')}
+                x1={layout.chainX + layout.chain.width}
+                y1={layout.centerY}
+                x2={layout.outputX}
+                y2={layout.centerY}
+              />
+              <g transform={'translate(' + layout.outputX + ', ' + layout.outputY + ')'}>
+                {renderOutput(rung.output, rungContext, rung.id, false)}
+              </g>
+            </>
+          )}
+          {powered && !placeholder && (
+            <g className="ll-energy" aria-hidden="true">
+              <rect
+                className="ll-energy-spark"
+                x={metrics.railLeft - 56}
+                y={layout.centerY - 1.5}
+                width="56"
+                height="3"
+                rx="1.5"
+                style={{
+                  '--ll-energy-span': `${Math.max(0, layout.outputX - metrics.railLeft)}px`,
+                } as CSSProperties}
+              />
+            </g>
+          )}
         </svg>
       </div>
     </article>
@@ -2257,15 +2265,23 @@ function SlotMenu({
     const menu = menuRef.current
     if (!menu) return
     const { anchor } = request
+    const margin = 8
     const width = menu.offsetWidth
     const height = menu.offsetHeight
-    const left = Math.max(
-      8,
-      Math.min(anchor.left + anchor.width / 2 - width / 2, window.innerWidth - width - 8),
-    )
-    let top = anchor.bottom + 8
-    if (top + height > window.innerHeight - 8) top = anchor.top - height - 8
-    if (top < 8) top = Math.max(8, window.innerHeight - height - 8)
+    // 左边缘对齐触发点：菜单贴着「+」出现，比居中之后被窗口边缘挤到
+    // 最左侧更好读，也不会盖住程序段标题和左侧母线。
+    const left = Math.max(margin, Math.min(anchor.left, window.innerWidth - width - margin))
+    const below = anchor.bottom + margin
+    const spaceBelow = window.innerHeight - below - margin
+    const spaceAbove = anchor.top - margin * 2
+    // 下方放得下就放下方；实在放不下才换到空间更大的那一侧，
+    // 避免菜单在视口中段突然跳到顶部盖住工具栏。
+    let top = spaceBelow >= height ? below : anchor.top - height - margin
+    if (spaceBelow < height && spaceBelow >= spaceAbove) top = below
+    if (top < margin) top = margin
+    if (top + height > window.innerHeight - margin) {
+      top = Math.max(margin, window.innerHeight - height - margin)
+    }
     setPlacement({ left: Math.round(left), top: Math.round(top) })
     const timer = window.setTimeout(() => {
       const preferred = initialKind
@@ -2409,28 +2425,31 @@ export default function LadderCanvas({
   rungClipboardCount = 0,
   onDeleteRung,
   onMoveRung,
-  onMoveNode,
-  onAddRung,
   dragTarget = null,
   isDragging = false,
   onEdit,
   onStartDrag,
   onRenameRung,
   onInsertAt,
+  onArmInsert,
   onOpenBranchAt,
   onMergeBranchAt,
   onPasteAt,
   clipboardCount = 0,
   onExtendSelect,
-  onInsertContact,
   onDeleteNode,
   onNotice,
   insertTarget = null,
   insertTargetLabel = '',
+  mergeArmed = null,
+  onMergeArmedChange,
 }: LadderCanvasProps) {
   const [dragSource, setDragSource] = useState<string | null>(null)
   const [slotMenu, setSlotMenu] = useState<SlotMenuRequest | null>(null)
-  const [mergeArmed, setMergeArmed] = useState<{ rungId: string; parallelPath: number[] } | null>(null)
+  const setMergeArmed = useCallback<Dispatch<SetStateAction<MergeArmed | null>>>(
+    (next) => onMergeArmedChange?.(next),
+    [onMergeArmedChange],
+  )
   const [pendingFocus, setPendingFocus] = useState<SlotRef | null>(null)
   const [focusOpenBranch, setFocusOpenBranch] = useState(false)
   const [lastKind, setLastKind] = useState<ContactKind>('NO')
@@ -2440,6 +2459,9 @@ export default function LadderCanvas({
   const draggingRungIndex = draggingRungId
     ? program.rungs.findIndex((rung) => rung.id === draggingRungId)
     : -1
+  const contentIndexById = new Map(
+    contentRungs(program).map((rung, index) => [rung.id, index + 1] as const),
+  )
 
   // 选完元件后把焦点交给下一个 +，键盘用户和触屏都能连续往下加。
   // 这里按 DOM 里的 rung/chain/index 查找，避免并联嵌套时把路径拼错。
@@ -2539,7 +2561,7 @@ export default function LadderCanvas({
     }
     window.addEventListener('keydown', onKeyDown, true)
     return () => window.removeEventListener('keydown', onKeyDown, true)
-  }, [mergeArmed, onNotice])
+  }, [mergeArmed, onNotice, setMergeArmed])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -2592,9 +2614,9 @@ export default function LadderCanvas({
       onSelect(next)
     },
     onEdit,
-    onMoveNode,
     onOpenSlotMenu: (request) => {
       setMergeArmed(null)
+      onArmInsert?.({ rungId: request.rungId, chain: [...request.chain], index: request.index })
       setSlotMenu(request)
     },
     onMergeSlotClick: (_slot, closeIndex) => {
@@ -2638,60 +2660,58 @@ export default function LadderCanvas({
             + '[role="menu"], [data-node-id], [data-output-id], .ll-slot, '
             + '.ll-merge-chip, .ll-node-grip, [data-drag-handle], .ll-rung-header',
           )) return
+          // 点图纸留白时一并释放元件/并联组上的键盘焦点，避免选中已清除后
+          // :focus-visible 仍把虚线选择框留在屏幕上。
+          const active = document.activeElement
+          if (
+            active
+            && active.closest('.ll-canvas')
+            && (active instanceof HTMLElement || active instanceof SVGElement)
+          ) {
+            active.blur()
+          }
           setMergeArmed(null)
           setSlotMenu(null)
           onSelect(null)
         }}
       >
-        {program.rungs.length === 0 ? (
-          <div className="ll-empty-board">
-            <div className="ll-empty-symbol">—[ ]—( )</div>
-            <h3>程序里还没有程序段</h3>
-            <p>添加第一条程序段，然后点线路上的 + 插入触点。</p>
-            <button type="button" onClick={onAddRung}>添加程序段</button>
-          </div>
-        ) : (
-          <div className="ll-program-sheet">
-            {program.rungs.map((rung, index) => (
-              <Fragment key={rung.id}>
-                <RungDropzone
-                  boundary={index}
-                  dragging={Boolean(draggingRungId)}
-                  active={dragTarget?.type === 'rung-boundary' && dragTarget.boundary === index}
-                  noop={index === draggingRungIndex || index === draggingRungIndex + 1}
-                />
-                <RungSection
-                  rung={rung}
-                  index={index}
-                  total={program.rungs.length}
-                  context={{ ...context, rungId: rung.id }}
-                  onDuplicateRung={onDuplicateRung}
-                  onCopyRung={onCopyRung}
-                  onCutRung={onCutRung}
-                  onPasteRung={onPasteRung}
-                  rungClipboardCount={rungClipboardCount}
-                  onDeleteRung={onDeleteRung}
-                  onMoveRung={onMoveRung}
-                  onRenameRung={onRenameRung}
-                  onInsertContact={onInsertContact}
-                  onDeleteNode={onDeleteNode}
-                />
-              </Fragment>
-            ))}
-            <RungDropzone
-              boundary={program.rungs.length}
-              dragging={Boolean(draggingRungId)}
-              active={dragTarget?.type === 'rung-boundary'
-                && dragTarget.boundary === program.rungs.length}
-              noop={program.rungs.length === draggingRungIndex + 1}
-            />
-          </div>
-        )}
-        {program.rungs.length > 0 && (
-          <button type="button" className="ll-add-rung" onClick={onAddRung}>
-            <span aria-hidden="true">+</span> 添加程序段
-          </button>
-        )}
+        <div className="ll-program-sheet">
+          {program.rungs.map((rung, index) => (
+            <Fragment key={rung.id}>
+              <RungDropzone
+                boundary={index}
+                dragging={Boolean(draggingRungId)}
+                active={dragTarget?.type === 'rung-boundary' && dragTarget.boundary === index}
+                noop={index === draggingRungIndex || index === draggingRungIndex + 1}
+              />
+              <RungSection
+                rung={rung}
+                index={index}
+                total={contentRungs(program).length}
+                segmentLabel={isBlankRung(rung)
+                  ? '新程序段'
+                  : '程序段 ' + (contentIndexById.get(rung.id) ?? 0)}
+                context={{ ...context, rungId: rung.id }}
+                onDuplicateRung={onDuplicateRung}
+                onCopyRung={onCopyRung}
+                onCutRung={onCutRung}
+                onPasteRung={onPasteRung}
+                rungClipboardCount={rungClipboardCount}
+                onDeleteRung={onDeleteRung}
+                onMoveRung={onMoveRung}
+                onRenameRung={onRenameRung}
+                onDeleteNode={onDeleteNode}
+              />
+            </Fragment>
+          ))}
+          <RungDropzone
+            boundary={program.rungs.length}
+            dragging={Boolean(draggingRungId)}
+            active={dragTarget?.type === 'rung-boundary'
+              && dragTarget.boundary === program.rungs.length}
+            noop={program.rungs.length === draggingRungIndex + 1}
+          />
+        </div>
       </div>
       {slotMenu && (
         <SlotMenu
@@ -2763,8 +2783,14 @@ function renderParallel(
     size.height - 2,
     Math.max(...placements.map((placement) => placement.y + placement.height)) + 8,
   )
-  const frameLeft = Math.max(0, Math.min(splitX, ownSplitX) - 8)
-  const frameRight = Math.min(size.width, Math.max(collectX, splitX, ownSplitX) + 8)
+  const frameHeight = frameBottom - frameTop
+  const frameInset = frameHeight / 6
+  const trimmedTop = frameTop + frameInset
+  const trimmedBottom = frameBottom - frameInset
+  // Inherited split/join columns can fall outside this group's local bounds.
+  // Keep the frame on the real wires instead of clipping it to 0..size.width.
+  const frameLeft = Math.min(splitX, ownSplitX) - 8
+  const frameRight = Math.max(collectX, splitX, ownSplitX) + 8
   const outputPower = context.runtime.nodePower[node.id] === true
   const selection = { rungId: context.rungId, path }
   const draftPlacements = placements.slice(1)
@@ -2805,17 +2831,11 @@ function renderParallel(
         aria-label={isOpen
           ? '并联分支，主线未闭合，点击编辑或点右侧合并分支'
           : '并联分支，' + node.branches.length + ' 条支路，点击编辑'}
-        aria-keyshortcuts="ArrowLeft ArrowRight"
         onClick={(event) => {
           event.stopPropagation()
           selectAndEdit(context, selection, event.currentTarget)
         }}
         onKeyDown={(event) => {
-          if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
-            event.preventDefault()
-            context.onMoveNode(context.rungId, path, event.key === 'ArrowLeft' ? -1 : 1)
-            return
-          }
           activateWithKeyboard(
             event,
             () => selectAndEdit(context, selection, event.currentTarget),
@@ -2843,10 +2863,11 @@ function renderParallel(
       <rect
         className="ll-branch-frame"
         data-parallel-frame
+        data-frame-untrimmed-height={frameHeight}
         x={frameLeft}
-        y={frameTop}
+        y={trimmedTop}
         width={Math.max(16, frameRight - frameLeft)}
-        height={Math.max(16, frameBottom - frameTop)}
+        height={Math.max(16, trimmedBottom - trimmedTop)}
         rx="8"
       />
       <path

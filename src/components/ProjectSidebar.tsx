@@ -4,7 +4,7 @@ import { getProfile } from '../engine/profiles'
 import type { ContactKind, OutputKind, ProfileId, Program } from '../engine/types'
 import type { DragPayload } from '../lib/dragTypes'
 import { favoriteInstructionId } from '../lib/instructionFavorites'
-import type { FavoriteInsertTarget } from '../lib/insertTarget'
+import { favoriteTargetSegmentLabel, type FavoriteInsertTarget } from '../lib/insertTarget'
 import { INSTRUCTIONS, isInstructionAllowed, type InstructionFamily } from './instructionCatalog'
 import {
   BookIcon,
@@ -14,7 +14,6 @@ import {
   GripIcon,
   HelpIcon,
   LadderIcon,
-  PlusIcon,
   SearchIcon,
   StarFilledIcon,
   StarIcon,
@@ -37,7 +36,6 @@ export interface ProjectSidebarProps {
   onInsertContact: (kind: ContactKind) => void
   onChangeOutput: (kind: OutputKind) => void
   onStartDrag: (event: React.PointerEvent<HTMLElement>, payload: DragPayload, label: string) => void
-  onAddRung: () => void
   onOpenLibrary: () => void
   onOpenTags: () => void
   onOpenGuide: () => void
@@ -60,7 +58,6 @@ export default function ProjectSidebar({
   onInsertContact,
   onChangeOutput,
   onStartDrag,
-  onAddRung,
   onOpenLibrary,
   onOpenTags,
   onOpenGuide,
@@ -68,9 +65,7 @@ export default function ProjectSidebar({
 }: ProjectSidebarProps) {
   const [query, setQuery] = useState('')
   const activeProfile = getProfile(profile)
-  const segmentLabel = insertTarget
-    ? '程序段 ' + (insertTarget.rungIndex + 1)
-    : '目标程序段'
+  const segmentLabel = insertTarget ? favoriteTargetSegmentLabel(insertTarget) : '目标程序段'
   const normalizedQuery = query.trim().toLocaleLowerCase()
   const visibleInstructions = normalizedQuery
     ? INSTRUCTIONS.filter((entry) =>
@@ -93,7 +88,6 @@ export default function ProjectSidebar({
         <div className="sidebar-mobile-head">
           <div>
             <h2>{variant === 'instructions' ? '全部指令' : '项目与指令'}</h2>
-            {variant === 'instructions' && <p className="sidebar-drawer-note">点一下插到下面的位置，也可以拖到梯形图。</p>}
           </div>
           <button
             type="button"
@@ -116,9 +110,6 @@ export default function ProjectSidebar({
             onSelectRung={onSelectRung}
             onLocate={onLocateTarget}
           />
-          <p className="sidebar-insert-target-note">
-            触点插在所选元件之后；没有选中元件时插到段末。输出会替换该段输出。
-          </p>
         </div>
       )}
 
@@ -168,15 +159,6 @@ export default function ProjectSidebar({
       <section className="sidebar-instructions" aria-labelledby="instruction-heading">
         <div className="instruction-head">
           <h2 id="instruction-heading">{variant === 'instructions' ? '按分类查找' : '指令'}</h2>
-          <button
-            type="button"
-            className="icon-button sidebar-add-rung"
-            onClick={onAddRung}
-            aria-label="新增程序段"
-            title="新增程序段"
-          >
-            <PlusIcon size={17} />
-          </button>
         </div>
 
         <label className="sidebar-search">
@@ -189,10 +171,6 @@ export default function ProjectSidebar({
             aria-label="搜索指令"
           />
         </label>
-
-        {variant === 'instructions' && (
-          <p className="instruction-favorite-hint">点右侧星标收藏，顶部“收藏指令”栏随取随用。</p>
-        )}
 
         {instructionGroups.map(({ group, entries }) => (
           <section className="instruction-group" key={group} aria-labelledby={`instruction-group-${group}`}>

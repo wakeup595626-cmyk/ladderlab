@@ -1,0 +1,75 @@
+{
+  "schema": 1,
+  "name": "电机正反转",
+  "profile": "v21",
+  "tags": [
+    { "id": "t-sbf", "name": "SB_Forward", "address": "%I0.0", "kind": "BOOL", "initial": false, "comment": "正转启动按钮" },
+    { "id": "t-sbr", "name": "SB_Reverse", "address": "%I0.1", "kind": "BOOL", "initial": false, "comment": "反转启动按钮" },
+    { "id": "t-sbs", "name": "SB_Stop", "address": "%I0.2", "kind": "BOOL", "initial": false, "comment": "停止按钮（常闭接法按常开处理）" },
+    { "id": "t-fr", "name": "FR_Overload", "address": "%I0.3", "kind": "BOOL", "initial": false, "comment": "热继电器过载" },
+    { "id": "t-kmf", "name": "KM_Forward", "address": "%Q0.0", "kind": "BOOL", "initial": false, "comment": "正转接触器" },
+    { "id": "t-kmr", "name": "KM_Reverse", "address": "%Q0.1", "kind": "BOOL", "initial": false, "comment": "反转接触器" },
+    { "id": "t-run", "name": "Running", "address": "%Q0.2", "kind": "BOOL", "initial": false, "comment": "运行指示灯" }
+  ],
+  "rungs": [
+    {
+      "id": "r1",
+      "label": "正转：启动按钮与自锁并联，反转互锁，停止与过载串联",
+      "nodes": [
+        {
+          "type": "parallel",
+          "id": "p1",
+          "branches": [
+            [
+              { "type": "contact", "id": "c1", "kind": "NO", "tag": "SB_Forward" },
+              { "type": "contact", "id": "c2", "kind": "NC", "tag": "KM_Reverse" }
+            ],
+            [
+              { "type": "contact", "id": "c3", "kind": "NO", "tag": "KM_Forward" }
+            ]
+          ]
+        },
+        { "type": "contact", "id": "c4", "kind": "NC", "tag": "SB_Stop" },
+        { "type": "contact", "id": "c5", "kind": "NC", "tag": "FR_Overload" }
+      ],
+      "output": { "id": "o1", "kind": "COIL", "tag": "KM_Forward" }
+    },
+    {
+      "id": "r2",
+      "label": "反转：同样的自锁结构，正转互锁",
+      "nodes": [
+        {
+          "type": "parallel",
+          "id": "p2",
+          "branches": [
+            [
+              { "type": "contact", "id": "c6", "kind": "NO", "tag": "SB_Reverse" },
+              { "type": "contact", "id": "c7", "kind": "NC", "tag": "KM_Forward" }
+            ],
+            [
+              { "type": "contact", "id": "c8", "kind": "NO", "tag": "KM_Reverse" }
+            ]
+          ]
+        },
+        { "type": "contact", "id": "c9", "kind": "NC", "tag": "SB_Stop" },
+        { "type": "contact", "id": "c10", "kind": "NC", "tag": "FR_Overload" }
+      ],
+      "output": { "id": "o2", "kind": "COIL", "tag": "KM_Reverse" }
+    },
+    {
+      "id": "r3",
+      "label": "任一方向运行时点亮运行指示灯",
+      "nodes": [
+        {
+          "type": "parallel",
+          "id": "p3",
+          "branches": [
+            [ { "type": "contact", "id": "c11", "kind": "NO", "tag": "KM_Forward" } ],
+            [ { "type": "contact", "id": "c12", "kind": "NO", "tag": "KM_Reverse" } ]
+          ]
+        }
+      ],
+      "output": { "id": "o3", "kind": "COIL", "tag": "Running" }
+    }
+  ]
+}

@@ -210,6 +210,9 @@ function assert(condition, message) {
 
 await send('Page.enable')
 await send('Runtime.enable')
+// Hover-dependent checks use computed styles. A background tab can keep the
+// previous pointer state in headless Chromium, so foreground this QA tab.
+await send('Page.bringToFront')
 await setViewport(1699, 935)
 await send('Page.navigate', { url: 'about:blank' })
 await sleep(250)
@@ -308,8 +311,7 @@ await sleep(220)
 const keyboardReset = await sheetMetrics()
 assert(Math.abs(keyboardReset.frameWidth - 1360) <= 1, 'Home 键没有恢复默认宽度')
 
-await evaluate(`[...document.querySelectorAll('.wb-doc-action')]
-  .find((button) => button.textContent?.includes('变量表'))?.click()`)
+await evaluate(`document.querySelector('[data-inspector-entry="tags"]')?.click()`)
 await sleep(450)
 const splitView = await sheetMetrics()
 assert(splitView.paneWidth < initial.paneWidth, '打开属性栏后程序区没有让出空间')

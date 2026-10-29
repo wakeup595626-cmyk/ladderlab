@@ -1,4 +1,5 @@
 import { uid } from '../lib/uid'
+import { ensureTrailingBlankRung } from './rungInvariant'
 import type { CompareOp, ContactKind, LadderNode, OutputElement, OutputKind, Program, TagDef } from './types'
 
 const t = (name: string, address: string, comment: string, initial = false): TagDef =>
@@ -55,7 +56,7 @@ function timerCounter(): Program {
     t('Start', '%I0.0', '启动按钮'), t('Stop', '%I0.1', '停止按钮'),
     t('Pulse', '%I0.2', '计数脉冲'), t('Reset', '%I0.3', '计数复位'),
     t('LED1', '%Q0.0', 'LED1 五秒熄灭'), t('LED1B', '%Q0.2', 'LED1 状态回读'), t('LED2', '%Q0.1', '计数满五次'), t('TimerDone', '%M0.0', '五秒到点'),
-    n('ElapsedTime', '%MD14', '教学模型：INT 毫秒'), n('CountValue', '%MW16', '计数器当前值'),
+    n('ElapsedTime', '%MD20', '教学模型：INT 毫秒'), n('CountValue', '%MW16', '计数器当前值'),
   ], [
     r('LED1 自保持 · 停止 / 到时熄灭', [nc('Stop'), nc('TimerDone'), or([no('Start')], [no('LED1')])], o('COIL', 'LED1')),
     r('启动后五秒定时', [no('LED1')], o('TON', 'T1', { pt: 5000, qTag: 'TimerDone', valueTag: 'ElapsedTime' })),
@@ -191,5 +192,5 @@ export const COURSE_LABS = [
 
 export function buildCourseLab(id: string): Program | null {
   const index = COURSE_LABS.findIndex((lab) => lab.id === id)
-  return index < 0 ? null : BUILDERS[index]()
+  return index < 0 ? null : ensureTrailingBlankRung(BUILDERS[index]())
 }

@@ -1,9 +1,11 @@
-import { useEffect, useRef, useState } from 'react'
-import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { PROFILES } from '../engine/profiles'
 import type { ProfileId } from '../engine/types'
 import { FIELD_LIMITS } from '../lib/limits'
+import { THEME_PRESETS, type ThemePreference } from '../lib/theme'
 import {
+  CheckCircleIcon,
   ChevronDownIcon,
   FolderIcon,
   HelpIcon,
@@ -12,6 +14,7 @@ import {
   InfoIcon,
   LadderIcon,
   MoreIcon,
+  PaletteIcon,
   PauseIcon,
   PlayIcon,
   PlusIcon,
@@ -42,12 +45,15 @@ export interface WorkspaceTopBarProps {
   onOpenProject: () => void
   onSaveProject: () => void
   saveBlocked?: boolean
+  saveStatus?: 'idle' | 'saving' | 'saved' | 'error'
   onImportProject: () => void
   onExportProject: () => void
   onExportImage: (mode: 'complete' | 'plain') => void
   onNewProject: () => void
   onGuide: () => void
   onAbout: () => void
+  theme: ThemePreference
+  onTheme: (theme: ThemePreference) => void
 }
 
 export default function WorkspaceTopBar({
@@ -69,21 +75,29 @@ export default function WorkspaceTopBar({
   onOpenProject,
   onSaveProject,
   saveBlocked = false,
+  saveStatus = 'idle',
   onImportProject,
   onExportProject,
   onExportImage,
   onNewProject,
   onGuide,
   onAbout,
+  theme,
+  onTheme,
 }: WorkspaceTopBarProps) {
   const [menuOpen, setMenuOpen] = useState(false)
   const [fileMenuOpen, setFileMenuOpen] = useState(false)
   const [fileMenuKind, setFileMenuKind] = useState<'export' | 'file'>('export')
+  const [themeMenuOpen, setThemeMenuOpen] = useState(false)
+  const [themeMenuStyle, setThemeMenuStyle] = useState<CSSProperties | null>(null)
   const menuRef = useRef<HTMLDivElement>(null)
   const menuButtonRef = useRef<HTMLButtonElement>(null)
   const fileMenuRef = useRef<HTMLDivElement>(null)
   const exportButtonRef = useRef<HTMLButtonElement>(null)
   const compactFileButtonRef = useRef<HTMLButtonElement>(null)
+  const themeWrapRef = useRef<HTMLDivElement>(null)
+  const themeButtonRef = useRef<HTMLButtonElement>(null)
+  const themeMenuRef = useRef<HTMLDivElement>(null)
   const nameCancelRef = useRef(false)
 
   // 非受控输入只在失焦或回车时提交；key 跟随工程名，新建/导入后会立即同步。
@@ -107,6 +121,9 @@ export default function WorkspaceTopBar({
   )
   const fileMenuItems = () => Array.from(
     fileMenuRef.current?.querySelectorAll<HTMLButtonElement>('[role^="menuitem"]:not([disabled])') ?? [],
+  )
+  const themeRadios = () => Array.from(
+    themeMenuRef.current?.querySelectorAll<HTMLButtonElement>('[role="radio"]') ?? [],
   )
 
   useEffect(() => {
@@ -174,6 +191,71 @@ export default function WorkspaceTopBar({
     }
   }, [fileMenuKind, fileMenuOpen])
 
+  // 弹层固定在触发按钮正下方：顶栏会随滚动改变高度，用 absolute 会漂移。
+  useLayoutEffect(() => {
+    if (!themeMenuOpen) return
+    const place = () => {
+      const rect = themeButtonRef.current?.getBoundingClientRect()
+      if (!rect) return
+      const top = Math.round(rect.bottom + 8)
+      const right = Math.max(12, Math.round(window.innerWidth - rect.right))
+      setThemeMenuStyle({
+        top,
+        right,
+        left: 'auto',
+        bottom: 'auto',
+        maxHeight: Math.max(240, Math.round(window.innerHeight - top - 12)),
+      })
+    }
+    place()
+    window.addEventListener('resize', place)
+    window.addEventListener('scroll', place, true)
+    return () => {
+      window.removeEventListener('resize', place)
+      window.removeEventListener('scroll', place, true)
+    }
+  }, [themeMenuOpen])
+
+  useEffect(() => {
+    if (!themeMenuOpen) return
+
+    const focusTimer = window.setTimeout(() => {
+      const checked = themeMenuRef.current?.querySelector<HTMLButtonElement>('[role="radio"][aria-checked="true"]')
+      ;(checked ?? themeRadios()[0])?.focus()
+    }, 0)
+    const handlePointerDown = (event: PointerEvent) => {
+      if (themeWrapRef.current && event.target instanceof Node && themeWrapRef.current.contains(event.target)) return
+      setThemeMenuOpen(false)
+    }
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      event.stopPropagation()
+      setThemeMenuOpen(false)
+      themeButtonRef.current?.focus()
+    }
+    // Tab 离开弹层就收起；原生取色器会把焦点短暂交给系统对话框，那种情况保持打开。
+    const handleFocusOut = () => {
+      window.setTimeout(() => {
+        const active = document.activeElement
+        if (!(active instanceof Node) || active === document.body) return
+        if (themeWrapRef.current?.contains(active)) return
+        setThemeMenuOpen(false)
+      }, 0)
+    }
+
+    const wrap = themeWrapRef.current
+    document.addEventListener('pointerdown', handlePointerDown)
+    document.addEventListener('keydown', handleKeyDown)
+    wrap?.addEventListener('focusout', handleFocusOut)
+    return () => {
+      window.clearTimeout(focusTimer)
+      document.removeEventListener('pointerdown', handlePointerDown)
+      document.removeEventListener('keydown', handleKeyDown)
+      wrap?.removeEventListener('focusout', handleFocusOut)
+    }
+  }, [themeMenuOpen])
+
   const handleMenuKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
     if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return
     const items = menuItems()
@@ -207,12 +289,33 @@ export default function WorkspaceTopBar({
     action()
   }
 
+  // 单选组的方向键 = 换值，这样键盘用户不用 Tab 逐个试色。
+  const handleThemeKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (!['ArrowDown', 'ArrowRight', 'ArrowUp', 'ArrowLeft', 'Home', 'End'].includes(event.key)) return
+    const items = themeRadios()
+    if (items.length === 0) return
+    event.preventDefault()
+    const index = items.indexOf(document.activeElement as HTMLButtonElement)
+    let next = 0
+    if (event.key === 'End') next = items.length - 1
+    else if (event.key === 'ArrowDown' || event.key === 'ArrowRight') next = index < 0 ? 0 : (index + 1) % items.length
+    else if (index < 0) next = 0
+    else next = (index - 1 + items.length) % items.length
+    const button = items[next]
+    button?.focus()
+    button?.click()
+  }
+
   const chooseFileMenuAction = (action: () => void) => {
     setFileMenuOpen(false)
     if (fileMenuKind === 'file') compactFileButtonRef.current?.focus()
     else exportButtonRef.current?.focus()
     action()
   }
+
+  const activeThemeName = theme.preset === 'custom'
+    ? '自定义'
+    : THEME_PRESETS.find((preset) => preset.id === theme.preset)?.name ?? '原版绿'
 
   return (
     <header className="topbar wb-topbar">
@@ -221,7 +324,7 @@ export default function WorkspaceTopBar({
           <LadderIcon size={20} />
         </span>
         <span className="wb-brand-name">
-          <strong>梯形实验室</strong>
+          <h1 className="wb-brand-title">梯形实验室</h1>
         </span>
       </div>
 
@@ -373,7 +476,6 @@ export default function WorkspaceTopBar({
                   <ExportIcon size={16} />
                   <span className="wb-menu-item-copy">
                     <strong>工程文件</strong>
-                    <small>.ladderlab.json · 可导入其他 LadderLab</small>
                   </span>
                 </button>
               </div>
@@ -383,14 +485,12 @@ export default function WorkspaceTopBar({
                   <ImageIcon size={16} />
                   <span className="wb-menu-item-copy">
                     <strong>完整程序 PNG</strong>
-                    <small>含工程名与程序段标题</small>
                   </span>
                 </button>
                 <button type="button" role="menuitem" onClick={() => chooseFileMenuAction(() => onExportImage('plain'))}>
                   <ImageIcon size={16} />
                   <span className="wb-menu-item-copy">
                     <strong>纯梯形图 PNG</strong>
-                    <small>只保留梯形图，适合插入报告</small>
                   </span>
                 </button>
               </div>
@@ -441,15 +541,37 @@ export default function WorkspaceTopBar({
 
         <button
           type="button"
-          className="wb-save-button"
+          className={`wb-save-button is-${saveStatus}${saveBlocked ? ' is-blocked' : ''}`}
           onClick={onSaveProject}
-          disabled={saveBlocked}
           aria-label="保存到本机项目库"
+          aria-busy={saveStatus === 'saving'}
           aria-keyshortcuts="Control+S Meta+S"
-          title={saveBlocked ? '本机项目库不可用，请先导出工程 JSON' : '保存到本机项目库 (Ctrl+S)'}
+          title={
+            saveStatus === 'saving'
+              ? '正在保存工程，请稍候'
+              : saveStatus === 'saved'
+                ? '已保存到本机项目库'
+                : saveStatus === 'error'
+                  ? '保存未完成，点击查看原因'
+                  : saveBlocked
+                    ? '项目库需要处理，点击查看原因并导出备份'
+                    : '保存到本机项目库 (Ctrl+S)'
+          }
         >
-          <SaveIcon size={16} />
-          <span>保存</span>
+          {saveStatus === 'saved'
+            ? <CheckCircleIcon size={16} />
+            : saveStatus === 'saving'
+              ? <span className="wb-save-spinner" aria-hidden="true" />
+              : <SaveIcon size={16} />}
+          <span className="wb-save-label" aria-live="polite">
+            {saveStatus === 'saving'
+              ? '保存中'
+              : saveStatus === 'saved'
+                ? '已保存'
+                : saveStatus === 'error'
+                  ? '重试'
+                  : '保存'}
+          </span>
         </button>
 
         <button
@@ -472,6 +594,144 @@ export default function WorkspaceTopBar({
           )}
           <span>{errorCount > 0 ? '无法运行' : running ? '暂停' : '运行'}</span>
         </button>
+
+        <div className="wb-theme-control" ref={themeWrapRef}>
+          <button
+            type="button"
+            className="wb-theme-button"
+            ref={themeButtonRef}
+            onClick={() => {
+              setMenuOpen(false)
+              setFileMenuOpen(false)
+              const next = !themeMenuOpen
+              // 先按当前按钮位置落座，再在 layout effect 里跟随滚动与缩放。
+              if (next) {
+                const rect = themeButtonRef.current?.getBoundingClientRect()
+                if (rect) {
+                  const top = Math.round(rect.bottom + 8)
+                  setThemeMenuStyle({
+                    top,
+                    right: Math.max(12, Math.round(window.innerWidth - rect.right)),
+                    left: 'auto',
+                    bottom: 'auto',
+                    maxHeight: Math.max(240, Math.round(window.innerHeight - top - 12)),
+                  })
+                }
+              }
+              setThemeMenuOpen(next)
+            }}
+            aria-label={`配色外观，当前${activeThemeName}`}
+            title={`配色外观 · 当前：${activeThemeName}`}
+            aria-expanded={themeMenuOpen}
+            aria-controls={themeMenuOpen ? 'topbar-theme-menu' : undefined}
+            aria-haspopup="dialog"
+          >
+            <span className="wb-theme-button-icon" aria-hidden="true">
+              <PaletteIcon size={17} />
+            </span>
+            <span className="wb-theme-button-label">配色</span>
+          </button>
+
+          {themeMenuOpen && themeMenuStyle && (
+            <div
+              className="topbar-menu wb-theme-menu"
+              id="topbar-theme-menu"
+              role="dialog"
+              aria-label="配色外观"
+              ref={themeMenuRef}
+              style={themeMenuStyle}
+            >
+              <div className="wb-theme-menu-head">
+                <span className="wb-menu-label">配色</span>
+                <span className="wb-theme-menu-current">当前：{activeThemeName}</span>
+              </div>
+
+              <div className="wb-theme-grid" role="radiogroup" aria-label="配色主题" onKeyDown={handleThemeKeyDown}>
+                {THEME_PRESETS.map((preset) => (
+                  <button
+                    type="button"
+                    role="radio"
+                    key={preset.id}
+                    aria-checked={theme.preset === preset.id}
+                    tabIndex={theme.preset === preset.id ? 0 : -1}
+                    className="wb-theme-option"
+                    title={preset.note}
+                    onClick={() => onTheme({
+                      preset: preset.id,
+                      accent: preset.swatch,
+                      ground: preset.tokens.ground,
+                    })}
+                  >
+                    <span
+                      className="wb-theme-swatch"
+                      aria-hidden="true"
+                      style={{
+                        '--swatch': preset.swatch,
+                        '--swatch-bg': preset.tokens.ground,
+                      } as CSSProperties}
+                    />
+                    <span className="wb-theme-option-text">
+                      <span className="wb-theme-option-name">{preset.name}</span>
+                      <span className="wb-theme-option-note">{preset.note}</span>
+                    </span>
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={theme.preset === 'custom'}
+                  tabIndex={theme.preset === 'custom' ? 0 : -1}
+                  className="wb-theme-option is-custom"
+                  title="用取色器调出任意主色与背景"
+                  onClick={() => onTheme({ ...theme, preset: 'custom' })}
+                >
+                  <span
+                    className="wb-theme-swatch"
+                    aria-hidden="true"
+                    style={{
+                      '--swatch': theme.accent,
+                      '--swatch-bg': theme.ground,
+                    } as CSSProperties}
+                  />
+                  <span className="wb-theme-option-text">
+                    <span className="wb-theme-option-name">自定义</span>
+                    <span className="wb-theme-option-note">取色器自由调</span>
+                  </span>
+                </button>
+              </div>
+
+              <div className="wb-theme-custom">
+                <span className="wb-theme-custom-label">调色</span>
+                <label className="wb-theme-color" title="自定义主色，立即预览">
+                  <input
+                    type="color"
+                    value={theme.accent}
+                    aria-label="自定义主色"
+                    onChange={(event) => onTheme({
+                      ...theme,
+                      preset: 'custom',
+                      accent: event.target.value,
+                    })}
+                  />
+                  <span>主色</span>
+                </label>
+                <label className="wb-theme-color" title="自定义背景色，自动压成浅色">
+                  <input
+                    type="color"
+                    value={theme.ground}
+                    aria-label="自定义背景色"
+                    onChange={(event) => onTheme({
+                      ...theme,
+                      preset: 'custom',
+                      ground: event.target.value,
+                    })}
+                  />
+                  <span>背景</span>
+                </label>
+              </div>
+            </div>
+          )}
+        </div>
 
         <div className="overflow wb-more" ref={menuRef}>
           <button
