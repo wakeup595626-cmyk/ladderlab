@@ -59,6 +59,7 @@ import type {
 } from './engine/types'
 import type { DragPayload, DropTarget } from './lib/dragTypes'
 import { downloadDataUrl, downloadText, parseProgramText, serializeProgram } from './lib/io'
+import { decodeProgramShare, isShareProgramHash } from './lib/shareLink'
 import { saveLatestNamedProject } from './lib/latestProjectSave'
 import {
   deleteSavedProject as removeSavedProjectFromLibrary,
@@ -2684,6 +2685,50 @@ export default function App() {
     })
     notify(mode === 'complete' ? '正在生成完整程序 PNG…' : '正在生成纯梯形图 PNG…')
   }
+
+  // 分享链接（#p=…）由 AI 或同学生成，内容全在地址里，服务器不参与。
+  // 一定先问一句再导入：直接顶掉学生没保存的草稿是最伤人的失败方式。
+  const applyImportedRef = useRef(applyImportedProject)
+  useEffect(() => {
+    applyImportedRef.current = applyImportedProject
+  })
+  const consumeShareHash = useCallback((rawHash: string) => {
+    if (!isShareProgramHash(rawHash)) return
+    // 先抹掉片段：刷新不会再弹一次，地址栏也不会被上千字符撑着。
+    // 这一步本身就是去重——StrictMode 重复执行时第二次读到的已经是空片段。
+    window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`)
+    void (async () => {
+      let incoming: Program
+      try {
+        incoming = await decodeProgramShare(rawHash)
+      } catch (reason) {
+        notify(reason instanceof Error ? reason.message : '分享链接读不出来，可能在复制时被截断了。', {
+          tone: 'error',
+        })
+        return
+      }
+      const report = compile(incoming)
+      const trouble = report.errors.length > 0
+        ? ` 目前还有 ${report.errors.length} 处编译错误，导入后需要你自己改。`
+        : ''
+      const accepted = await confirm({
+        title: `导入分享的工程「${incoming.name}」？`,
+        description: `共 ${contentRungs(incoming).length} 段梯形图、${incoming.tags.length} 个变量。当前工程会被替换（可撤销）。${trouble}`,
+        confirmLabel: '导入',
+        cancelLabel: '先不导入',
+      })
+      if (!accepted) return
+      applyImportedRef.current(incoming)
+    })()
+  }, [confirm, notify])
+
+  // 直接打开链接，和「页面开着时再点开链接」都要能用，所以同时盯住 hashchange。
+  useEffect(() => {
+    consumeShareHash(window.location.hash)
+    const onHashChange = () => consumeShareHash(window.location.hash)
+    window.addEventListener('hashchange', onHashChange)
+    return () => window.removeEventListener('hashchange', onHashChange)
+  }, [consumeShareHash])
 
   // 先按变量类型判断能不能写，再看写入是否真的产生了新状态。
   // 用户把 INT 写成和当前相同的数值时，运行时本就会返回新对象，

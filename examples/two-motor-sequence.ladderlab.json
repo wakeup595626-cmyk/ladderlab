@@ -1,0 +1,110 @@
+{
+  "schema": 1,
+  "name": "两台电机顺序启动逆序停止",
+  "profile": "v21",
+  "tags": [
+    { "id": "t-sb1", "name": "SB1", "address": "%I0.0", "kind": "BOOL", "initial": false, "comment": "启动按钮（常开，按一下为 1）" },
+    { "id": "t-sb2", "name": "SB2", "address": "%I0.1", "kind": "BOOL", "initial": false, "comment": "停止按钮（常开，按一下为 1）" },
+    { "id": "t-fr", "name": "FR", "address": "%I0.2", "kind": "BOOL", "initial": false, "comment": "热继电器过载信号，1 表示已动作" },
+    { "id": "t-s1", "name": "S1", "address": "%M0.0", "kind": "BOOL", "initial": false, "comment": "第一步：1 号电机运行" },
+    { "id": "t-s2", "name": "S2", "address": "%M0.1", "kind": "BOOL", "initial": false, "comment": "第二步：2 号电机运行" },
+    { "id": "t-stop", "name": "MStop", "address": "%M0.2", "kind": "BOOL", "initial": false, "comment": "停止过程标志，等待 2 号停机延时" },
+    { "id": "t-km1", "name": "KM1", "address": "%Q0.0", "kind": "BOOL", "initial": false, "comment": "1 号电机接触器" },
+    { "id": "t-km2", "name": "KM2", "address": "%Q0.1", "kind": "BOOL", "initial": false, "comment": "2 号电机接触器" }
+  ],
+  "rungs": [
+    {
+      "id": "r1",
+      "label": "启动：按下 SB1 进入第一步，S1 自保持",
+      "nodes": [
+        {
+          "type": "parallel",
+          "id": "p1",
+          "branches": [
+            [ { "type": "contact", "id": "c1", "kind": "NO", "tag": "SB1" } ],
+            [ { "type": "contact", "id": "c2", "kind": "NO", "tag": "S1" } ]
+          ]
+        },
+        { "type": "contact", "id": "c3", "kind": "NC", "tag": "FR" },
+        { "type": "contact", "id": "c4", "kind": "NC", "tag": "MStop" }
+      ],
+      "output": { "id": "o1", "kind": "SET", "tag": "S1" }
+    },
+    {
+      "id": "r2",
+      "label": "第一步计时 3 秒，T1.Q 到达后允许进入第二步",
+      "nodes": [
+        { "type": "contact", "id": "c5", "kind": "NO", "tag": "S1" },
+        { "type": "contact", "id": "c6", "kind": "NC", "tag": "S2" }
+      ],
+      "output": { "id": "o2", "kind": "TON", "tag": "T1", "pt": 3000 }
+    },
+    {
+      "id": "r3",
+      "label": "延时到，2 号电机投入（顺序启动）",
+      "nodes": [
+        { "type": "contact", "id": "c7", "kind": "NO", "tag": "T1.Q" }
+      ],
+      "output": { "id": "o3", "kind": "SET", "tag": "S2" }
+    },
+    {
+      "id": "r4",
+      "label": "按下 SB2 记下停止请求，松开也不会丢",
+      "nodes": [
+        { "type": "contact", "id": "c8", "kind": "NO", "tag": "SB2" }
+      ],
+      "output": { "id": "o4", "kind": "SET", "tag": "MStop" }
+    },
+    {
+      "id": "r5",
+      "label": "逆序停止第一步：先停 2 号电机",
+      "nodes": [
+        { "type": "contact", "id": "c9", "kind": "NO", "tag": "MStop" },
+        { "type": "contact", "id": "c10", "kind": "NO", "tag": "S2" }
+      ],
+      "output": { "id": "o5", "kind": "RESET", "tag": "S2" }
+    },
+    {
+      "id": "r6",
+      "label": "2 号停机后再延时 2 秒",
+      "nodes": [
+        { "type": "contact", "id": "c11", "kind": "NO", "tag": "MStop" }
+      ],
+      "output": { "id": "o6", "kind": "TON", "tag": "T2", "pt": 2000 }
+    },
+    {
+      "id": "r7",
+      "label": "逆序停止第二步：延时报到，停 1 号电机",
+      "nodes": [
+        { "type": "contact", "id": "c12", "kind": "NO", "tag": "T2.Q" }
+      ],
+      "output": { "id": "o7", "kind": "RESET", "tag": "S1" }
+    },
+    {
+      "id": "r8",
+      "label": "撤掉停止请求，系统回到可再次启动的状态",
+      "nodes": [
+        { "type": "contact", "id": "c13", "kind": "NO", "tag": "T2.Q" }
+      ],
+      "output": { "id": "o8", "kind": "RESET", "tag": "MStop" }
+    },
+    {
+      "id": "r9",
+      "label": "1 号电机输出，过载时立即断开",
+      "nodes": [
+        { "type": "contact", "id": "c14", "kind": "NO", "tag": "S1" },
+        { "type": "contact", "id": "c15", "kind": "NC", "tag": "FR" }
+      ],
+      "output": { "id": "o9", "kind": "COIL", "tag": "KM1" }
+    },
+    {
+      "id": "r10",
+      "label": "2 号电机输出，过载时立即断开",
+      "nodes": [
+        { "type": "contact", "id": "c16", "kind": "NO", "tag": "S2" },
+        { "type": "contact", "id": "c17", "kind": "NC", "tag": "FR" }
+      ],
+      "output": { "id": "o10", "kind": "COIL", "tag": "KM2" }
+    }
+  ]
+}

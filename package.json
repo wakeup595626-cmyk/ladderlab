@@ -26,6 +26,7 @@
     "qa:touch": "node scripts/qa-responsive-touch.mjs",
     "qa:tags": "node scripts/qa-tags.mjs",
     "qa:save": "node scripts/qa-save-button.mjs",
+    "qa:share": "node scripts/qa-share-link.mjs",
     "preview": "vite preview --strictPort"
   },
   "dependencies": {
