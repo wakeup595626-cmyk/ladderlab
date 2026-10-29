@@ -524,6 +524,10 @@ export default function WorkspaceTopBar({
               </div>
               <div className="wb-menu-group" role="group" aria-label="矢量图 SVG">
                 <span className="wb-menu-label">矢量图 SVG</span>
+                <button type="button" role="menuitem" {...exportGuard} onClick={() => chooseFileMenuAction(() => onExportSfc('svg'))}>
+                  <StepIcon size={16} />
+                  <span>顺序功能图 SVG</span>
+                </button>
                 <button type="button" role="menuitem" {...exportGuard} onClick={() => chooseFileMenuAction(() => onExportImage('complete', 'svg'))}>
                   <ImageIcon size={16} />
                   <span>完整程序 SVG</span>
@@ -531,10 +535,6 @@ export default function WorkspaceTopBar({
                 <button type="button" role="menuitem" {...exportGuard} onClick={() => chooseFileMenuAction(() => onExportImage('plain', 'svg'))}>
                   <ImageIcon size={16} />
                   <span>纯梯形图 SVG</span>
-                </button>
-                <button type="button" role="menuitem" {...exportGuard} onClick={() => chooseFileMenuAction(() => onExportSfc('svg'))}>
-                  <StepIcon size={16} />
-                  <span>顺序功能图 SVG</span>
                 </button>
               </div>
               <div className="wb-menu-group" role="group" aria-label="位图 PNG">
@@ -592,6 +592,10 @@ export default function WorkspaceTopBar({
               </div>
               <div className="wb-menu-group" role="group" aria-label="矢量图 SVG">
                 <span className="wb-menu-label">矢量图 SVG</span>
+                <button type="button" role="menuitem" onClick={() => chooseFileMenuAction(() => onExportSfc('svg'))}>
+                  <StepIcon size={16} />
+                  <span>顺序功能图 SVG</span>
+                </button>
                 <button type="button" role="menuitem" onClick={() => chooseFileMenuAction(() => onExportImage('complete', 'svg'))}>
                   <ImageIcon size={16} />
                   <span>完整程序 SVG</span>
@@ -599,10 +603,6 @@ export default function WorkspaceTopBar({
                 <button type="button" role="menuitem" onClick={() => chooseFileMenuAction(() => onExportImage('plain', 'svg'))}>
                   <ImageIcon size={16} />
                   <span>纯梯形图 SVG</span>
-                </button>
-                <button type="button" role="menuitem" onClick={() => chooseFileMenuAction(() => onExportSfc('svg'))}>
-                  <StepIcon size={16} />
-                  <span>顺序功能图 SVG</span>
                 </button>
               </div>
               <div className="wb-menu-group" role="group" aria-label="位图 PNG">

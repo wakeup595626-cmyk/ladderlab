@@ -2941,10 +2941,11 @@ export default function App() {
     try {
       const chart = buildSfc(program)
       if (!chart) {
-        notify(
-          '这个工程还没有梯形图网络：先画一条带输出的网络，再导出顺序功能图',
-          { tone: 'error' },
-        )
+        const hasOutput = program.rungs.some((rung) => rung.output.tag.trim() !== '')
+        notify(hasOutput
+          ? '这张梯形图暂时归纳不出顺序功能图：结构超出当前识别范围，可以先导出梯形图 SVG'
+          : '这个工程还没有梯形图网络：先画一条带输出的网络，再导出顺序功能图',
+        { tone: 'error' })
         return
       }
       notify('正在生成顺序功能图 ' + format.toUpperCase() + '…')
