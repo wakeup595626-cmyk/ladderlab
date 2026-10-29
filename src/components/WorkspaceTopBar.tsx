@@ -51,6 +51,8 @@ export interface WorkspaceTopBarProps {
   onExportProject: () => void
   onExportImage: (mode: 'complete' | 'plain', format: 'svg' | 'png') => void
   onExportSfc: (format: 'svg' | 'png') => void
+  /** 图片/顺序功能图正在生成：导出入口置灰，避免重复排队占满主线程。 */
+  exporting?: boolean
   onCopyShareLink: () => void
   onNewProject: () => void
   onGuide: () => void
@@ -83,6 +85,7 @@ export default function WorkspaceTopBar({
   onExportProject,
   onExportImage,
   onExportSfc,
+  exporting = false,
   onCopyShareLink,
   onNewProject,
   onGuide,
@@ -348,6 +351,13 @@ export default function WorkspaceTopBar({
     ? '自定义'
     : THEME_PRESETS.find((preset) => preset.id === theme.preset)?.name ?? '原版绿'
 
+  // 导出进行中把图片与顺序功能图入口统一置灰：一张大图要跑十几秒，
+  // 反复点击只会让主线程排队，用户还以为程序卡死了。
+  const exportGuard = exporting
+    ? { disabled: true, title: '正在导出，请稍候…' }
+    : {}
+
+
   return (
     <header className="topbar wb-topbar">
       <div className="brand wb-brand">
@@ -514,30 +524,30 @@ export default function WorkspaceTopBar({
               </div>
               <div className="wb-menu-group" role="group" aria-label="矢量图 SVG">
                 <span className="wb-menu-label">矢量图 SVG</span>
-                <button type="button" role="menuitem" onClick={() => chooseFileMenuAction(() => onExportImage('complete', 'svg'))}>
+                <button type="button" role="menuitem" {...exportGuard} onClick={() => chooseFileMenuAction(() => onExportImage('complete', 'svg'))}>
                   <ImageIcon size={16} />
                   <span>完整程序 SVG</span>
                 </button>
-                <button type="button" role="menuitem" onClick={() => chooseFileMenuAction(() => onExportImage('plain', 'svg'))}>
+                <button type="button" role="menuitem" {...exportGuard} onClick={() => chooseFileMenuAction(() => onExportImage('plain', 'svg'))}>
                   <ImageIcon size={16} />
                   <span>纯梯形图 SVG</span>
                 </button>
-                <button type="button" role="menuitem" onClick={() => chooseFileMenuAction(() => onExportSfc('svg'))}>
+                <button type="button" role="menuitem" {...exportGuard} onClick={() => chooseFileMenuAction(() => onExportSfc('svg'))}>
                   <StepIcon size={16} />
                   <span>顺序功能图 SVG</span>
                 </button>
               </div>
               <div className="wb-menu-group" role="group" aria-label="位图 PNG">
                 <span className="wb-menu-label">位图 PNG</span>
-                <button type="button" role="menuitem" onClick={() => chooseFileMenuAction(() => onExportImage('complete', 'png'))}>
+                <button type="button" role="menuitem" {...exportGuard} onClick={() => chooseFileMenuAction(() => onExportImage('complete', 'png'))}>
                   <ImageIcon size={16} />
                   <span>完整程序 PNG</span>
                 </button>
-                <button type="button" role="menuitem" onClick={() => chooseFileMenuAction(() => onExportImage('plain', 'png'))}>
+                <button type="button" role="menuitem" {...exportGuard} onClick={() => chooseFileMenuAction(() => onExportImage('plain', 'png'))}>
                   <ImageIcon size={16} />
                   <span>纯梯形图 PNG</span>
                 </button>
-                <button type="button" role="menuitem" onClick={() => chooseFileMenuAction(() => onExportSfc('png'))}>
+                <button type="button" role="menuitem" {...exportGuard} onClick={() => chooseFileMenuAction(() => onExportSfc('png'))}>
                   <StepIcon size={16} />
                   <span>顺序功能图 PNG</span>
                 </button>

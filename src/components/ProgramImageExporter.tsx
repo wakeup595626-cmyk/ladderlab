@@ -25,10 +25,14 @@ export type ProgramImageMode = 'complete' | 'plain'
 /** png 用于微信、Word 这类只认位图的场合；svg 是矢量原稿，任意缩放都不糊。 */
 export type ProgramImageFormat = 'png' | 'svg'
 
-export interface ProgramImageResult {
-  format: ProgramImageFormat
-  data: string
-}
+/**
+ * SVG 交付字符串，PNG 交付 Blob：
+ * PNG 若先转成 dataURL，会多留一份约 1.37 倍大小的 base64 文本在内存里，
+ * 大工程导出正是最容易踩到内存峰值的场景，所以这里直接传二进制。
+ */
+export type ProgramImageResult =
+  | { format: 'svg'; data: string }
+  | { format: 'png'; data: Blob }
 
 interface ProgramImageExporterProps {
   program: Program
@@ -58,6 +62,10 @@ interface VectorRung {
 
 const INITIAL_STAGE_WIDTH = 1240
 const SOURCE_SCALE = 2
+/** 字体迟迟不就绪时按当前字体继续导出，绝不让整次导出无限等待。 */
+const FONT_READY_TIMEOUT_MS = 3000
+/** 每连续占用主线程这么久就让出一帧，避免导出期间页面完全失去响应。 */
+const EXPORT_SLICE_MS = 40
 const WHITE = '#ffffff'
 const INK = '#17191c'
 const MUTED = '#6b7178'
@@ -128,6 +136,57 @@ function nextFrame() {
     // 后台标签页可能暂停 requestAnimationFrame；定时器兜底避免导出永久悬挂。
     window.setTimeout(finish, 80)
     window.requestAnimationFrame(finish)
+  })
+}
+
+/** 把主线程让给界面绘制；setTimeout 在后台标签页里也不会被 rAF 暂停卡住。 */
+function yieldToMain() {
+  return new Promise<void>((resolve) => window.setTimeout(resolve, 0))
+}
+
+/** 宽高清零后浏览器可以立即回收这块位图，比等 GC 更可靠。 */
+function releaseCanvas(canvas: HTMLCanvasElement) {
+  canvas.width = 0
+  canvas.height = 0
+}
+
+const PNG_ENCODE_FAILED = 'PNG 编码失败，请改用 SVG 导出（矢量图不受画布限制）'
+
+function canvasToBlob(canvas: HTMLCanvasElement) {
+  return new Promise<Blob>((resolve, reject) => {
+    const fail = () => reject(new Error(PNG_ENCODE_FAILED))
+    try {
+      canvas.toBlob((blob) => {
+        if (blob) resolve(blob)
+        else fail()
+      }, 'image/png')
+    } catch {
+      fail()
+    }
+  })
+}
+
+/**
+ * 等网页字体就绪，但最多等 FONT_READY_TIMEOUT_MS。
+ * 字体服务卡住时 document.fonts.ready 可能一直不 resolve，
+ * 以前会让导出永远停在“正在生成…”。
+ */
+function waitForFonts(timeoutMs = FONT_READY_TIMEOUT_MS) {
+  return new Promise<void>((resolve) => {
+    let settled = false
+    const finish = () => {
+      if (settled) return
+      settled = true
+      window.clearTimeout(timer)
+      resolve()
+    }
+    const timer = window.setTimeout(finish, timeoutMs)
+    const ready = document.fonts?.ready
+    if (!ready) {
+      finish()
+      return
+    }
+    ready.then(finish, finish)
   })
 }
 
@@ -432,41 +491,46 @@ async function prepareRung(svg: SVGSVGElement, label: string, title: string) {
     rasterContext.fillRect(0, 0, raster.width, raster.height)
     rasterContext.drawImage(image, 0, 0, raster.width, raster.height)
 
-    const bounds = findContentBounds(raster)
-    if (!bounds) return null
-    const margin = Math.round(10 * SOURCE_SCALE)
-    const left = Math.max(0, bounds.left - margin)
-    const top = Math.max(0, bounds.top - margin)
-    const right = Math.min(raster.width - 1, bounds.right + margin)
-    const bottom = Math.min(raster.height - 1, bounds.bottom + margin)
-    const cropWidth = right - left + 1
-    const cropHeight = bottom - top + 1
+    try {
+      const bounds = findContentBounds(raster)
+      if (!bounds) return null
+      const margin = Math.round(10 * SOURCE_SCALE)
+      const left = Math.max(0, bounds.left - margin)
+      const top = Math.max(0, bounds.top - margin)
+      const right = Math.min(raster.width - 1, bounds.right + margin)
+      const bottom = Math.min(raster.height - 1, bounds.bottom + margin)
+      const cropWidth = right - left + 1
+      const cropHeight = bottom - top + 1
 
-    const cropped = document.createElement('canvas')
-    cropped.width = cropWidth
-    cropped.height = cropHeight
-    const croppedContext = cropped.getContext('2d')
-    if (!croppedContext) throw new Error('浏览器无法裁切程序段')
-    croppedContext.fillStyle = WHITE
-    croppedContext.fillRect(0, 0, cropWidth, cropHeight)
-    croppedContext.drawImage(
-      raster,
-      left,
-      top,
-      cropWidth,
-      cropHeight,
-      0,
-      0,
-      cropWidth,
-      cropHeight,
-    )
-    return {
-      canvas: cropped,
-      width: cropWidth / SOURCE_SCALE,
-      height: cropHeight / SOURCE_SCALE,
-      label,
-      title,
-    } satisfies PreparedRung
+      const cropped = document.createElement('canvas')
+      cropped.width = cropWidth
+      cropped.height = cropHeight
+      const croppedContext = cropped.getContext('2d')
+      if (!croppedContext) throw new Error('浏览器无法裁切程序段')
+      croppedContext.fillStyle = WHITE
+      croppedContext.fillRect(0, 0, cropWidth, cropHeight)
+      croppedContext.drawImage(
+        raster,
+        left,
+        top,
+        cropWidth,
+        cropHeight,
+        0,
+        0,
+        cropWidth,
+        cropHeight,
+      )
+      return {
+        canvas: cropped,
+        width: cropWidth / SOURCE_SCALE,
+        height: cropHeight / SOURCE_SCALE,
+        label,
+        title,
+      } satisfies PreparedRung
+    } finally {
+      // 全尺寸中间画布只在裁切时用一次：1000 段各留一张会直接把内存推爆。
+      releaseCanvas(raster)
+    }
   } finally {
     URL.revokeObjectURL(url)
   }
@@ -840,10 +904,14 @@ export default function ProgramImageExporter({
     let cancelled = false
 
     const capture = async () => {
+      // 光栅化出来的每段小图都要在导出结束（含失败、取消）后统一释放。
+      const prepared: PreparedRung[] = []
       try {
-        await document.fonts.ready
+        await waitForFonts()
+        if (cancelled) return
         await nextFrame()
         await nextFrame()
+        if (cancelled) return
 
         const stage = documentRef.current
         if (!stage) throw new Error('无法创建图片画布')
@@ -870,11 +938,21 @@ export default function ProgramImageExporter({
 
         if (format === 'svg') {
           const vectorRungs: VectorRung[] = []
+          let sliceStartedAt = performance.now()
           for (const [index, svg] of currentDiagrams.entries()) {
+            // 组件已经卸载（点了「取消导出」、切换工程）时立刻停手。
+            if (cancelled) return
             const rung = exportProgram.rungs[index]
             if (!rung) break
             const result = vectorRung(svg, '程序段 ' + (index + 1), rung.label)
             if (result) vectorRungs.push(result)
+            // 逐段读取计算样式是这条链路最贵的一步：每攒够一小段就交还主线程，
+            // 大工程导出时页面仍能滚动，也能响应「取消导出」。
+            if (performance.now() - sliceStartedAt > EXPORT_SLICE_MS) {
+              await yieldToMain()
+              if (cancelled) return
+              sliceStartedAt = performance.now()
+            }
           }
           if (vectorRungs.length !== exportProgram.rungs.length) {
             throw new Error('有程序段没有绘制内容，无法生成 SVG')
@@ -886,7 +964,6 @@ export default function ProgramImageExporter({
           return
         }
 
-        const prepared: PreparedRung[] = []
         for (const [index, svg] of currentDiagrams.entries()) {
           // 组件已经卸载（切换工程、关闭导出）时，剩余程序段不必再光栅化。
           if (cancelled) return
@@ -908,12 +985,21 @@ export default function ProgramImageExporter({
         const canvas = mode === 'plain'
           ? buildPlainImage(prepared, planPlainLayout(prepared))
           : buildCompleteImage(program, prepared, planCompleteLayout(prepared))
-        if (!cancelled) onComplete({ format: 'png', data: canvas.toDataURL('image/png') })
+        let blob: Blob
+        try {
+          blob = await canvasToBlob(canvas)
+        } finally {
+          // 编码完成就放掉成品画布，内存占用只保留最终这一个 PNG。
+          releaseCanvas(canvas)
+        }
+        if (!cancelled) onComplete({ format: 'png', data: blob })
       } catch (reason) {
         if (!cancelled) {
           const fallback = format === 'svg' ? 'SVG 生成失败' : 'PNG 生成失败'
           onError(reason instanceof Error ? reason.message : fallback)
         }
+      } finally {
+        for (const rung of prepared) releaseCanvas(rung.canvas)
       }
     }
 

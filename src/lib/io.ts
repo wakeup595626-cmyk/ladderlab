@@ -265,8 +265,11 @@ export function serializeProgram(program: Program): string {
   return JSON.stringify(program, null, 2)
 }
 
-export function downloadText(filename: string, content: string, mime = 'application/json;charset=utf-8') {
-  const blob = new Blob([content], { type: mime })
+/**
+ * 直传 Blob 下载：PNG 先经 canvas.toBlob 拿到二进制再走这里，
+ * 比 toDataURL 少一份 base64 字符串常驻内存，导出大图时峰值明显更低。
+ */
+export function downloadBlob(filename: string, blob: Blob) {
   const url = URL.createObjectURL(blob)
   const anchor = document.createElement('a')
   anchor.href = url
@@ -274,7 +277,12 @@ export function downloadText(filename: string, content: string, mime = 'applicat
   document.body.appendChild(anchor)
   anchor.click()
   anchor.remove()
+  // Safari 要等下载真正开始；撤销太早会得到一个空文件。
   window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+}
+
+export function downloadText(filename: string, content: string, mime = 'application/json;charset=utf-8') {
+  downloadBlob(filename, new Blob([content], { type: mime }))
 }
 
 export function downloadDataUrl(filename: string, dataUrl: string) {

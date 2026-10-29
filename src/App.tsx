@@ -70,7 +70,15 @@ import type {
   Selection,
 } from './engine/types'
 import type { DragPayload, DropTarget } from './lib/dragTypes'
-import { downloadDataUrl, downloadText, downloadTimestamp, parseProgramText, serializeProgram } from './lib/io'
+import {
+  downloadBlob,
+  downloadDataUrl,
+  downloadText,
+  downloadTimestamp,
+  parseProgramText,
+  serializeProgram,
+} from './lib/io'
+import { safeFileName } from './lib/filename'
 import { copyText } from './lib/clipboard'
 import {
   buildShareUrl,
@@ -350,11 +358,6 @@ const COACH_KEY = 'ladderlab.coach.v1'
 const SAVE_DEBOUNCE_MS = 400
 const SAVE_RETRY_DELAYS_MS = [1500, 5000, 15000]
 const MAX_SIMULATION_CATCH_UP_STEPS = 5
-
-function safeFileName(value: string): string {
-  const cleaned = value.trim().replace(/[\\/:*?"<>|]+/g, '-').replace(/\s+/g, '-')
-  return cleaned || 'ladderlab-program'
-}
 
 const backupTimeFormatter = new Intl.DateTimeFormat('zh-CN', {
   month: '2-digit',
@@ -674,6 +677,8 @@ export default function App() {
   // 导出请求必须每次唯一：同一毫秒里连点两个不同导出，key 重复会让
   // ProgramImageExporter 不重新挂载，第二个请求就不会执行。
   const imageExportSeqRef = useRef(0)
+  // 顺序功能图导出是「同步归纳 + 异步栅格化」，连点会同时跑两份，这里串行化。
+  const sfcExportBusyRef = useRef(false)
   const program = history.present
   const compileResult = useMemo(() => compile(program), [program])
 
@@ -2818,6 +2823,13 @@ export default function App() {
   }
 
   const startImageExport = (mode: ProgramImageMode, format: ProgramImageFormat) => {
+    if (imageExportRequest) {
+      // 直接替换请求会让上一张图静默消失，学生只会看到界面卡住又弹一条新提示。
+      notify('上一张图还在生成中，等它完成再导出；要中止请点提示里的「取消导出」', {
+        tone: 'error',
+      })
+      return
+    }
     imageExportSeqRef.current += 1
     setImageExportRequest({
       id: imageExportSeqRef.current,
@@ -2826,7 +2838,17 @@ export default function App() {
       format,
     })
     const name = mode === 'complete' ? '完整程序' : '纯梯形图'
-    notify('正在生成' + name + ' ' + format.toUpperCase() + '…')
+    notify('正在生成' + name + ' ' + format.toUpperCase()
+      + '（' + contentRungs(program).length + ' 段）…', {
+      sticky: true,
+      action: {
+        label: '取消导出',
+        run: () => {
+          setImageExportRequest(null)
+          notify('已取消导出')
+        },
+      },
+    })
   }
 
   // 分享链接（#p=…）由 AI 或同学生成，内容全在地址里，服务器不参与。
@@ -2910,17 +2932,23 @@ export default function App() {
   }, [consumeShareHash])
   // 顺序功能图由步骤位、步进网络和线圈条件现场归纳，不写入工程文件。
   const startSfcExport = async (format: ProgramImageFormat) => {
-    const chart = buildSfc(program)
-    if (!chart) {
-      notify(
-        '这个工程还没有梯形图网络：先画一条带输出的网络，再导出顺序功能图',
-        { tone: 'error' },
-      )
+    if (sfcExportBusyRef.current) return
+    if (imageExportRequest) {
+      notify('梯形图图片还在生成，先等它结束再导出顺序功能图', { tone: 'error' })
       return
     }
-    notify('正在生成顺序功能图 ' + format.toUpperCase() + '…')
-    const base = safeFileName(program.name) + '-顺序功能图-' + downloadTimestamp()
+    sfcExportBusyRef.current = true
     try {
+      const chart = buildSfc(program)
+      if (!chart) {
+        notify(
+          '这个工程还没有梯形图网络：先画一条带输出的网络，再导出顺序功能图',
+          { tone: 'error' },
+        )
+        return
+      }
+      notify('正在生成顺序功能图 ' + format.toUpperCase() + '…')
+      const base = safeFileName(program.name) + '-顺序功能图-' + downloadTimestamp()
       if (format === 'svg') {
         downloadText(base + '.svg', serializeSfcSvg(chart), 'image/svg+xml;charset=utf-8')
         notify('已导出顺序功能图 SVG（' + chart.steps.length + ' 步）')
@@ -2934,6 +2962,8 @@ export default function App() {
         reason instanceof Error ? reason.message : '顺序功能图生成失败',
         { tone: 'error' },
       )
+    } finally {
+      sfcExportBusyRef.current = false
     }
   }
 
@@ -3301,6 +3331,7 @@ export default function App() {
         onExportProject={exportProject}
         onExportImage={startImageExport}
         onExportSfc={(format) => void startSfcExport(format)}
+        exporting={imageExportRequest !== null}
         onCopyShareLink={() => void copyShareLink()}
         onGuide={() => setGuideOpen(true)}
         onAbout={() => setAboutOpen(true)}
@@ -3900,7 +3931,7 @@ export default function App() {
               if (result.format === 'svg') {
                 downloadText(base + '.svg', result.data, 'image/svg+xml;charset=utf-8')
               } else {
-                downloadDataUrl(base + '.png', result.data)
+                downloadBlob(base + '.png', result.data)
               }
               setImageExportRequest(null)
               notify('已导出' + suffix + ' ' + result.format.toUpperCase())
