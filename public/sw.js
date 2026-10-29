@@ -13,7 +13,7 @@
  * - 其他同源 GET：stale-while-revalidate
  */
 const CACHE_PREFIX = 'ladderlab-'
-const CACHE_VERSION = 'v1'
+const CACHE_VERSION = 'v2'
 const CACHE_NAME = CACHE_PREFIX + CACHE_VERSION
 const OFFLINE_URL = './index.html'
 const PRECACHE_URLS = [
@@ -121,7 +121,9 @@ self.addEventListener('fetch', (event) => {
 async function handleNavigation(event, request) {
   const cache = await caches.open(CACHE_NAME)
   try {
-    const response = await fetch(request)
+    // 导航请求绕过 HTTP 缓存，新版本部署后刷新就能拿到新的 index.html；
+    // 离线时仍然回退到下面的缓存。
+    const response = await fetch(new Request(request, { cache: 'no-store' }))
     if (response && response.ok) {
       event.waitUntil(cache.put(request, response.clone()).catch(() => undefined))
     }

@@ -2856,7 +2856,7 @@ export default function App() {
     const chart = buildSfc(program)
     if (!chart) {
       notify(
-        '这个工程里找不到可归纳的步序：需要 Step1…StepN 这样的步骤位，或至少两个可识别的状态、节拍步骤',
+        '这个工程还没有梯形图网络：先画一条带输出的网络，再导出顺序功能图',
         { tone: 'error' },
       )
       return

@@ -51,6 +51,31 @@ function srFixture(): Program {
   }
 }
 
+/** 自建工程：三条普通线圈网络，第一条带自保持。 */
+function customFixture(): Program {
+  return {
+    schema: 1,
+    name: '自建联锁',
+    profile: 'v21',
+    tags: [
+      tag('Start', '%I0.0', '启动'),
+      tag('Stop', '%I0.1', '停止'),
+      tag('M1', '%Q0.0', '一号电机'),
+      tag('M2', '%Q0.1', '二号电机'),
+      tag('M3', '%Q0.2', '三号电机'),
+    ],
+    rungs: [
+      rung('n1', '一号电机', [
+        contact('n1-c1', 'Start'),
+        contact('n1-c2', 'Stop', 'NC'),
+        contact('n1-c3', 'M1'),
+      ], 'M1'),
+      rung('n2', '', [contact('n2-c1', 'M1')], 'M2'),
+      rung('n3', '', [contact('n3-c1', 'M2')], 'M3'),
+    ],
+  }
+}
+
 function lab(id: string): Program {
   const program = buildCourseLab(id)
   if (!program) throw new Error(`Missing ${id}`)
@@ -178,6 +203,67 @@ describe('顺序功能图归纳', () => {
 
     const first = chart!.steps.find((step) => step.tagName === 'Step1')!
     expect(first.actions).toEqual([{ text: '一号灯', detail: 'Q0.0=1' }])
+  })
+
+  it('自建工程按网络顺序逐步导出，一条网络就是一步', () => {
+    const chart = buildSfc(customFixture())
+    expect(chart).not.toBeNull()
+    expect(chart!.source).toBe('network')
+    expect(chart!.steps.map((step) => step.number)).toEqual(['0', '1', '2', '3'])
+    expect(chart!.steps[0].initial).toBe(true)
+    expect(chart!.steps[0].actions).toEqual([])
+    expect(chart!.steps[1].title).toBe('一号电机')
+    expect(chart!.steps[1].actions).toEqual([{ text: '一号电机', detail: 'Q0.0=1' }])
+    expect(chart!.steps[2].actions).toEqual([{ text: '二号电机', detail: 'Q0.1=1' }])
+    expect(chart!.edges).toHaveLength(3)
+    expect(chart!.edges[0].from).toBe('__initial')
+    expect(chart!.edges[0].to).toBe('n1')
+    // 输出自身的保持触点不进转移条件，进入第一步的是启动且停止未按下。
+    expect(chart!.edges[0].label).toContain('启动')
+    expect(chart!.edges[0].label).toContain('停止')
+    expect(chart!.edges[0].label).not.toContain('一号电机')
+    expect(chart!.edges[1].label).toContain('一号电机')
+    expect(chart!.edges[1].label).toContain('Q0.0')
+  })
+
+  it('只有一条网络的自建工程也能导出单步图', () => {
+    const base = customFixture()
+    const chart = buildSfc({ ...base, name: '单网络', rungs: [base.rungs[0]] })!
+    expect(chart.steps).toHaveLength(2)
+    expect(chart.edges).toHaveLength(1)
+    expect(() => renderSfcSvg(chart)).not.toThrow()
+  })
+
+  it('还没有输出的空工程不会冒充顺序功能图', () => {
+    const blank: Program = {
+      schema: 1,
+      name: '空工程',
+      profile: 'v21',
+      tags: [tag('Start', '%I0.0', '启动')],
+      rungs: [{ id: 'b1', label: '', nodes: [], output: { id: 'b1-o', kind: 'COIL', tag: '' } }],
+    }
+    expect(buildSfc(blank)).toBeNull()
+  })
+
+  it('不同的自建工程导出不同的图，改一条网络图就跟着变', () => {
+    const signature = (chart: NonNullable<ReturnType<typeof buildSfc>>) => [
+      ...chart.steps.map((step) => [
+        step.number,
+        step.title,
+        step.actions.map((action) => action.text + '/' + action.detail).join(';'),
+      ].join('|')),
+      '#' + chart.edges.map((edge) => edge.label).join('|'),
+    ].join(' / ')
+
+    const first = customFixture()
+    const other = customFixture()
+    other.name = '另一个自建工程'
+    other.rungs[2] = rung('n3', '三号电机启动', [contact('n3-c1', 'M1')], 'M3')
+
+    const firstChart = buildSfc(first)!
+    const otherChart = buildSfc(other)!
+    expect(signature(firstChart)).not.toBe(signature(otherChart))
+    expect(renderSfcSvg(firstChart).svg).not.toBe(renderSfcSvg(otherChart).svg)
   })
 })
 

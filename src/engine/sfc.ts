@@ -28,7 +28,7 @@ export interface SfcChart {
   steps: SfcStep[]
   edges: SfcEdge[]
   notes: string[]
-  source: 'sr-steps' | 'bit-steps' | 'state-tags' | 'pattern' | 'run-cycle'
+  source: 'sr-steps' | 'bit-steps' | 'state-tags' | 'pattern' | 'run-cycle' | 'network'
   container?: string
 }
 
@@ -1089,6 +1089,106 @@ function buildRunCycleChart(ctx: Context): SfcChart | null {
   }
 }
 
+/** 一步的动作：把这一网络的输出写成图上的短句。 */
+function outputAction(output: Rung['output'], ctx: Context): SfcAction {
+  const tag = ctx.tags.get(output.tag)
+  const name = tag ? (shortComment(tag) || tag.name) : (output.tag || '输出')
+  const address = tag ? shortAddress(tag.address) : ''
+  if (output.kind === 'TON' || output.kind === 'TOF' || output.kind === 'TONR') {
+    const duration = formatDuration(output.pt)
+    const qTag = output.qTag ? ctx.tags.get(output.qTag) : undefined
+    return {
+      text: `${name} 计时${duration ? ` ${duration}` : ''}`,
+      detail: qTag ? `${shortAddress(qTag.address)}=1` : '',
+    }
+  }
+  if (output.kind === 'CTU') {
+    return { text: `${name} 计数`, detail: output.pv ? `计数到 ${output.pv}` : '' }
+  }
+  if (output.kind === 'MOVE') {
+    const value = output.value ?? 0
+    return { text: address ? `${address} ← ${value}` : `${name} 赋值`, detail: '' }
+  }
+  if (output.kind === 'SHL' || output.kind === 'ROL') {
+    return { text: `${name} 移位`, detail: address }
+  }
+  if (output.kind === 'ADD' || output.kind === 'SUB') {
+    return { text: `${name} ${output.kind === 'ADD' ? '加' : '减'} ${output.value ?? 0}`, detail: address }
+  }
+  if (output.kind === 'PATTERN') {
+    return { text: '灯字序列', detail: address }
+  }
+  if (output.kind === 'RESET') {
+    return { text: `${name} 复位`, detail: address ? `${address}=0` : '' }
+  }
+  if (output.kind === 'SET') {
+    return { text: `${name} 置位`, detail: address ? `${address}=1` : '' }
+  }
+  return { text: name, detail: address ? `${address}=1` : '' }
+}
+
+/** 去掉输出自身的保持触点（含并联分支里的），剩下的才是进入这一步的条件。 */
+function withoutSelfContacts(nodes: LadderNode[], self: string): LadderNode[] {
+  const kept: LadderNode[] = []
+  for (const node of nodes) {
+    if (node.type === 'contact') {
+      if (node.tag !== self) kept.push(node)
+      continue
+    }
+    kept.push({
+      ...node,
+      branches: node.branches.map((branch) => withoutSelfContacts(branch, self)),
+    })
+  }
+  return kept
+}
+
+/** 进入这一网络的条件：自身保持触点不算转移条件。 */
+function networkGuard(rung: Rung, ctx: Context): string {
+  const nodes = withoutSelfContacts(rung.nodes, rung.output.tag)
+  return formatNodes(nodes, ctx, false) || '—'
+}
+
+/**
+ * 通用兜底：梯形图里每个网络就是顺序功能图里的一步。
+ * 找不到步骤位或状态链的自建工程也一定有图，而且图和它自己的梯形图逐条对应。
+ */
+function buildNetworkChart(ctx: Context): SfcChart | null {
+  // 没有输出变量的网络不算一步，跳过；全空说明还没有可归纳的梯形图。
+  const rungs = ctx.rungs.filter((rung) => rung.output.tag.trim() !== '')
+  if (rungs.length === 0) return null
+  // 初始步不写文字，只留双边框；每一步的进入条件写在上一条连线上。
+  const steps: SfcStep[] = [{
+    key: '__initial',
+    number: '0',
+    title: '',
+    initial: true,
+    actions: [],
+  }]
+  const edges: SfcEdge[] = []
+  let previous = '__initial'
+  rungs.forEach((rung, index) => {
+    steps.push({
+      key: rung.id,
+      number: String(index + 1),
+      title: cleanRungLabel(rung.label) || `网络 ${index + 1}`,
+      initial: false,
+      tagName: rung.output.tag || undefined,
+      tagAddress: ctx.tags.get(rung.output.tag)?.address.replace(/^%/, ''),
+      actions: [outputAction(rung.output, ctx)],
+    })
+    edges.push({ from: previous, to: rung.id, label: networkGuard(rung, ctx) })
+    previous = rung.id
+  })
+  return {
+    programName: ctx.program.name,
+    steps,
+    edges,
+    notes: ['按梯形图的网络顺序逐步排列，每个网络对应一步。'],
+    source: 'network',
+  }
+}
+
 export function buildSfc(program: Program): SfcChart | null {
   const steps = pickStepGroup(collectStepMatches(program))
   const rungs = contentRungs(program)
@@ -1125,8 +1225,12 @@ export function buildSfc(program: Program): SfcChart | null {
     }
     return buildSrChart(ctx)
   }
-  // 没有步骤位时，按置位状态、序列盒或定时计数网络归纳出一条状态链。
-  return buildStateChart(ctx) ?? buildPatternChart(ctx) ?? buildRunCycleChart(ctx)
+  // 没有步骤位时，按置位状态、序列盒或定时计数网络归纳出一条状态链；
+  // 都不匹配就按网络顺序逐步排列，保证任何自建工程都能导出自己的图。
+  return buildStateChart(ctx)
+    ?? buildPatternChart(ctx)
+    ?? buildRunCycleChart(ctx)
+    ?? buildNetworkChart(ctx)
 }
 
 export const __testing = { collectStepMatches, pickStepGroup, formatNodes }

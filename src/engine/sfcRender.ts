@@ -75,7 +75,7 @@ export function compactSfcText(value: string): string {
     .replace(/\s+/g, ' ')
     .replace(/\s*·\s*/g, '·')
     .replace(/·{2,}/g, '·')
-    .replace(/\s*且\s*/g, '且')
+    .replace(/\s*且\s*/g, ' 且 ')
     .replace(/\s*或\s*/g, ' 或 ')
     .replace(/^[\s·且或]+|[\s·且或]+$/g, '')
     .trim()
