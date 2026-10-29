@@ -1,7 +1,8 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { supportsContact, supportsOutput } from '../engine/profiles'
-import { looksLikeAddress, normalizeBitAddress, normalizeByteAddress } from '../engine/references'
+import { parseAddress } from '../engine/address'
+import { looksLikeAddress, normalizeBitAddress, normalizeByteAddress, normalizeReference } from '../engine/references'
 import { FIELD_LIMITS } from '../lib/limits'
 import type {
   ContactKind,
@@ -246,6 +247,16 @@ function NumberField({
       {hint && <small>{hint}</small>}
     </label>
   )
+}
+
+/** 移位/旋转次数的输入上限跟着目标变量位宽走（%MB=8、%MW=16、%MD=32）。 */
+function shiftCountMax(program: Program, tagName: string | undefined): number {
+  const tag = program.tags.find(
+    (item) => normalizeReference(item.name) === normalizeReference(tagName ?? ''),
+  )
+  const width = tag ? parseAddress(tag.address)?.width : null
+  const bits = width && width > 1 ? width : tag?.kind === 'BOOL' ? 8 : 16
+  return bits - 1
 }
 
 export default function QuickEditor({
@@ -772,7 +783,7 @@ export default function QuickEditor({
                   label={output.kind === 'MOVE' ? '常量' : output.kind === 'SHL' || output.kind === 'ROL' ? '移位次数' : '操作数'}
                   value={output.value ?? 0}
                   min={output.kind === 'SHL' || output.kind === 'ROL' ? 0 : -32768}
-                  max={output.kind === 'SHL' ? 15 : output.kind === 'ROL' ? 7 : 32767}
+                  max={output.kind === 'SHL' || output.kind === 'ROL' ? shiftCountMax(program, output.tag) : 32767}
                   onCommit={(value) => onProgram(updateOutput(program, rung.id, { value }))}
                 />
                 <label className="qe-field">

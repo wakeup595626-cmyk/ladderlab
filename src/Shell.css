@@ -112,7 +112,9 @@ body[data-drag-kind] {
   line-height: 1;
 }
 
-.wb-brand-name strong {
+.wb-brand-name strong,
+.wb-brand-name .wb-brand-title {
+  margin: 0;
   overflow: hidden;
   color: var(--text);
   font-size: 15px;
@@ -2344,7 +2346,8 @@ body[data-drag-kind] {
   background: var(--surface);
 }
 
-.wb-brand-name strong {
+.wb-brand-name strong,
+.wb-brand-name .wb-brand-title {
   font-size: 14px;
   font-weight: 600;
   letter-spacing: 0;

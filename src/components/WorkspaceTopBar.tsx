@@ -324,7 +324,7 @@ export default function WorkspaceTopBar({
           <LadderIcon size={20} />
         </span>
         <span className="wb-brand-name">
-          <strong>梯形实验室</strong>
+          <h1 className="wb-brand-title">梯形实验室</h1>
         </span>
       </div>
 

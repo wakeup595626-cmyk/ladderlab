@@ -1,0 +1,35 @@
+{
+  "name": "梯形实验室 LadderLab",
+  "short_name": "LadderLab",
+  "description": "浏览器里的 PLC 梯形图教学仿真器：拖入指令、单击改参数、运行看能流。安装为桌面应用后可离线使用（首次需联网加载）。",
+  "id": "./",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#f0f1ef",
+  "theme_color": "#f0f1ef",
+  "lang": "zh-CN",
+  "dir": "ltr",
+  "categories": ["education", "productivity"],
+  "icons": [
+    {
+      "src": "icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

@@ -35,6 +35,7 @@ import SaveProjectDialog from './components/SaveProjectDialog'
 import ProgramImageExporter, { type ProgramImageMode } from './components/ProgramImageExporter'
 import QuickEditor from './components/QuickEditor'
 import StatusBar from './components/StatusBar'
+import SupportBadge from './components/SupportBadge'
 import WorkspaceTopBar from './components/WorkspaceTopBar'
 import { instructionLabel, type InstructionFamily } from './components/instructionCatalog'
 import { compile } from './engine/compile'
@@ -155,6 +156,8 @@ interface ToastState {
   /** 错误类提示不自动消失，必须由用户关闭。 */
   sticky: boolean
   action?: { label: string; run: () => void }
+  /** 带操作按钮的提示出现时把焦点交给按钮，键盘用户删除后不会失去落点。 */
+  focusAction?: boolean
 }
 
 type CorruptSavedProgram = Extract<LoadSavedProgramResult, { status: 'corrupt' }>
@@ -714,7 +717,12 @@ export default function App() {
 
   const notify = useCallback((
     message: string,
-    options?: { tone?: 'info' | 'error'; sticky?: boolean; action?: { label: string; run: () => void } },
+    options?: {
+      tone?: 'info' | 'error'
+      sticky?: boolean
+      action?: { label: string; run: () => void }
+      focusAction?: boolean
+    },
   ) => {
     setToast({
       id: Date.now() + Math.random(),
@@ -722,7 +730,17 @@ export default function App() {
       tone: options?.tone ?? 'info',
       sticky: options?.sticky ?? options?.tone === 'error',
       action: options?.action,
+      focusAction: options?.focusAction,
     })
+  }, [])
+
+  /** 收掉提示时如果焦点还在提示里（撤销按钮），把它交回画布，别落到 body。 */
+  const dismissToast = useCallback(() => {
+    const active = document.activeElement
+    if (active instanceof HTMLElement && active.closest('.toast')) {
+      document.getElementById('wb-main')?.focus({ preventScroll: true })
+    }
+    setToast(null)
   }, [])
 
   const stopToastTimer = useCallback(() => {
@@ -736,9 +754,9 @@ export default function App() {
     const duration = Math.max(minDuration, Math.min(5200, Math.max(2400, 1200 + message.length * 45)))
     toastTimerRef.current = window.setTimeout(() => {
       toastTimerRef.current = null
-      setToast(null)
+      dismissToast()
     }, duration)
-  }, [stopToastTimer])
+  }, [dismissToast, stopToastTimer])
 
   /** 停止或报错时把「仿真已开始」那条提示一起收掉，避免界面互相打脸。 */
   const clearRunToast = useCallback(() => {
@@ -1174,6 +1192,7 @@ export default function App() {
           setSelection({ rungId: removed.id, path: null, wholeRung: true })
         },
       },
+      focusAction: true,
     })
     return true
   }, [commit, notify, program, restoreRung])
@@ -3003,6 +3022,7 @@ export default function App() {
       onPointerDownCapture={clearInsertCursorOnAnyPointerDown}
       onPointerDown={clearSelectionOnBlankPointerDown}
     >
+      <a className="skip-link" href="#wb-main">跳到梯形图</a>
       <WorkspaceTopBar
         projectName={program.name}
         profile={program.profile}
@@ -3079,7 +3099,7 @@ export default function App() {
       {!coachDismissed && <CoachStrip onDismiss={dismissCoach} onStartDemo={startDemo} />}
 
       <div className="wb-workbench">
-        <main className="wb-program-pane" ref={editorRef}>
+        <main className="wb-program-pane" id="wb-main" tabIndex={-1} ref={editorRef}>
           <div
             id="wb-program-sheet"
             className="wb-program-frame"
@@ -3659,9 +3679,10 @@ export default function App() {
             <button
               type="button"
               className="toast-action"
+              autoFocus={toast.focusAction}
               onClick={() => {
                 const run = toast.action?.run
-                setToast(null)
+                dismissToast()
                 run?.()
               }}
             >
@@ -3673,13 +3694,15 @@ export default function App() {
               type="button"
               className="toast-close"
               aria-label="关闭提示"
-              onClick={() => setToast(null)}
+              onClick={dismissToast}
             >
               ×
             </button>
           )}
         </div>
       )}
+
+      <SupportBadge />
     </div>
   )
 

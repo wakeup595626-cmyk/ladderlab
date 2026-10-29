@@ -1,5 +1,6 @@
 import { getProfile, supportsContact, supportsOutput } from './profiles'
 import { contentRungs } from './rungInvariant'
+import { describeOverlap, parseAddress, rangesOverlap, type PlcAddress } from './address'
 import {
   normalizeReference,
   parseBitAddress,
@@ -303,7 +304,7 @@ function validateIds(ctx: Ctx) {
 
 function validateTagTable(ctx: Ctx) {
   const seenNames = new Set<string>()
-  const seenAddresses = new Map<string, string>()
+  const seenAddresses: Array<{ name: string; tag: TagDef; address: PlcAddress }> = []
 
   for (const tag of ctx.program.tags) {
     const name = normalizeReference(tag.name)
@@ -352,14 +353,21 @@ function validateTagTable(ctx: Ctx) {
       }
     }
 
-    const address = tag.address.trim().toUpperCase()
+    const address = parseAddress(tag.address)
     if (address) {
-      const owner = seenAddresses.get(address)
-      if (owner) {
-        warning(ctx, `变量“${owner}”和“${name}”使用了同一个地址 ${address}。`)
-      } else {
-        seenAddresses.set(address, name)
+      for (const previous of seenAddresses) {
+        // 位别名本来就在其 INT 字节里占一个位，是同一块存储的显式映射。
+        const previousOwner = normalizeReference(previous.tag.bitOf ?? '')
+        const currentOwner = normalizeReference(tag.bitOf ?? '')
+        const aliasPair = previousOwner === name || currentOwner === previous.name
+        if (!aliasPair && rangesOverlap(previous.address, address)) {
+          error(
+            ctx,
+            `变量“${previous.name}”与“${name}”地址重叠（${describeOverlap(previous.address, address)}）。`,
+          )
+        }
       }
+      seenAddresses.push({ name, tag, address })
     }
   }
 }
@@ -388,6 +396,13 @@ function collectInstances(ctx: Ctx) {
       }
     }
   }
+}
+
+/** 指令位宽优先取地址宽度；没有可用地址的 INT 仍按西门子 WORD 处理。 */
+function tagBitWidth(tag: TagDef | null): 8 | 16 | 32 {
+  const address = tag ? parseAddress(tag.address) : null
+  if (address && address.width !== 1) return address.width
+  return tag?.kind === 'BOOL' ? 8 : 16
 }
 
 function checkContact(ctx: Ctx, rungId: string, node: Extract<LadderNode, { type: 'contact' }>) {
@@ -634,16 +649,35 @@ function checkOutput(ctx: Ctx, rungId: string, output: Program['rungs'][number][
         error(ctx, `${output.kind} 的整数常量必须是 -32768～32767 之间的整数。`, rungId, output.id)
       }
     }
+    const shiftWidth = tagBitWidth(target)
     if (usesConstant && output.kind === 'SHL' && output.value !== undefined
-      && (output.value < 0 || output.value > 15)) {
-      error(ctx, 'SHL 的移位次数必须在 0～15 之间。', rungId, output.id)
+      && Number.isInteger(output.value) && output.value >= shiftWidth) {
+      warning(
+        ctx,
+        `SHL 的移位次数 N=${output.value} 不小于目标位宽 ${shiftWidth} 位，结果恒为 0。`,
+        rungId,
+        output.id,
+      )
     }
     if (usesConstant && output.kind === 'ROL' && output.value !== undefined
-      && (output.value < 0 || output.value > 7)) {
-      error(ctx, 'ROL 的移位次数必须在 0～7 之间。', rungId, output.id)
+      && Number.isInteger(output.value) && output.value >= shiftWidth) {
+      warning(
+        ctx,
+        `ROL 的移位次数会按目标位宽 ${shiftWidth} 位取模。`,
+        rungId,
+        output.id,
+      )
+    }
+    if (usesConstant && (output.kind === 'SHL' || output.kind === 'ROL') && output.value !== undefined
+      && Number.isInteger(output.value) && output.value < 0) {
+      const rule = output.kind === 'SHL' ? '按 0 处理' : `按目标位宽 ${shiftWidth} 位取模`
+      warning(ctx, `${output.kind} 的负移位次数 ${output.value} 在运行时${rule}。`, rungId, output.id)
     }
     if ((output.kind === 'SHL' || output.kind === 'ROL') && normalizeReference(output.valueTag ?? '')) {
-      warning(ctx, `${output.kind} 的变量移位次数会在运行时按 ${output.kind === 'SHL' ? '0～15' : '0～7'} 取模。`, rungId, output.id)
+      const rule = output.kind === 'SHL'
+        ? `N 为负或非法时按 0 处理，N 不小于目标位宽 ${shiftWidth} 位时结果为 0`
+        : `N 会按目标位宽 ${shiftWidth} 位取模`
+      warning(ctx, `${output.kind} 的变量移位次数在运行时${rule}。`, rungId, output.id)
     }
     return
   }
@@ -663,6 +697,14 @@ function checkOutput(ctx: Ctx, rungId: string, output: Program['rungs'][number][
     }
     boolRef(output.pulseTag, 'PATTERN 节拍变量', true)
     const stepTag = variableRef(output.stepTag, 'INT', 'PATTERN 步号变量')
+    if (target && stepTag && normalizeReference(target.name) === normalizeReference(stepTag.name)) {
+      error(
+        ctx,
+        `PATTERN 输出变量“${target.name}”与步号变量不能指向同一变量。`,
+        rungId,
+        output.id,
+      )
+    }
     if (stepTag) {
       noteDrive(
         ctx,
@@ -705,7 +747,11 @@ export function compile(program: Program): CompileResult {
   for (const rung of contentRungs(program)) {
     // 无条件的程序段是合法的常通能流，MOVE、TON 和 RESET 都可能需要每扫描执行。
     walkChain(rung.nodes, (node) => {
-      if (node.type === 'contact') checkContact(ctx, rung.id, node)
+      if (node.type === 'contact') {
+        checkContact(ctx, rung.id, node)
+      } else if (node.open !== true && node.branches.some((branch) => branch.length === 0)) {
+        warning(ctx, `并联节点“${node.id || '无 ID'}”已闭合，但包含空支路；该支路按不通电处理。`, rung.id, node.id)
+      }
     })
     checkOutput(ctx, rung.id, rung.output)
   }

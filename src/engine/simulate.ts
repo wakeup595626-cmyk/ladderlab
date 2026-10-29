@@ -1,4 +1,5 @@
 import type { ContactNode, LadderNode, OutputElement, Program, Runtime } from './types'
+import { parseAddress } from './address'
 import { normalizeReference, parseBitAddress, splitReference } from './references'
 import { contentRungs } from './rungInvariant'
 
@@ -28,6 +29,15 @@ function wrapInt(value: number): number {
 
 function tagName(tag: { name: string }): string {
   return normalizeReference(tag.name)
+}
+
+/** 移位/旋转的位宽由目标地址决定，无法解析的 INT 目标按 WORD 处理。 */
+function operationBitWidth(program: Program, name: string): 8 | 16 | 32 {
+  const normalized = normalizeReference(name)
+  const tag = program.tags.find((item) => tagName(item) === normalized)
+  const address = tag ? parseAddress(tag.address) : null
+  if (address && address.width !== 1) return address.width
+  return tag?.kind === 'BOOL' ? 8 : 16
 }
 
 function walkNodes(program: Program, visit: (node: ContactNode) => void) {
@@ -141,7 +151,9 @@ function evalChain(chain: LadderNode[], incoming: boolean, runtime: Runtime): bo
     } else {
       // 还没闭合的草稿支路不参与能流，仿真按主线（第一条支路）计算。
       const active = node.open === true ? node.branches.slice(0, 1) : node.branches
-      const branches = active.map((branch) => evalChain(branch, power, runtime))
+      const branches = active.map((branch) => node.open !== true && branch.length === 0
+        ? false
+        : evalChain(branch, power, runtime))
       power = power && branches.some(Boolean)
       runtime.nodePower[node.id] = power
     }
@@ -230,13 +242,23 @@ function applyOutput(output: OutputElement, power: boolean, runtime: Runtime, dt
       if (output.kind === 'ADD') result = wrapInt(source + operand)
       if (output.kind === 'SUB') result = wrapInt(source - operand)
       if (output.kind === 'SHL') {
-        const count = ((operand % 16) + 16) % 16
-        result = wrapInt(source << count)
+        const width = operationBitWidth(program, output.tag)
+        const count = Number.isFinite(operand) && Number.isInteger(operand) && operand >= 0 ? operand : 0
+        result = count >= width ? 0 : wrapInt(source << count)
       }
       if (output.kind === 'ROL') {
-        const count = ((operand % 8) + 8) % 8
-        const byte = source & 255
-        result = ((byte << count) | (byte >>> (8 - count))) & 255
+        const width = operationBitWidth(program, output.tag)
+        const count = Number.isFinite(operand) && Number.isInteger(operand)
+          ? ((operand % width) + width) % width
+          : 0
+        if (width === 32) {
+          const value = source >>> 0
+          result = count === 0 ? value : ((value << count) | (value >>> (32 - count))) >>> 0
+        } else {
+          const mask = 2 ** width - 1
+          const value = source & mask
+          result = count === 0 ? value : ((value << count) | (value >>> (width - count))) & mask
+        }
       }
       write(output.tag, result)
       break

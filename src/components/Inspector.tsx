@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react'
+import { parseAddress } from '../engine/address'
 import { getProfile, supportsContact, supportsOutput } from '../engine/profiles'
 import { normalizeReference } from '../engine/references'
 import { contentRungs } from '../engine/rungInvariant'
@@ -725,6 +726,15 @@ function PropertiesPanel({
     const setOutput = (patch: Parameters<typeof updateOutput>[2]) => onProgram(updateOutput(program, selectedRung.id, patch))
     const isTimer = isTimerKind(output.kind)
     const isInteger = ['MOVE', 'ADD', 'SUB', 'SHL', 'ROL', 'PATTERN'].includes(output.kind)
+    // 移位次数上限跟着目标变量自己的位宽走：%MW 是 16 位，%MD 是 32 位。
+    const shiftTarget = program.tags.find(
+      (tag) => normalizeReference(tag.name) === normalizeReference(output.tag ?? ''),
+    )
+    const shiftWidth = (() => {
+      const width = shiftTarget ? parseAddress(shiftTarget.address)?.width : null
+      if (width && width > 1) return width
+      return shiftTarget?.kind === 'BOOL' ? 8 : 16
+    })()
     const referenceField = (label: string, field: 'qTag' | 'valueTag' | 'pulseTag' | 'stepTag', kind: 'BOOL' | 'INT', allowInstances = false) => (
       <label className="field">
         <span>{label}</span>
@@ -867,12 +877,12 @@ function PropertiesPanel({
             {output.kind !== 'MOVE' && referenceField('操作数 INT 变量（可选）', 'valueTag', 'INT')}
             <label className="field">
               <span>{output.kind === 'MOVE' ? '整数常量' : output.kind === 'SHL' || output.kind === 'ROL' ? '移位次数' : '操作数常量'}</span>
-              <input type="number" step={1} min={output.kind === 'SHL' || output.kind === 'ROL' ? 0 : undefined} max={output.kind === 'SHL' ? 15 : output.kind === 'ROL' ? 7 : undefined} value={output.value ?? 0} onChange={(event) => setOutput({ value: Number(event.target.value) })} />
+              <input type="number" step={1} min={output.kind === 'SHL' || output.kind === 'ROL' ? 0 : undefined} max={output.kind === 'SHL' || output.kind === 'ROL' ? shiftWidth - 1 : undefined} value={output.value ?? 0} onChange={(event) => setOutput({ value: Number(event.target.value) })} />
               {output.kind !== 'MOVE' && (
                 <small>
                   未连接操作数变量时使用此常量；目标变量同时是运算的源值。
-                  {output.kind === 'SHL' && ' 常量移位次数为 0～15。'}
-                  {output.kind === 'ROL' && ' 常量移位次数为 0～7。'}
+                  {output.kind === 'SHL' && ` 常量移位次数按目标变量位宽 ${shiftWidth} 位计算：0～${shiftWidth - 1} 有效，达到 ${shiftWidth} 时结果恒为 0。`}
+                  {output.kind === 'ROL' && ` 常量移位次数按目标变量位宽 ${shiftWidth} 位循环：超过 ${shiftWidth - 1} 会对 ${shiftWidth} 取模。`}
                 </small>
               )}
             </label>

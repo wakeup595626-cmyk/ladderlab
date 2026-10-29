@@ -1,0 +1,278 @@
+/* 「请我喝杯咖啡」：固定在左下角状态栏上方，抽屉里会被 backdrop 盖住。 */
+
+.support-badge {
+  position: fixed;
+  left: 16px;
+  bottom: 46px; /* 状态栏 34px + 12px 间距 */
+  z-index: 40;
+  font-family: var(--sans);
+}
+
+.support-badge-pill {
+  display: inline-flex;
+  height: 34px;
+  align-items: stretch;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface) 88%, var(--ground));
+  box-shadow: 0 1px 2px rgba(21, 24, 22, 0.06), 0 4px 12px rgba(21, 24, 22, 0.06);
+  color: var(--muted);
+  transition:
+    border-color var(--dur-quick) var(--ease-out),
+    background-color var(--dur-quick) var(--ease-out),
+    box-shadow var(--dur-quick) var(--ease-out),
+    transform var(--dur-quick) var(--ease-out);
+}
+
+.support-badge-pill:hover {
+  border-color: var(--control);
+  background: var(--surface);
+  box-shadow: 0 2px 4px rgba(21, 24, 22, 0.08), 0 10px 22px rgba(21, 24, 22, 0.1);
+  color: var(--frame-ink);
+  transform: translateY(-1px);
+}
+
+.support-badge-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 8px 0 11px;
+  border: 0;
+  border-radius: 999px 0 0 999px;
+  background: transparent;
+  color: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+}
+
+.support-badge-github {
+  display: grid;
+  width: 33px;
+  place-items: center;
+  border-left: 1px solid var(--rule);
+  border-radius: 0 999px 999px 0;
+  color: inherit;
+  opacity: 0.86;
+  transition:
+    background-color var(--dur-quick) var(--ease-out),
+    color var(--dur-quick) var(--ease-out),
+    opacity var(--dur-quick) var(--ease-out);
+}
+
+.support-badge-github:hover {
+  background: var(--active);
+  color: var(--frame-ink);
+  opacity: 1;
+}
+
+.support-badge-trigger:focus-visible,
+.support-badge-github:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.support-badge[data-open='true'] .support-badge-pill {
+  border-color: var(--accent);
+  background: var(--accent-wash);
+  color: var(--accent-ink);
+}
+
+.support-badge-icon {
+  flex: 0 0 auto;
+  opacity: 0.9;
+}
+
+.support-badge-panel {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  left: 0;
+  width: 272px;
+  padding: 14px 14px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  box-shadow: var(--shadow-overlay);
+  animation: support-badge-in var(--dur-base) var(--ease-out);
+}
+
+@keyframes support-badge-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.support-badge-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.support-badge-head h2 {
+  margin: 0;
+  color: var(--frame-ink);
+  font-size: 13.5px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.support-badge-close {
+  display: grid;
+  width: 26px;
+  height: 26px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--faint);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.support-badge-close:hover {
+  border-color: var(--border);
+  background: var(--raised);
+  color: var(--text);
+}
+
+.support-badge-copy {
+  margin: 0 0 10px;
+  color: var(--muted);
+  font-size: 11.5px;
+  line-height: 1.55;
+}
+
+.support-badge-qr {
+  margin: 0;
+  padding: 8px;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-control);
+  background: #fff;
+  text-align: center;
+}
+
+.support-badge-qr img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 2px;
+}
+
+.support-badge-qr figcaption {
+  margin-top: 6px;
+  color: var(--faint);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.support-badge-actions {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.support-badge-link {
+  display: inline-flex;
+  min-height: 32px;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--raised);
+  color: var(--muted);
+  font-size: 11.5px;
+  font-weight: 500;
+  text-decoration: none;
+  transition:
+    background-color var(--dur-quick) var(--ease-out),
+    border-color var(--dur-quick) var(--ease-out),
+    color var(--dur-quick) var(--ease-out);
+}
+
+.support-badge-link:hover {
+  border-color: var(--control);
+  background: var(--active);
+  color: var(--frame-ink);
+}
+
+.support-badge-link.is-primary {
+  border-color: var(--accent-ink);
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+
+.support-badge-link.is-primary:hover {
+  border-color: var(--accent-ink);
+  background: var(--accent-ink);
+  color: #fff;
+}
+
+.support-badge-dismiss {
+  display: block;
+  width: 100%;
+  margin-top: 8px;
+  padding: 4px 0 2px;
+  border: 0;
+  background: transparent;
+  color: var(--faint);
+  font-size: 11px;
+  text-align: center;
+  cursor: pointer;
+}
+
+.support-badge-dismiss:hover {
+  color: var(--text);
+  text-decoration: underline;
+}
+
+@media (max-width: 720px) {
+  .support-badge {
+    left: 12px;
+    bottom: calc(30px + 56px + 10px); /* 状态栏 30px + 底部标签栏 56px */
+  }
+
+  .support-badge-pill {
+    height: 32px;
+  }
+
+  .support-badge-trigger {
+    padding: 0 9px;
+  }
+
+  .support-badge-github {
+    width: 32px;
+  }
+
+  .support-badge-label {
+    display: none;
+  }
+
+  .support-badge-panel {
+    width: min(272px, calc(100vw - 24px));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .support-badge-panel {
+    animation: none;
+  }
+
+  .support-badge-pill:hover {
+    transform: none;
+  }
+}

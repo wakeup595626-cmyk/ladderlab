@@ -102,6 +102,87 @@ describe('引用与地址边界', () => {
   })
 })
 
+describe('地址区间、空支路与移位位宽', () => {
+  it('DWORD 与落入其字节范围的 WORD 报地址重叠', () => {
+    const source = program(
+      [tag('ElapsedTime', 'INT', 0, '%MD14'), tag('CountValue', 'INT', 0, '%MW16')],
+      [rung('r1', [], output('MOVE', 'CountValue', { value: 0 }))],
+    )
+    const messages = compile(source).errors.map((item) => item.message).join('\n')
+    expect(messages).toContain('变量“ElapsedTime”与“CountValue”地址重叠')
+    expect(messages).toContain('%MD14 与 %MW16 地址范围重叠')
+  })
+
+  it('相邻 WORD 和不同位的 BOOL 不算重叠，无法解析的地址不中断编译', () => {
+    const adjacent = program(
+      [tag('First', 'INT', 0, '%MW16'), tag('Second', 'INT', 0, '%MW18')],
+      [rung('r1', [], output('MOVE', 'First', { value: 1 }))],
+    )
+    expect(compile(adjacent).errors).toEqual([])
+
+    const bits = program(
+      [tag('Bit0', 'BOOL', false, '%M0.0'), tag('Bit1', 'BOOL', false, '%M0.1')],
+      [rung('r1', [contact('c1', 'NO', 'Bit0')], output('COIL', 'Bit1'))],
+    )
+    expect(compile(bits).errors).toEqual([])
+
+    const unparsable = program(
+      [tag('Opaque', 'INT', 0, '%MZ9'), tag('Other', 'INT', 0, 'DB1.DBW0')],
+      [rung('r1', [], output('MOVE', 'Opaque', { value: 0 }))],
+    )
+    expect(() => compile(unparsable)).not.toThrow()
+    expect(compile(unparsable).errors.some((item) => item.message.includes('地址重叠'))).toBe(false)
+  })
+
+  it('闭合并联里的空支路按不通电处理并提示', () => {
+    const node = (open?: boolean): LadderNode => ({
+      type: 'parallel',
+      id: 'p1',
+      branches: [[], [contact('c1', 'NO', 'X')]],
+      ...(open === undefined ? {} : { open }),
+    })
+    const source = program([tag('X'), tag('Lamp')], [rung('r1', [node()], output('COIL', 'Lamp'))])
+    const result = compile(source)
+    expect(result.errors).toEqual([])
+    expect(result.warnings.some((item) => item.message.includes('空支路'))).toBe(true)
+    expect(step(source, createRuntime(source), 1).bools.Lamp).toBe(false)
+    let runtime = writeRuntimeValue(source, createRuntime(source), 'X', true)
+    runtime = step(source, runtime, 1)
+    expect(runtime.bools.Lamp).toBe(true)
+
+    const draft = program([tag('X'), tag('Lamp')], [rung('r1', [node(true)], output('COIL', 'Lamp'))])
+    expect(compile(draft).warnings.some((item) => item.message.includes('空支路'))).toBe(false)
+    expect(step(draft, createRuntime(draft), 1).bools.Lamp).toBe(true)
+  })
+
+  it('ROL 按目标地址位宽旋转，SHL 越界结果为 0', () => {
+    const rotate = program(
+      [tag('Value', 'INT', 0x1234, '%MW0')],
+      [rung('r1', [], output('ROL', 'Value', { value: 4 }))],
+    )
+    expect(compile(rotate).errors).toEqual([])
+    expect(step(rotate, createRuntime(rotate), 1).ints.Value).toBe(0x2341)
+
+    const shift = program(
+      [tag('Value', 'INT', 1, '%MW0')],
+      [rung('r1', [], output('SHL', 'Value', { value: 16 }))],
+    )
+    const shiftResult = compile(shift)
+    expect(shiftResult.errors).toEqual([])
+    expect(shiftResult.warnings.some((item) => item.message.includes('结果恒为 0'))).toBe(true)
+    expect(step(shift, createRuntime(shift), 1).ints.Value).toBe(0)
+
+    const negative = program(
+      [tag('Value', 'INT', 7, '%MW0')],
+      [rung('r1', [], output('SHL', 'Value', { value: -1 }))],
+    )
+    const negativeResult = compile(negative)
+    expect(negativeResult.errors).toEqual([])
+    expect(negativeResult.warnings.some((item) => item.message.includes('负移位次数'))).toBe(true)
+    expect(step(negative, createRuntime(negative), 1).ints.Value).toBe(7)
+  })
+})
+
 describe('状态 ID 与配置校验', () => {
   it('拒绝重复的变量、程序段和输出 ID', () => {
     const duplicateTags = program(
@@ -186,8 +267,8 @@ describe('状态 ID 与配置校验', () => {
     const result = compile(source)
     const errors = result.errors.map((item) => item.message).join('\n')
     expect(errors).toContain('必须在 -32768～32767 之间')
-    expect(errors).toContain('SHL 的移位次数必须在 0～15 之间')
-    expect(errors).toContain('ROL 的移位次数必须在 0～7 之间')
+    expect(errors).not.toContain('移位次数')
+    expect(result.warnings.some((item) => item.message.includes('结果恒为 0'))).toBe(true)
     expect(result.warnings.some((item) => item.message.includes('取整'))).toBe(true)
   })
 })
@@ -335,7 +416,7 @@ describe('输出驱动与定时器边界', () => {
 
     const result = compile(source)
     expect(result.errors).toEqual([])
-    expect(result.warnings.some((item) => item.message.includes('取模'))).toBe(true)
+    expect(result.warnings.some((item) => item.message.includes('N 为负或非法时按 0 处理'))).toBe(true)
   })
 
   it('算术指令的源变量类型必须是 INT', () => {
@@ -397,6 +478,7 @@ describe('输出驱动与定时器边界', () => {
       rung('pattern', [contact('c1', 'NO', 'Pulse')], pattern('pattern-out', 'Step', 'Step')),
     ])
     expect(compile(sameAddress).warnings).toEqual([])
+    expect(compile(sameAddress).errors.map((item) => item.message).join('\n')).toContain('不能指向同一变量')
   })
 
   it('多个 PATTERN 写同一变量时按写入者各报一次', () => {
@@ -552,13 +634,14 @@ describe('16 位仿真语义', () => {
     expect(step(shlSource, createRuntime(shlSource), 1).ints.Value).toBe(-32768)
   })
 
-  it('ROL 变量次数按 8 位取模，CTU 到 INT 上限后不再变负', () => {
+  it('ROL 变量次数按目标位宽取模，CTU 到 INT 上限后不再变负', () => {
     const rotateSource = program(
       [tag('Value', 'INT', 1, '%MW0'), tag('Count', 'INT', 9, '%MW2')],
       [rung('r1', [], output('ROL', 'Value', { valueTag: 'Count' }))],
     )
     expect(compile(rotateSource).warnings.some((item) => item.message.includes('取模'))).toBe(true)
-    expect(step(rotateSource, createRuntime(rotateSource), 1).ints.Value).toBe(2)
+    // %MW0 是 16 位，1 左旋 9 次落在第 9 位。
+    expect(step(rotateSource, createRuntime(rotateSource), 1).ints.Value).toBe(512)
 
     const counterSource = program(
       [tag('Pulse'), tag('CountValue', 'INT', 0, '%MW2')],

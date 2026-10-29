@@ -111,7 +111,7 @@ describe('编译诊断', () => {
     )
     const result = compile(source)
     expect(result.errors.some((item) => item.message.includes('变量名“Start”重复'))).toBe(true)
-    expect(result.warnings.some((item) => item.message.includes('同一个地址'))).toBe(true)
+    expect(result.errors.some((item) => item.message.includes('地址重叠'))).toBe(true)
     expect(result.warnings.some((item) => item.message.includes('被多个线圈驱动'))).toBe(true)
   })
 
