@@ -50,6 +50,7 @@ export interface WorkspaceTopBarProps {
   onImportProject: () => void
   onExportProject: () => void
   onExportImage: (mode: 'complete' | 'plain') => void
+  onExportSfc: () => void
   onCopyShareLink: () => void
   onNewProject: () => void
   onGuide: () => void
@@ -81,6 +82,7 @@ export default function WorkspaceTopBar({
   onImportProject,
   onExportProject,
   onExportImage,
+  onExportSfc,
   onCopyShareLink,
   onNewProject,
   onGuide,
@@ -522,6 +524,10 @@ export default function WorkspaceTopBar({
                   <ImageIcon size={16} />
                   <span>纯梯形图 PNG</span>
                 </button>
+                <button type="button" role="menuitem" onClick={() => chooseFileMenuAction(onExportSfc)}>
+                  <StepIcon size={16} />
+                  <span>顺序功能图 PNG</span>
+                </button>
               </div>
             </div>
           )}
@@ -570,6 +576,10 @@ export default function WorkspaceTopBar({
                 <button type="button" role="menuitem" onClick={() => chooseFileMenuAction(() => onExportImage('plain'))}>
                   <ImageIcon size={16} />
                   <span>纯梯形图 PNG</span>
+                </button>
+                <button type="button" role="menuitem" onClick={() => chooseFileMenuAction(onExportSfc)}>
+                  <StepIcon size={16} />
+                  <span>顺序功能图 PNG</span>
                 </button>
               </div>
             </div>

@@ -48,6 +48,7 @@ import {
   programsEqualIgnoringPlaceholder,
 } from './engine/rungInvariant'
 import { createRuntime, step, writeRuntimeValue } from './engine/simulate'
+import { buildSfc } from './engine/sfc'
 import type {
   ContactKind,
   LadderNode,
@@ -78,6 +79,7 @@ import {
   type SaveNamedProjectResult,
   type SavedProject,
 } from './lib/projectLibrary'
+import { rasterizeSfcPng } from './lib/sfcExport'
 import {
   clampInspectorWidth,
   INSPECTOR_DEFAULT_WIDTH,
@@ -2794,6 +2796,31 @@ export default function App() {
     window.addEventListener('hashchange', onHashChange)
     return () => window.removeEventListener('hashchange', onHashChange)
   }, [consumeShareHash])
+  // 顺序功能图由步骤位、步进网络和线圈条件现场归纳，不写入工程文件。
+  const startSfcExport = async () => {
+    const chart = buildSfc(program)
+    if (!chart) {
+      notify(
+        '当前工程没有可识别的步骤位：变量名需形如 Step1…StepN（或注释写“第 N 步”），且至少两步。先按步骤位整理程序再导出顺序功能图',
+        { tone: 'error' },
+      )
+      return
+    }
+    notify('正在生成顺序功能图 PNG…')
+    try {
+      const dataUrl = await rasterizeSfcPng(chart)
+      downloadDataUrl(
+        `${safeFileName(program.name)}-顺序功能图-${downloadTimestamp()}.png`,
+        dataUrl,
+      )
+      notify(`已导出顺序功能图 PNG（${chart.steps.length} 步）`)
+    } catch (reason) {
+      notify(
+        reason instanceof Error ? reason.message : '顺序功能图 PNG 生成失败',
+        { tone: 'error' },
+      )
+    }
+  }
 
   // 先按变量类型判断能不能写，再看写入是否真的产生了新状态。
   // 用户把 INT 写成和当前相同的数值时，运行时本就会返回新对象，
@@ -3157,6 +3184,7 @@ export default function App() {
         onImportProject={() => setImportOpen(true)}
         onExportProject={exportProject}
         onExportImage={startImageExport}
+        onExportSfc={() => void startSfcExport()}
         onCopyShareLink={() => void copyShareLink()}
         onGuide={() => setGuideOpen(true)}
         onAbout={() => setAboutOpen(true)}
