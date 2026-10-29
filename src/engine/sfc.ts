@@ -29,6 +29,11 @@ export interface SfcChart {
   edges: SfcEdge[]
   notes: string[]
   source: 'sr-steps' | 'bit-steps' | 'state-tags' | 'pattern' | 'run-cycle' | 'network'
+  /**
+   * sequence：有真实的状态 / 步骤位证据，边表示工艺转移。
+   * combined：没有可证明的状态证据，只画同一扫描周期内按条件求值的组合逻辑，edges 必为空。
+   */
+  kind?: 'sequence' | 'combined'
   container?: string
 }
 
@@ -111,21 +116,6 @@ function addressRange(addresses: string[]): string {
   return `${addresses[0]}–${addresses[addresses.length - 1]}`
 }
 
-/** 取一组说明文字的共同尾巴：「1 号抢答灯」…→「抢答灯」。 */
-function sharedTail(labels: string[]): string {
-  const cleaned = labels.map((label) => label.trim()).filter(Boolean)
-  if (cleaned.length < 2) return ''
-  const reversed = cleaned.map((label) => Array.from(label).reverse())
-  let length = 0
-  while (reversed.every((chars) => chars[length] !== undefined && chars[length] === reversed[0][length])) {
-    length += 1
-  }
-  const tail = reversed[0].slice(0, length).reverse().join('')
-    .replace(/^[\s\d０-９第号层楼\-_·]+/, '')
-    .trim()
-  return tail.length >= 2 ? tail : ''
-}
-
 /** 取一组说明文字的共同前缀加编号：「喷泉 1」「喷泉 3」→「喷泉 1·3」。 */
 function numberedList(labels: string[]): string {
   const parts = labels.map((label) => /^(.*?)[\s_-]*(\d+)\s*$/.exec(label.trim()))
@@ -146,9 +136,7 @@ function shortComment(tag: TagDef): string {
 function tagDisplay(tag: TagDef | undefined, fallback: string): string {
   if (!tag) return fallback
   const comment = shortComment(tag)
-  const label = comment && comment !== tag.name && comment.length <= 14 ? comment : tag.name
-  const address = shortAddress(tag.address)
-  return address ? `${label}（${address}）` : label
+  return comment && comment !== tag.name && comment.length <= 14 ? comment : tag.name
 }
 
 function cleanRungLabel(label: string): string {
@@ -749,7 +737,7 @@ function buildSrChart(ctx: Context): SfcChart | null {
     steps.unshift({
       key: '__initial',
       number: '0',
-      title: '',
+      title: '初始步',
       initial: true,
       actions: [{ text: '等待启动，各步复位', detail: '' }],
     })
@@ -763,7 +751,7 @@ function buildSrChart(ctx: Context): SfcChart | null {
     steps.unshift({
       key: '__initial',
       number: '0',
-      title: '',
+      title: '初始步',
       initial: true,
       actions: [{ text: '等待启动，各步复位', detail: '' }],
     })
@@ -855,9 +843,18 @@ function buildSrChart(ctx: Context): SfcChart | null {
     if (!source) {
       // 同一个条件已经画成前向转移时（如「T1 到时 → 下一步」），
       // 这条复位只是那一步的退出动作，图上不再单独画一条边。
-      if (!transitions.some((transition) => transition.guard === group.guard)) {
-        unresolved.push(`条件「${group.guard}」会复位步骤位，但网络里没有可挂接的来源步。`)
+      if (transitions.some((transition) => transition.guard === group.guard)) continue
+      if (allReset) {
+        // 停止条件同时复位全部步骤位：每个步骤都有一条真实的回初始步出口。
+        const home = ensureInitial()
+        if (!home) continue
+        for (const name of group.targets) {
+          if (!stepKeys.has(name)) continue
+          edges.push({ from: name, to: home.key, label: group.guard })
+        }
+        continue
       }
+      unresolved.push(`条件「${group.guard}」会复位步骤位，但网络里没有可挂接的来源步。`)
       continue
     }
     if (allReset) {
@@ -899,15 +896,14 @@ function buildSrChart(ctx: Context): SfcChart | null {
   const normalized = mergeEdges(edges)
   // 一条边都建不出来时不许按步号顺序瞎连，交回上层降级成通用图。
   if (normalized.length === 0) return null
+  // 步骤位没有成对的复位网络时可以同时保持，单令牌 SFC 会误导读者，交回上层降级。
+  if (!exclusive) return null
 
   const notes = [
     '动作框按线圈条件自动归入对应步；闪烁、互锁与定时细节仍以梯形图为准。',
   ]
   if (entries.length > 0 && !ctx.steps.some(isInitialStep)) {
     notes.push('图首的初始步 0 由起始置位网络整理得出，上电首次扫描应进入该步。')
-  }
-  if (!exclusive) {
-    notes.push('这些步位没有成对的复位网络，梯形图里可以同时保持；图按置位先后绘制。')
   }
   if (unresolved.length > 0) notes.push(...new Set(unresolved))
 
@@ -1308,7 +1304,15 @@ function pushUniqueTrigger(list: TriggerRef[], trigger: TriggerRef): void {
 }
 
 function entryLabelFromGroup(group: EntryGroup, ctx: Context): string {
-  const condition = group.conditions.map((item) => conditionLabel(item, ctx)).join(' 且 ')
+  const seen = new Set<string>()
+  const labels: string[] = []
+  for (const item of group.conditions) {
+    const label = conditionLabel(item, ctx)
+    if (seen.has(label)) continue
+    seen.add(label)
+    labels.push(label)
+  }
+  const condition = labels.join(' 且 ')
   const fallback = group.fallbacks.filter(Boolean).join(' 或 ')
   return entryLabelOf(group.triggers, condition, ctx, fallback)
 }
@@ -1319,18 +1323,9 @@ function stateActions(node: StateNode, ctx: Context): SfcAction[] {
     .filter((tag): tag is TagDef => Boolean(tag))
   if (members.length === 0) return []
 
+  // 步骤标题已经是这个状态的中文名（如「1 号抢答灯」），动作框里就只写它额外
+  // 驱动的输出，避免同一句话在步骤框和动作框里各出现一次。
   const actions: SfcAction[] = []
-  if (members.length === 1) {
-    const tag = members[0]
-    actions.push({ text: shortName(tag, tag.name), detail: `${shortAddress(tag.address)}=1` })
-  } else {
-    const labels = members.map((tag) => shortComment(tag) || tag.name)
-    const addresses = members.map((tag) => shortAddress(tag.address))
-    actions.push({
-      text: sharedTail(labels) || numberRange(labels) || labels.join('·'),
-      detail: addressRange(addresses),
-    })
-  }
 
   // 只由本步状态驱动的线圈（例如数码管段）挂在同一个动作框里。
   const memberNames = new Set(node.members)
@@ -1345,10 +1340,7 @@ function stateActions(node: StateNode, ctx: Context): SfcAction[] {
   }
   if (driven.length === 1) {
     const tag = driven[0]
-    const address = `${shortAddress(tag.address)}=1`
-    const primary = actions[0]
-    if (primary?.detail) primary.detail = `${primary.detail}、${address}`
-    else actions.push({ text: shortName(tag, tag.name), detail: address })
+    actions.push({ text: shortName(tag, tag.name), detail: `${shortAddress(tag.address)}=1` })
   } else if (driven.length > 1) {
     const labels = driven.map((tag) => shortComment(tag) || tag.name)
     actions.push({
@@ -1394,11 +1386,6 @@ function stateActions(node: StateNode, ctx: Context): SfcAction[] {
   return actions
 }
 
-/** 「P1」「P2」这类编号取区间，其余情况按点号列表显示。 */
-function numberRange(labels: string[]): string {
-  return numberedRange(labels) || numberedList(labels)
-}
-
 /**
  * 置位 / 复位状态图：每个状态都从真实网络里取自己的入边和出边。
  * - 来源只认常开状态触点，常闭触点一律当联锁条件，绝不冒充上一状态。
@@ -1412,31 +1399,27 @@ function buildStateChart(ctx: Context): SfcChart | null {
   if (groups.length === 0) return null
   const order = new Map(ctx.rungs.map((rung, index) => [rung.id, index]))
 
-  // 互锁组里只有「去掉组内常闭之后的进入条件」相同的状态才合成一步：
-  // 四路抢答灯都靠「允许抢答」进入，是一步四灯；电梯上行、下行各有自己的需求位，就分两步。
+  // 只有互斥组里的记忆位才是真正的控制状态（例如四路抢答灯、电梯上/下行方向）。
+  // 呼叫记忆、需求汇总这类辅助位只是转移条件：把它们也画成步骤，电梯会膨胀成
+  // 十几个状态和十几条回边，图上读不出主流程。
+  const stateNames = new Set(groups.flat())
   const main: StateNode[] = []
   const conditionTags = new Set<string>()
+  const groupOf = new Map<string, string[]>()
   for (const group of groups) {
-    const groupSet = new Set(group)
-    const partsOf = new Map<string, EntryParts>()
-    for (const name of group) partsOf.set(name, entryParts(latches.get(name)!, groupSet))
-    const bySignature = new Map<string, string[]>()
-    for (const name of group) {
-      const signature = partsOf.get(name)!.conditions.map(conditionKey).sort().join('|')
-      const list = bySignature.get(signature) ?? []
-      list.push(name)
-      bySignature.set(signature, list)
-    }
-    for (const members of bySignature.values()) {
-      for (const name of members) {
-        for (const condition of partsOf.get(name)!.conditions) conditionTags.add(condition.tag)
-      }
-      main.push({
-        members,
-        order: Math.min(...members.map((name) => order.get(latches.get(name)!.setRungs[0].id) ?? 0)),
-        locks: [...group],
-      })
-    }
+    for (const name of group) groupOf.set(name, group)
+  }
+  for (const name of stateNames) {
+    const info = latches.get(name)
+    if (!info) continue
+    const group = groupOf.get(name) ?? [name]
+    const parts = entryParts(info, new Set(group))
+    for (const condition of parts.conditions) conditionTags.add(condition.tag)
+    main.push({
+      members: [name],
+      order: order.get(info.setRungs[0].id) ?? 0,
+      locks: group,
+    })
   }
   main.sort((left, right) => left.order - right.order)
 
@@ -1462,13 +1445,17 @@ function buildStateChart(ctx: Context): SfcChart | null {
     number: '0',
     title: '初始步',
     initial: true,
-    actions: [{ text: '全部输出关闭', detail: '' }],
+    actions: [],
   }]
   ordered.forEach((node, index) => {
+    const labels = node.members
+      .map((name) => ctx.tags.get(name))
+      .map((tag) => (tag ? shortComment(tag) || tag.name : ''))
+      .filter(Boolean)
     steps.push({
       key: stateNodeKey(node),
       number: String(index + 1),
-      title: node.members.join(' / '),
+      title: labels.join(' / ') || node.members.join(' / '),
       initial: false,
       actions: stateActions(node, ctx),
     })
@@ -1550,10 +1537,9 @@ function buildStateChart(ctx: Context): SfcChart | null {
           const conditions: EntryCondition[] = []
           for (const contact of path) {
             if (contact === source || triggerTags.has(contact.tag)) continue
-            // 组内互锁是多成员目标（同一步的几个灯）或从初始步进入时的常识，不作为转移文字。
-            const interlock = contact.kind === 'NC'
-              && node.locks.includes(contact.tag)
-              && (own.size > 1 || from === '__initial')
+            // 同一互斥组里的常闭触点是「别的状态此刻没亮」的联锁，顺序功能图本身
+            // 已经表达了先后关系，再写进转移标签只会让文字变成一长串「无…」。
+            const interlock = contact.kind === 'NC' && node.locks.includes(contact.tag)
             if (interlock) continue
             conditions.push(asCondition(contact))
           }
@@ -1679,18 +1665,22 @@ function buildPatternChart(ctx: Context): SfcChart | null {
 
     const steps: SfcStep[] = []
     const edges: SfcEdge[] = []
+    const startName = gate ? shortName(ctx.tags.get(gate.tag), gate.tag) : ''
+    const pulse = output.pulseTag?.trim() ?? ''
+    const tick = pulse || label
+    const runGuard = [startName, tick].filter(Boolean).join(' 且 ')
     if (gate) {
       steps.push({
         key: '__initial',
         number: '0',
         title: '初始步',
         initial: true,
-        actions: [{ text: '全部灯熄灭', detail: '' }],
+        actions: [],
       })
       edges.push({
         from: '__initial',
         to: 'beat-1',
-        label: shortName(ctx.tags.get(gate.tag), gate.tag),
+        label: runGuard,
       })
     }
     pattern.forEach((value, index) => {
@@ -1705,11 +1695,12 @@ function buildPatternChart(ctx: Context): SfcChart | null {
         number: String(index + 1),
         title: `第 ${index + 1} 拍`,
         initial: !gate && index === 0,
+        // 运行条件已经写在进入这一拍的转移上，动作框里只写这一拍点亮的灯。
         actions: [{ text, detail: '' }],
       })
-      if (index > 0) edges.push({ from: `beat-${index}`, to: `beat-${index + 1}`, label })
+      if (index > 0) edges.push({ from: `beat-${index}`, to: `beat-${index + 1}`, label: runGuard })
     })
-    edges.push({ from: `beat-${pattern.length}`, to: 'beat-1', label })
+    edges.push({ from: `beat-${pattern.length}`, to: 'beat-1', label: runGuard })
 
     return {
       programName: ctx.program.name,
@@ -1885,215 +1876,36 @@ function outputAction(output: Rung['output'], ctx: Context): SfcAction {
   return { text: name, detail: address ? `${address}=1` : '' }
 }
 
-/** 去掉输出自身的保持触点（含并联分支里的），剩下的才是进入这一步的条件。 */
-function withoutSelfContacts(nodes: LadderNode[], self: string): LadderNode[] {
-  const kept: LadderNode[] = []
-  for (const node of nodes) {
-    if (node.type === 'contact') {
-      if (node.tag !== self) kept.push(node)
-      continue
-    }
-    kept.push({
-      ...node,
-      branches: node.branches.map((branch) => withoutSelfContacts(branch, self)),
-    })
-  }
-  return kept
-}
-
-/** 进入这一网络的条件：自身保持触点不算转移条件。 */
-function networkGuard(rung: Rung, ctx: Context): string {
-  const nodes = withoutSelfContacts(rung.nodes, rung.output.tag)
-  return formatNodes(nodes, ctx, false) || '—'
-}
-
-/** 串联条件与先后顺序无关：A 且 B 与 B 且 A 是同一个进入条件。 */
-function guardKey(guard: string): string {
-  return guard
-    .split(/\s*且\s*/)
-    .map((part) => part.trim())
-    .filter(Boolean)
-    .sort()
-    .join(' 且 ')
-}
-
-/** 只有普通布尔输出才可能并进同一步；定时 / 计数 / 功能盒一律单独成步。 */
-const MERGEABLE_OUTPUTS: ReadonlySet<Rung['output']['kind']> = new Set(['COIL', 'SET', 'RESET'])
-
-function isPlainOutput(rung: Rung): boolean {
-  return MERGEABLE_OUTPUTS.has(rung.output.kind)
-}
-
-/** 条件里是否直接引用了某个输出位（并联分支和比较触点都算引用）。 */
-function referencesTag(nodes: LadderNode[], tag: string): boolean {
-  return collectContactNodes(nodes).some((node) => node.tag === tag)
-}
+/** 组合视图的动作条数上限：超过这个规模已不适合用一张 SFC 表达，交回上层提示无法归纳。 */
+const MAX_COMBINED_ACTIONS = 120
 
 /**
- * 连续网络能否并入同一组：都是普通布尔输出、进入条件文本相同、
- * 输出位互不引用，也不重复写同一个输出。
- */
-function canJoinNetworkGroup(group: Rung[], next: Rung, guard: string, ctx: Context): boolean {
-  if (!group.every(isPlainOutput) || !isPlainOutput(next)) return false
-  const nextTag = next.output.tag.trim()
-  if (!nextTag || group.some((rung) => rung.output.tag === nextTag)) return false
-  if (guardKey(networkGuard(next, ctx)) !== guardKey(guard)) return false
-  for (const rung of group) {
-    if (referencesTag(next.nodes, rung.output.tag)) return false
-    if (referencesTag(rung.nodes, nextTag)) return false
-  }
-  return true
-}
-
-/**
- * 条件全部由上一组刚写下的输出位组成：这只是同一步里的从属输出
- * （运行灯跟着运行位亮、指示灯跟着输出亮），不该单独占一步。
- */
-function dependsOnGroup(nodes: LadderNode[], group: Rung[]): boolean {
-  const contacts = collectContactNodes(nodes)
-  if (contacts.length === 0) return false
-  const produced = new Set(group.map((rung) => rung.output.tag))
-  return contacts.every((node) => node.kind === 'NO' && produced.has(node.tag))
-}
-
-/** 每个网络只引用自己的输出位：这些输出是同时有效的条件动作，不存在先后顺序。 */
-function groupsAreIndependent(groups: NetworkGroup[]): boolean {
-  const owners = new Map<string, number>()
-  groups.forEach((group, index) => {
-    for (const rung of group.rungs) owners.set(rung.output.tag, index)
-  })
-  return groups.every((group, index) => group.rungs.every((rung) => (
-    collectContactNodes(rung.nodes).every((node) => {
-      const owner = owners.get(node.tag)
-      return owner === undefined || owner === index
-    })
-  )))
-}
-
-interface NetworkGroup {
-  rungs: Rung[]
-  /** 组内第一条网络在梯形图里的序号，用来生成默认标题。 */
-  order: number
-  guard: string
-}
-
-/**
- * 通用兜底：按梯形图网络顺序排列。连续、进入条件相同且输出互不引用的
- * 普通布尔输出网络并成同一步，避免把“同时得电”画成先后两步。
+ * 没有可证明的状态 / 步骤位时的保底视图：把每个网络的输出连同它自己的前置条件
+ * 放进同一扫描周期的动作清单。不按网络先后造步骤，也不补扫描回边——那会把
+ * 同时有效的组合逻辑画成一条并不存在的工艺流程。
  */
 function buildNetworkChart(ctx: Context): SfcChart | null {
   // 没有输出变量的网络不算一步，跳过；全空说明还没有可归纳的梯形图。
   const rungs = ctx.rungs.filter((rung) => rung.output.tag.trim() !== '')
   if (rungs.length === 0) return null
-  const groups: NetworkGroup[] = []
-  rungs.forEach((rung, index) => {
-    const group = groups.at(-1)
-    if (group && canJoinNetworkGroup(group.rungs, rung, group.guard, ctx)) {
-      group.rungs.push(rung)
-      return
-    }
-    if (
-      group
-      && group.rungs.every(isPlainOutput)
-      && isPlainOutput(rung)
-      && !group.rungs.some((item) => item.output.tag === rung.output.tag)
-      && dependsOnGroup(rung.nodes, group.rungs)
-    ) {
-      group.rungs.push(rung)
-      return
-    }
-    groups.push({ rungs: [rung], order: index, guard: networkGuard(rung, ctx) })
-  })
-
-  // 各网络互不引用时把它们串成 1→2→3 会凭空造出先后关系：梯形图里两个输出可以
-  // 同时得电，SFC 里却要等前一步结束。这种情况合成一步，条件写在各自的动作上。
-  if (groups.length > 1 && groupsAreIndependent(groups)) {
-    const actions: SfcAction[] = []
-    for (const group of groups) {
-      for (const rung of group.rungs) {
-        const skip = new Set(ctx.stepByTag.keys())
-        skip.add(rung.output.tag)
-        const guard = inputGuard(rung.nodes, ctx, skip)
-        if (!guard) {
-          actions.length = 0
-          break
-        }
-        const action = outputAction(rung.output, ctx)
-        actions.push({ ...action, text: `${guard} 时 ${action.text}` })
-      }
-      if (actions.length === 0) break
-    }
-    if (actions.length > 0) {
-      return {
-        programName: ctx.program.name,
-        steps: [{ key: '__parallel', number: '1', title: '', initial: true, actions }],
-        edges: [],
-        notes: ['各网络互不引用，按同时有效的条件动作画在同一步，不表示先后顺序。'],
-        source: 'network',
-      }
-    }
+  const actions: SfcAction[] = []
+  for (const rung of rungs) {
+    const skip = new Set(ctx.stepByTag.keys())
+    skip.add(rung.output.tag)
+    const guard = compactNodes(rung.nodes, ctx, skip)
+    const action = outputAction(rung.output, ctx)
+    const text = guard ? `${guard} 时 ${action.text}` : action.text
+    if (actions.some((item) => item.text === text && item.detail === action.detail)) continue
+    actions.push({ text, detail: action.detail })
   }
-
-  // 初始步不写文字，只留双边框；每一步的进入条件写在上一条连线上。
-  // 不替初始步声明输出状态：常闭触点或带记忆的输出在上电时可能已经是 1，
-  // 梯形图里没有证据，宁可不画动作框也不编造「全部关闭」。
-  const steps: SfcStep[] = [{
-    key: '__initial',
-    number: '0',
-    title: '',
-    initial: true,
-    actions: [],
-  }]
-  const edges: SfcEdge[] = []
-  let previous = '__initial'
-  groups.forEach((group, index) => {
-    const first = group.rungs[0]
-    steps.push({
-      key: first.id,
-      number: String(index + 1),
-      title: cleanRungLabel(first.label) || `网络 ${group.order + 1}`,
-      initial: false,
-      tagName: first.output.tag || undefined,
-      tagAddress: ctx.tags.get(first.output.tag)?.address.replace(/^%/, ''),
-      actions: group.rungs.map((rung) => outputAction(rung.output, ctx)),
-    })
-    edges.push({ from: previous, to: first.id, label: group.guard })
-    // 启保停：自保持网络里的输入常闭触点就是运行步退回初始步的转移。
-    const hold = group.rungs.find((rung) => rung.output.kind === 'COIL'
-      && collectContactNodes(rung.nodes).some((node) => node.kind === 'NO' && node.tag === rung.output.tag))
-    if (hold) {
-      const stops = [...new Set(collectContactNodes(hold.nodes)
-        .filter((node) => node.kind === 'NC' && node.tag !== hold.output.tag && isInput(ctx.tags.get(node.tag)))
-        .map((node) => node.tag))]
-      if (stops.length > 0) {
-        edges.push({
-          from: first.id,
-          to: '__initial',
-          label: stops.map((name) => tagDisplay(ctx.tags.get(name), name)).join(' 或 '),
-        })
-      }
-    }
-    previous = first.id
-  })
-  // 逐网络图是扫描周期的抽象。末步没有自己的退出网络时，补一条回到初始步的
-  // 扫描回边，避免图上留下没有出边的死路；有真实退出边的网络不重复添加。
-  const last = steps.at(-1)
-  let scanLoop = false
-  if (steps.length > 2 && last && !edges.some((edge) => edge.from === last.key)) {
-    edges.push({ from: last.key, to: '__initial', label: '下一扫描周期' })
-    scanLoop = true
-  }
-  const merged = groups.some((group) => group.rungs.length > 1)
-  const notes = [merged
-    ? '按梯形图的网络顺序排列；进入条件相同的连续布尔输出网络已合并为同一步。'
-    : '按梯形图的网络顺序逐步排列，每个网络对应一步。']
-  if (scanLoop) notes.push('「下一扫描周期」表示梯形图循环执行，不代表工艺上还有一步。')
+  if (actions.length === 0 || actions.length > MAX_COMBINED_ACTIONS) return null
   return {
     programName: ctx.program.name,
-    steps,
-    edges,
-    notes,
+    steps: [{ key: '__combined', number: '1', title: '组合逻辑', initial: true, actions }],
+    edges: [],
+    notes: ['各网络在同一扫描周期内按各自条件求值，不表示工艺上的先后步骤。'],
     source: 'network',
+    kind: 'combined',
   }
 }
 
