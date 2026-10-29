@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import type { Program, Selection } from '../engine/types'
 import { createRuntime } from '../engine/simulate'
 import { contentRungs } from '../engine/rungInvariant'
@@ -17,7 +17,12 @@ import {
   escapeXmlText,
   sanitizeXmlText,
 } from '../lib/svgDocument'
-import LadderCanvas from './LadderCanvas'
+import {
+  mergeFragments,
+  planChunks,
+  unwrapSvgRoot,
+} from '../lib/exportChunking'
+import LadderCanvas, { naturalRungWidth } from './LadderCanvas'
 import './ProgramImageExporter.css'
 
 export type ProgramImageMode = 'complete' | 'plain'
@@ -51,7 +56,7 @@ interface PreparedRung {
 }
 
 interface VectorRung {
-  node: SVGSVGElement
+  markup: string
   bounds: { x: number; y: number; width: number; height: number }
   inherited: string
   width: number
@@ -61,11 +66,17 @@ interface VectorRung {
 }
 
 const INITIAL_STAGE_WIDTH = 1240
+/** 与 ProgramImageExporter.css 里 .program-export-document 的左右内边距（40 + 40）一致。 */
+const DOCUMENT_PADDING_X = 80
+/** 舞台在整表最宽程序段之外额外留出的空白。 */
+const STAGE_BLEED = 150
 const SOURCE_SCALE = 2
 /** 字体迟迟不就绪时按当前字体继续导出，绝不让整次导出无限等待。 */
 const FONT_READY_TIMEOUT_MS = 3000
 /** 每连续占用主线程这么久就让出一帧，避免导出期间页面完全失去响应。 */
 const EXPORT_SLICE_MS = 40
+/** 字符串拼装也分块让出主线程，避免大工程出现一块超长任务。 */
+const VECTOR_BUILD_CHUNK = 40
 const WHITE = '#ffffff'
 const INK = '#17191c'
 const MUTED = '#6b7178'
@@ -191,6 +202,13 @@ function waitForFonts(timeoutMs = FONT_READY_TIMEOUT_MS) {
 }
 
 function noop() {}
+
+let svgSerializer: XMLSerializer | null = null
+
+function serializeNode(node: Node) {
+  svgSerializer ??= new XMLSerializer()
+  return svgSerializer.serializeToString(node)
+}
 
 function fitText(
   context: CanvasRenderingContext2D,
@@ -325,12 +343,17 @@ function sanitizeSvgTree(node: Node) {
     return
   }
   if (node.nodeType === ELEMENT_NODE) {
-    for (const attribute of Array.from((node as Element).attributes)) {
+    const attributes = (node as Element).attributes
+    for (let index = attributes.length - 1; index >= 0; index -= 1) {
+      const attribute = attributes.item(index)
+      if (!attribute) continue
       const clean = sanitizeXmlText(attribute.value)
       if (clean !== attribute.value) attribute.value = clean
     }
   }
-  for (const child of Array.from(node.childNodes)) sanitizeSvgTree(child)
+  for (let index = 0; index < node.childNodes.length; index += 1) {
+    sanitizeSvgTree(node.childNodes[index])
+  }
 }
 
 /** 把计算后的样式逐节点写成 style 属性：PowerPoint、Word、Illustrator 都只认
@@ -343,10 +366,18 @@ function inlineSvgStyles(source: SVGSVGElement, clone: SVGSVGElement) {
   const inheritedSize = rootComputed.getPropertyValue('font-size')
   const inheritedWeight = rootComputed.getPropertyValue('font-weight')
 
-  sourceNodes.forEach((node, index) => {
+  for (let index = 0; index < sourceNodes.length; index += 1) {
+    const node = sourceNodes[index]
     const copy = cloneNodes[index]
-    if (!copy) return
+    if (!copy) continue
+    // 这两类节点稍后会整棵删除，没必要在这里为它们读取几十项计算样式。
+    if (
+      index > 0
+      && (node.tagName.toLowerCase() === 'title' || node.matches(INTERACTION_ONLY_SELECTOR))
+    ) continue
     const computed = window.getComputedStyle(node)
+    const isWire = node.matches(WIRE_SELECTOR)
+    const isText = node instanceof SVGTextElement
     const declarations: string[] = []
     for (const property of SVG_STYLE_PROPERTIES) {
       let value = computed.getPropertyValue(property)
@@ -360,17 +391,17 @@ function inlineSvgStyles(source: SVGSVGElement, clone: SVGSVGElement) {
       ) continue
       if (index === 0 && property === 'fill') {
         value = 'none'
-      } else if (node.matches(WIRE_SELECTOR)) {
+      } else if (isWire) {
         if (property === 'fill') value = 'none'
         else if (property === 'stroke') value = INK
       }
-      if (node instanceof SVGTextElement && property === 'fill') value = INK
+      if (isText && property === 'fill') value = INK
       if (value === SVG_DEFAULT_VALUES[property]) continue
       declarations.push(property + ':' + value)
     }
-    if (declarations.length === 0) return
+    if (declarations.length === 0) continue
     copy.setAttribute('style', declarations.join(';'))
-  })
+  }
 
   // 导出始终展示静态电路，不沿用当前仿真通电效果或交互选中状态。
   clone.classList.remove('is-powered')
@@ -384,8 +415,12 @@ function inlineSvgStyles(source: SVGSVGElement, clone: SVGSVGElement) {
   clone.querySelectorAll(INTERACTION_ONLY_SELECTOR).forEach((node) => node.remove())
 
   // 图片是静态交付物，不应把网页按钮语义、测试标记或旧类名带出去。
-  clone.querySelectorAll('*').forEach((node) => {
-    for (const attribute of Array.from(node.attributes)) {
+  const descendants = clone.querySelectorAll<SVGElement>('*')
+  for (let index = 0; index < descendants.length; index += 1) {
+    const node = descendants[index]
+    for (let attrIndex = node.attributes.length - 1; attrIndex >= 0; attrIndex -= 1) {
+      const attribute = node.attributes.item(attrIndex)
+      if (!attribute) continue
       if (
         attribute.name === 'role'
         || attribute.name === 'tabindex'
@@ -396,9 +431,11 @@ function inlineSvgStyles(source: SVGSVGElement, clone: SVGSVGElement) {
       ) node.removeAttribute(attribute.name)
     }
     if (node.tagName.toLowerCase() === 'title') node.remove()
-  })
+  }
   for (const attribute of ['class', 'tabindex', 'focusable']) clone.removeAttribute(attribute)
-  for (const attribute of Array.from(clone.attributes)) {
+  for (let index = clone.attributes.length - 1; index >= 0; index -= 1) {
+    const attribute = clone.attributes.item(index)
+    if (!attribute) continue
     if (attribute.name.startsWith('aria-') || attribute.name.startsWith('data-')) {
       clone.removeAttribute(attribute.name)
     }
@@ -422,8 +459,8 @@ function serializeSvg(source: SVGSVGElement) {
   return {
     width,
     height,
-    // 兜底：即使某个节点绕过了上面的清洗，序列化结果里也不能留非法控制字符。
-    xml: sanitizeXmlText(new XMLSerializer().serializeToString(clone)),
+    // inlineSvgStyles 已在序列化前逐节点清洗；这里无需再扫描整份大字符串。
+    xml: serializeNode(clone),
   }
 }
 
@@ -714,8 +751,11 @@ function vectorRung(
     .filter((declaration) => declaration.length > 0)
     .join(';')
 
+  const unwrapped = unwrapSvgRoot(serializeNode(clone))
+  if (!unwrapped) return null
+
   return {
-    node: clone,
+    markup: unwrapped.inner,
     bounds,
     inherited,
     width: bounds.width,
@@ -726,14 +766,11 @@ function vectorRung(
 }
 
 function placeVectorRung(rung: VectorRung, x: number, y: number) {
-  const children = Array.from(rung.node.childNodes)
-    .map((child) => new XMLSerializer().serializeToString(child))
-    .join('')
   const transform = 'translate(' + round2(x - rung.bounds.x)
     + ' ' + round2(y - rung.bounds.y) + ')'
-  return sanitizeXmlText('<g transform="' + transform + '"'
+  return '<g transform="' + transform + '"'
     + (rung.inherited ? ' style="' + escapeXmlText(rung.inherited) + '"' : '')
-    + '>' + children + '</g>')
+    + '>' + rung.markup + '</g>'
 }
 
 function vectorLine(x1: number, y1: number, x2: number, y2: number) {
@@ -785,17 +822,37 @@ function measureContext() {
   return document.createElement('canvas').getContext('2d')
 }
 
-function buildPlainVector(rungs: VectorRung[], layout: PlainLayout) {
-  const body = layout.placements
-    .map((placement, index) => {
+async function buildPlainVector(
+  rungs: VectorRung[],
+  layout: PlainLayout,
+  isCancelled: () => boolean,
+) {
+  const fragments: string[] = []
+  const chunks = planChunks(layout.placements.length, VECTOR_BUILD_CHUNK)
+  for (let chunkIndex = 0; chunkIndex < chunks.length; chunkIndex += 1) {
+    const chunk = chunks[chunkIndex]
+    for (let index = chunk.start; index < chunk.end; index += 1) {
+      if (isCancelled()) return null
       const rung = rungs[index]
-      return rung ? placeVectorRung(rung, placement.x, placement.y) : ''
-    })
-    .join('')
-  return vectorDocument(layout.width, layout.height, body)
+      const placement = layout.placements[index]
+      if (rung && placement) {
+        fragments.push(placeVectorRung(rung, placement.x, placement.y))
+      }
+    }
+    if (chunkIndex < chunks.length - 1) {
+      await yieldToMain()
+      if (isCancelled()) return null
+    }
+  }
+  return vectorDocument(layout.width, layout.height, mergeFragments(fragments))
 }
 
-function buildCompleteVector(program: Program, rungs: VectorRung[], layout: CompleteLayout) {
+async function buildCompleteVector(
+  program: Program,
+  rungs: VectorRung[],
+  layout: CompleteLayout,
+  isCancelled: () => boolean,
+) {
   const {
     pagePad,
     cardPad,
@@ -828,60 +885,70 @@ function buildCompleteVector(program: Program, rungs: VectorRung[], layout: Comp
   ))
   body.push(vectorLine(pagePad, pagePad + ruleOffset, width - pagePad, pagePad + ruleOffset))
 
-  rungs.forEach((rung, index) => {
-    const card = cards[index]
-    if (!card) return
-    const counter = String(index + 1).padStart(2, '0') + ' / ' + String(rungs.length).padStart(2, '0')
-    const counterWidth = context ? (() => {
-      setFont(context, 500, 10)
-      return context.measureText(counter).width
-    })() : 64
-    const contentRight = pagePad + cardWidth - cardPad - counterWidth - 16
-    let label = rung.label
-    let labelWidth = 0
-    if (context) {
-      setFont(context, 650, 13)
-      label = fitText(context, rung.label, Math.max(60, contentRight - card.rungX))
-      labelWidth = context.measureText(label).width
-    } else {
-      label = fitTextApprox(rung.label, Math.max(60, contentRight - card.rungX), 13)
-      labelWidth = Array.from(label).reduce((total, character) => (
-        total + (isNarrowGlyph(character) ? 13 * 0.58 : 13)
-      ), 0)
-    }
-    body.push('<rect x="' + pagePad + '" y="' + round2(card.y) + '" width="' + cardWidth
-      + '" height="' + round2(card.height) + '" fill="' + WHITE
-      + '" stroke="' + RULE + '" stroke-width="1" />')
-    body.push(vectorLine(pagePad, card.y + cardHeader, pagePad + cardWidth, card.y + cardHeader))
-    body.push(vectorText(card.rungX, card.y + cardTitleBaseline, label, {
-      size: 13, weight: 650, fill: INK,
-    }))
-
-    if (rung.title) {
-      let title = rung.title
-      const titleLeft = card.rungX + labelWidth + 14
-      const titleLimit = Math.max(40, contentRight - titleLeft)
+  const chunks = planChunks(rungs.length, VECTOR_BUILD_CHUNK)
+  for (let chunkIndex = 0; chunkIndex < chunks.length; chunkIndex += 1) {
+    const chunk = chunks[chunkIndex]
+    for (let index = chunk.start; index < chunk.end; index += 1) {
+      if (isCancelled()) return null
+      const rung = rungs[index]
+      const card = cards[index]
+      if (!card) continue
+      const counter = String(index + 1).padStart(2, '0') + ' / ' + String(rungs.length).padStart(2, '0')
+      const counterWidth = context ? (() => {
+        setFont(context, 500, 10)
+        return context.measureText(counter).width
+      })() : 64
+      const contentRight = pagePad + cardWidth - cardPad - counterWidth - 16
+      let label = rung.label
+      let labelWidth = 0
       if (context) {
-        setFont(context, 450, 12)
-        title = fitText(context, rung.title, titleLimit)
+        setFont(context, 650, 13)
+        label = fitText(context, rung.label, Math.max(60, contentRight - card.rungX))
+        labelWidth = context.measureText(label).width
       } else {
-        title = fitTextApprox(rung.title, titleLimit, 12)
+        label = fitTextApprox(rung.label, Math.max(60, contentRight - card.rungX), 13)
+        labelWidth = Array.from(label).reduce((total, character) => (
+          total + (isNarrowGlyph(character) ? 13 * 0.58 : 13)
+        ), 0)
       }
-      body.push(vectorText(titleLeft, card.y + cardTitleBaseline, title, {
-        size: 12, weight: 450, fill: MUTED,
+      body.push('<rect x="' + pagePad + '" y="' + round2(card.y) + '" width="' + cardWidth
+        + '" height="' + round2(card.height) + '" fill="' + WHITE
+        + '" stroke="' + RULE + '" stroke-width="1" />')
+      body.push(vectorLine(pagePad, card.y + cardHeader, pagePad + cardWidth, card.y + cardHeader))
+      body.push(vectorText(card.rungX, card.y + cardTitleBaseline, label, {
+        size: 13, weight: 650, fill: INK,
       }))
+
+      if (rung.title) {
+        let title = rung.title
+        const titleLeft = card.rungX + labelWidth + 14
+        const titleLimit = Math.max(40, contentRight - titleLeft)
+        if (context) {
+          setFont(context, 450, 12)
+          title = fitText(context, rung.title, titleLimit)
+        } else {
+          title = fitTextApprox(rung.title, titleLimit, 12)
+        }
+        body.push(vectorText(titleLeft, card.y + cardTitleBaseline, title, {
+          size: 12, weight: 450, fill: MUTED,
+        }))
+      }
+
+      body.push(vectorText(
+        pagePad + cardWidth - cardPad,
+        card.y + cardTitleBaseline,
+        counter,
+        { size: 10, weight: 500, fill: MUTED, anchor: 'end' },
+      ))
+      body.push(placeVectorRung(rung, card.rungX, card.rungY))
     }
+    if (chunkIndex < chunks.length - 1) {
+      await yieldToMain()
+      if (isCancelled()) return null
+    }
+  }
 
-    body.push(vectorText(
-      pagePad + cardWidth - cardPad,
-      card.y + cardTitleBaseline,
-      counter,
-      { size: 10, weight: 500, fill: MUTED, anchor: 'end' },
-    ))
-    body.push(placeVectorRung(rung, card.rungX, card.rungY))
-  })
-
-  return vectorDocument(width, height, body.join(''))
+  return vectorDocument(width, height, mergeFragments(body))
 }
 
 export default function ProgramImageExporter({
@@ -892,12 +959,25 @@ export default function ProgramImageExporter({
   onError,
 }: ProgramImageExporterProps) {
   const documentRef = useRef<HTMLDivElement>(null)
-  const [stageWidth, setStageWidth] = useState(INITIAL_STAGE_WIDTH)
   const runtime = useMemo(() => createRuntime(program), [program])
   const exportProgram = useMemo(
     () => ({ ...program, rungs: contentRungs(program) }),
     [program],
   )
+  /*
+   * 舞台宽度在挂载前一次算定。图纸宽度是「自然宽度」与「可用宽度」取大，
+   * 若先按 INITIAL_STAGE_WIDTH 挂载再量最宽的一段，最宽程序段必然把舞台撑大，
+   * 整张（大工程上千段）舞台就要重渲染一遍。这里直接复现那次排版的结果，
+   * 导出的几何与两遍排版完全一致。
+   */
+  const stageWidth = useMemo(() => {
+    let widest = 0
+    for (const rung of exportProgram.rungs) {
+      widest = Math.max(widest, naturalRungWidth(rung))
+    }
+    const firstPassUsable = Math.max(widest, INITIAL_STAGE_WIDTH - DOCUMENT_PADDING_X)
+    return Math.max(INITIAL_STAGE_WIDTH, Math.ceil(firstPassUsable + STAGE_BLEED))
+  }, [exportProgram])
   const selection: Selection | null = null
 
   useEffect(() => {
@@ -921,25 +1001,10 @@ export default function ProgramImageExporter({
           throw new Error('程序段尚未完成绘制，请重试')
         }
 
-        const widestDiagram = Math.max(
-          0,
-          ...diagrams.map((svg) => Number(svg.getAttribute('width')) || svg.clientWidth),
-        )
-        const nextStageWidth = Math.max(INITIAL_STAGE_WIDTH, Math.ceil(widestDiagram + 150))
-        if (nextStageWidth > stageWidth) {
-          setStageWidth(nextStageWidth)
-          await nextFrame()
-          await nextFrame()
-          await new Promise<void>((resolve) => window.setTimeout(resolve, 80))
-        }
-
-
-        const currentDiagrams = Array.from(stage.querySelectorAll<SVGSVGElement>('.ll-diagram'))
-
         if (format === 'svg') {
           const vectorRungs: VectorRung[] = []
           let sliceStartedAt = performance.now()
-          for (const [index, svg] of currentDiagrams.entries()) {
+          for (const [index, svg] of diagrams.entries()) {
             // 组件已经卸载（点了「取消导出」、切换工程）时立刻停手。
             if (cancelled) return
             const rung = exportProgram.rungs[index]
@@ -958,13 +1023,18 @@ export default function ProgramImageExporter({
             throw new Error('有程序段没有绘制内容，无法生成 SVG')
           }
           const markup = mode === 'plain'
-            ? buildPlainVector(vectorRungs, planPlainLayout(vectorRungs))
-            : buildCompleteVector(program, vectorRungs, planCompleteLayout(vectorRungs))
-          if (!cancelled) onComplete({ format: 'svg', data: markup })
+            ? await buildPlainVector(vectorRungs, planPlainLayout(vectorRungs), () => cancelled)
+            : await buildCompleteVector(
+              program,
+              vectorRungs,
+              planCompleteLayout(vectorRungs),
+              () => cancelled,
+            )
+          if (markup && !cancelled) onComplete({ format: 'svg', data: markup })
           return
         }
 
-        for (const [index, svg] of currentDiagrams.entries()) {
+        for (const [index, svg] of diagrams.entries()) {
           // 组件已经卸载（切换工程、关闭导出）时，剩余程序段不必再光栅化。
           if (cancelled) return
           const rung = exportProgram.rungs[index]
@@ -1019,6 +1089,7 @@ export default function ProgramImageExporter({
         <LadderCanvas
           program={exportProgram}
           runtime={runtime}
+          availableWidth={stageWidth - DOCUMENT_PADDING_X}
           selection={selection}
           onSelect={noop}
           onDuplicateRung={noop}

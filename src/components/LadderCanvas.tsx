@@ -41,6 +41,8 @@ export interface LadderCanvasProps {
   selection: Selection | null
   insertTarget?: FavoriteInsertTarget | null
   insertTargetLabel?: string
+  /** 已知图纸可用宽度时直接传入（导出舞台），省掉挂载后读 clientWidth 的强制布局。 */
+  availableWidth?: number
   onSelect: (selection: Selection | null) => void
   onDuplicateRung: (rungId: string) => void
   onCopyRung: (rungId: string) => void
@@ -1652,6 +1654,14 @@ function measureRung(
   }
 }
 
+/**
+ * 一段图纸按元件排布算出来的自然宽度，不读 DOM、不看可用宽度。
+ * 导出器要在挂载前把整表宽度定下来，靠的就是它。
+ */
+export function naturalRungWidth(rung: Program['rungs'][number]): number {
+  return measureRung(rung, 0, DEFAULT_METRICS).width
+}
+
 function collectNodeIds(nodes: LadderNode[]): string[] {
   return nodes.flatMap((node) => (
     node.type === 'contact'
@@ -2439,6 +2449,7 @@ export default function LadderCanvas({
   onNotice,
   insertTarget = null,
   insertTargetLabel = '',
+  availableWidth,
   mergeArmed = null,
   onMergeArmedChange,
 }: LadderCanvasProps) {
@@ -2453,16 +2464,19 @@ export default function LadderCanvas({
   const [lastKind, setLastKind] = useState<ContactKind>('NO')
   // 整张图纸共用一个宽度：1000 段工程也只挂一个 ResizeObserver、只读一次 clientWidth。
   const sheetRef = useRef<HTMLDivElement>(null)
-  const [sheetWidth, setSheetWidth] = useState(0)
+  const [measuredSheetWidth, setMeasuredSheetWidth] = useState(0)
   useLayoutEffect(() => {
+    // 导出舞台在挂载前就算得出可用宽度，不必再触发一次强制布局。
+    if (availableWidth !== undefined) return
     const element = sheetRef.current
     if (!element) return
-    const updateWidth = () => setSheetWidth(element.clientWidth)
+    const updateWidth = () => setMeasuredSheetWidth(element.clientWidth)
     updateWidth()
     const observer = new ResizeObserver(updateWidth)
     observer.observe(element)
     return () => observer.disconnect()
-  }, [])
+  }, [availableWidth])
+  const sheetWidth = availableWidth ?? measuredSheetWidth
   const draggingRungId = isDragging && dragSource?.startsWith('rung:')
     ? dragSource.slice(5)
     : null

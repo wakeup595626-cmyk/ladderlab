@@ -31,6 +31,12 @@
   background: #fff;
 }
 
+/* 导出舞台整个位于屏幕外；若沿用编辑区的 content-visibility:auto，
+   浏览器会跳过所有程序段的布局，导出时被迫逐段强制回流。 */
+.program-export-document .ll-program-sheet.is-long > .ll-rung {
+  content-visibility: visible;
+}
+
 .program-export-document .ll-rung,
 .program-export-document .ll-svg-scroll,
 .program-export-document .ll-diagram {
