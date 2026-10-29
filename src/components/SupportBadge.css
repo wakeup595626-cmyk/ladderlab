@@ -28,11 +28,13 @@
 }
 
 .support-badge-pill {
-  display: inline-flex;
-  height: 30px;
-  align-items: stretch;
+  /* 宽度锁在 62px：上面一行放咖啡杯，下面整行排说明文字。 */
+  display: grid;
+  width: 62px;
+  grid-template-columns: 1fr;
+  grid-template-rows: 30px auto;
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: 11px;
   background: color-mix(in srgb, var(--surface) 90%, var(--ground));
   box-shadow: 0 1px 2px rgba(21, 24, 22, 0.05), 0 2px 8px rgba(21, 24, 22, 0.05);
   color: var(--muted);
@@ -65,51 +67,54 @@
   transition: none;
 }
 
-.support-badge-trigger,
-.support-badge-star {
+.support-badge-trigger {
   position: relative;
   display: inline-flex;
-  width: 30px;
+  width: 100%;
+  grid-row: 1;
   align-items: center;
   justify-content: center;
   padding: 0;
+  border: 0;
+  border-radius: 10px 10px 0 0;
+  background: transparent;
   color: inherit;
   cursor: inherit;
   touch-action: none;
   -webkit-user-drag: none;
 }
 
-/* 视觉只有 30px，但上下各借 7px 做命中区，手指点起来不至于太苛刻。 */
-.support-badge-trigger::after,
-.support-badge-star::after {
+/* 视觉只有 30px 高，但往上借 7px 做命中区，手指点起来不至于太苛刻；下面留给说明文字。 */
+.support-badge-trigger::after {
   content: '';
   position: absolute;
-  inset: -7px 0;
+  inset: -7px 0 0;
   border-radius: 999px;
 }
 
-.support-badge-trigger {
-  border: 0;
-  border-radius: 999px 0 0 999px;
-  background: transparent;
-}
-
-.support-badge-star {
-  border-left: 1px solid var(--rule);
-  border-radius: 0 999px 999px 0;
-  text-decoration: none;
+/* 六个汉字要塞进 60px 的内容宽：9px 排得下还留两侧呼吸位，且任何屏幕下都不换行。 */
+.support-badge-caption {
+  display: block;
+  grid-row: 2;
+  grid-column: 1 / -1;
+  padding: 0 0 4px;
+  font-size: 9px;
+  font-weight: 500;
+  line-height: 1.35;
+  letter-spacing: 0.01em;
+  text-align: center;
+  white-space: nowrap;
+  color: inherit;
 }
 
 @media (hover: hover) and (pointer: fine) {
-  .support-badge-trigger:hover,
-  .support-badge-star:hover {
+  .support-badge-trigger:hover {
     background: var(--active);
     color: var(--frame-ink);
   }
 }
 
-.support-badge-trigger:focus-visible,
-.support-badge-star:focus-visible {
+.support-badge-trigger:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
 }

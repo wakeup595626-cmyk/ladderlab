@@ -112,13 +112,14 @@ try {
       const root = document.querySelector('.support-badge')
       const pill = document.querySelector('.support-badge-pill')
       const trigger = document.querySelector('.support-badge-trigger')
-      const star = document.querySelector('.support-badge-star')
+      const caption = document.querySelector('.support-badge-caption')
       const rect = (node) => {
         const box = node.getBoundingClientRect()
         return { left: box.left, top: box.top, right: box.right, bottom: box.bottom, width: box.width, height: box.height }
       }
       return {
-        root: rect(root), pill: rect(pill), trigger: rect(trigger), star: rect(star),
+        root: rect(root), pill: rect(pill), trigger: rect(trigger),
+        caption: { ...rect(caption), text: caption.textContent, scrollWidth: caption.scrollWidth },
         viewport: { width: innerWidth, height: innerHeight },
         open: root.dataset.open === 'true',
         panel: document.querySelector('.support-badge-panel')?.getBoundingClientRect().toJSON() ?? null,
@@ -197,10 +198,18 @@ try {
   await setViewport(1440, 900)
   await reload(true)
   let geometry = await badgeGeometry()
+  // 宽度锁在 62px；高度因为图标下面多了一行说明文字，上限放宽到 56px。
   check(
     'desktop/pill-is-small',
-    geometry.pill.width <= 68 && geometry.pill.height <= 36,
+    geometry.pill.width <= 68 && geometry.pill.height <= 56,
     `${geometry.pill.width}×${geometry.pill.height}`,
+  )
+  check(
+    'desktop/caption-fits-pill',
+    geometry.caption.text === '请我喝杯咖啡'
+      && geometry.caption.top >= geometry.pill.top + 20
+      && geometry.caption.scrollWidth <= Math.ceil(geometry.caption.width) + 1,
+    `${geometry.caption.text} · 文字宽 ${Math.round(geometry.caption.scrollWidth)} / 框宽 ${Math.round(geometry.caption.width)}`,
   )
   check(
     'desktop/defaults-bottom-left',
@@ -227,20 +236,24 @@ try {
   geometry = await badgeGeometry()
   check('desktop/position-restores-after-reload', geometry.root.left <= 40 && geometry.root.top <= 40)
 
-  const targetsBeforeStarDrag = new Set((await pageTargets()).map((item) => item.id))
+  const targetsBeforeCaptionDrag = new Set((await pageTargets()).map((item) => item.id))
   await mouseDrag(
-    { x: geometry.star.left + geometry.star.width / 2, y: geometry.star.top + geometry.star.height / 2 },
+    { x: geometry.caption.left + geometry.caption.width / 2, y: geometry.caption.top + geometry.caption.height / 2 },
     { x: 1410, y: 825 },
   )
   geometry = await badgeGeometry()
   check(
-    'desktop/star-drag-stays-in-viewport',
+    'desktop/caption-drag-stays-in-viewport',
     geometry.root.right <= geometry.viewport.width - 10 && geometry.root.bottom <= geometry.viewport.height - 10,
     `right=${geometry.root.right}, bottom=${geometry.root.bottom}`,
   )
   check(
-    'desktop/star-drag-does-not-navigate',
-    (await pageTargets()).every((item) => targetsBeforeStarDrag.has(item.id)),
+    'desktop/caption-drag-does-not-open-panel',
+    !geometry.open && !geometry.panel,
+  )
+  check(
+    'desktop/caption-drag-does-not-navigate',
+    (await pageTargets()).every((item) => targetsBeforeCaptionDrag.has(item.id)),
   )
 
   await mouseClick({
@@ -266,6 +279,16 @@ try {
     'desktop/escape-restores-trigger-focus',
     await evaluate("document.activeElement?.classList.contains('support-badge-trigger')"),
   )
+
+  await mouseClick({
+    x: geometry.caption.left + geometry.caption.width / 2,
+    y: geometry.caption.top + geometry.caption.height / 2,
+  })
+  geometry = await badgeGeometry()
+  check('desktop/caption-click-opens-panel', geometry.open && !!geometry.panel)
+  await executeKey('Escape', 27)
+  geometry = await badgeGeometry()
+  check('desktop/caption-tap-closes-again', !geometry.open)
 
   const beforeKeyboard = geometry.root.left
   await executeKey('ArrowLeft', 37, 1)

@@ -448,3 +448,15 @@ export function PaletteIcon(props: IconProps) {
     </IconBase>
   )
 }
+
+/** 咖啡杯：杯身 + 杯把 + 杯垫横线，小尺寸下也能一眼认出是“喝一杯”。 */
+export function CoffeeIcon(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <path d="M4.6 8.4h13.1v4.5a5.1 5.1 0 0 1-5.1 5.1h-2.9a5.1 5.1 0 0 1-5.1-5.1V8.4Z" />
+      <path d="M17.7 10.2h1.5a2.7 2.7 0 0 1 0 5.4h-1.5" />
+      <path d="M3.1 20.7h13.6" />
+      <path d="M8.4 3.1c-.8.9.8 1.4 0 2.4M12.3 3.1c-.8.9.8 1.4 0 2.4" />
+    </IconBase>
+  )
+}

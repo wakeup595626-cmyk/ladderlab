@@ -14,6 +14,7 @@ import alipayQr from '../assets/support-alipay.png'
 import {
   ArrowUpRightIcon,
   CloseIcon,
+  CoffeeIcon,
   GithubIcon,
   StarFilledIcon,
 } from './Icons'
@@ -359,7 +360,9 @@ export default function SupportBadge() {
       // 触屏拖完后再轻点，部分浏览器会吞掉紧接着的原生 click。
       // 这里直接触发同一颗按钮/链接，并短暂屏蔽随后可能补发的 click。
       if (drag.pointerType !== 'mouse' && event.target instanceof Element) {
-        const action = event.target.closest<HTMLElement>('.support-badge-trigger, .support-badge-star')
+        const action = event.target.closest<HTMLElement>(
+          '.support-badge-trigger, .support-badge-caption',
+        )
         if (action) {
           event.preventDefault()
           action.click()
@@ -462,6 +465,7 @@ export default function SupportBadge() {
           aria-expanded={open}
           aria-controls={open ? panelId : undefined}
           aria-haspopup="dialog"
+          aria-label="请我喝杯咖啡（打赏与项目链接）"
           aria-describedby={hintId}
           title="打赏与项目链接（可拖动）"
           onClick={(event) => {
@@ -472,50 +476,22 @@ export default function SupportBadge() {
             setOpen((value) => !value)
           }}
         >
-          <svg
-            className="support-badge-icon"
-            viewBox="0 0 24 24"
-            width="15"
-            height="15"
-            aria-hidden="true"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.7"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <path d="M4 8h12v6a5 5 0 0 1-5 5H9a5 5 0 0 1-5-5V8Z" />
-            <path d="M16 9h2.2a2.8 2.8 0 0 1 0 5.6H16" />
-            <path d="M7.5 3.4c-.6.8.6 1.3 0 2.1M11 3.4c-.6.8.6 1.3 0 2.1" />
-          </svg>
+          <CoffeeIcon className="support-badge-icon" size={18} />
         </button>
 
-        <a
-          className="support-badge-star"
-          href={GITHUB_REPO}
-          target="_blank"
-          rel="noopener noreferrer"
-          draggable={false}
-          aria-label="在 GitHub 为 LadderLab 点 Star"
-          aria-describedby={hintId}
-          title="去 GitHub 点 Star（可拖动）"
+        <span
+          className="support-badge-caption"
+          aria-hidden="true"
           onClick={(event) => {
-            if (performance.now() < suppressNextClickRef.current) event.preventDefault()
+            if (performance.now() < suppressNextClickRef.current) {
+              event.preventDefault()
+              return
+            }
+            setOpen((value) => !value)
           }}
         >
-          <svg
-            viewBox="0 0 24 24"
-            width="14"
-            height="14"
-            aria-hidden="true"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.8"
-            strokeLinejoin="round"
-          >
-            <path d="M12 3.6l2.6 5.3 5.8.8-4.2 4.1 1 5.8-5.2-2.8-5.2 2.8 1-5.8-4.2-4.1 5.8-.8L12 3.6Z" />
-          </svg>
-        </a>
+          请我喝杯咖啡
+        </span>
       </div>
 
       {open && (
