@@ -1941,7 +1941,9 @@ function coversCriticalOutputs(chart: SfcChart, ctx: Context): boolean {
   const actions = chart.steps.flatMap((step) => step.actions.map((action) => (
     action.text + ' ' + action.detail
   )))
-  const surface = actions.join('\n')
+  // 步骤标题也是图上可见的信息：状态位本身就叫「报警灯」时，它写在步骤框里，
+  // 不该因为动作框没重复一遍就被判成“漏掉安全输出”。
+  const surface = [...chart.steps.map((step) => step.title), ...actions].join('\n')
   for (const rung of criticalRungs(ctx)) {
     const tag = ctx.tags.get(rung.output.tag)
     const address = tag?.address.replace(/^%/, '') ?? ''
