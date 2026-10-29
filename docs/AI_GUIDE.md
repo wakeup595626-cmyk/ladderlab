@@ -164,6 +164,9 @@ node scripts/share-link.mjs examples/我的工程.ladderlab.json
 
 ## 这个项目不能做什么
 
-- 不生成 TIA Portal 的 `.ap21` 工程，不生成 SCL / SFC / FBD / HMI。
+- 不生成 TIA Portal 的 `.ap21` 工程，也不生成 SCL / FBD / HMI 或可再导入的
+  SFC 源文件。
+- 能导出顺序功能图 SVG / PNG，但那只是从当前梯形图归纳出的参考图；联锁、延时和
+  扫描细节仍以梯形图为准，不能当成 TIA Portal 的 SFC 工程提交。
 - 不连接真实 PLC，不能下载程序。
 - 生成的图可以用在课设报告里，但不能当成博途的工程文件提交。
