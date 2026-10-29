@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { parseAddress } from '../engine/address'
 import { getProfile, supportsContact, supportsOutput } from '../engine/profiles'
 import { normalizeReference } from '../engine/references'
@@ -11,6 +11,7 @@ import type {
   Program,
   Runtime,
   Selection,
+  TagDef,
 } from '../engine/types'
 import { FIELD_LIMITS } from '../lib/limits'
 import {
@@ -21,7 +22,7 @@ import {
   deleteNode,
   deleteTag,
   getNodeAtPath,
-  tagsInProgramOrder,
+  tagsInRung,
   tagUsage,
   updateContact,
   updateOutput,
@@ -29,7 +30,7 @@ import {
   wrapInParallel,
 } from '../state/programOps'
 import { useModalFocus } from '../lib/useModalFocus'
-import { CheckCircleIcon, CloseIcon, PointerIcon, SearchIcon } from './Icons'
+import { CheckCircleIcon, ChevronRightIcon, CloseIcon, PointerIcon, SearchIcon } from './Icons'
 
 interface InspectorProps {
   program: Program
@@ -226,22 +227,45 @@ function ContactProperties({
   )
 }
 
+// 程序段 id 来自导入文件，可能带空格等字符：DOM id 统一做可逆转义，
+// 避免 aria-controls 指向无效节点、不同 id 撞名，或与「未引用」组撞名。
+const domToken = (value: string) => value.replace(
+  /[^A-Za-z0-9-]/g,
+  (char) => `_${char.codePointAt(0)!.toString(16)}_`,
+)
+const groupDomId = (key: string) => `tag-group-${domToken(key)}`
+const cardDomId = (tagId: string) => `tag-card-${domToken(tagId)}`
+const UNUSED_KEY = 'unused'
+const rungKey = (rungId: string) => `rung:${rungId}`
+
 function TagsPanel({
   program,
   runtime,
+  selection,
   onProgram,
   onToggleBool,
   onSetInt,
 }: {
   program: Program
   runtime: Runtime
+  selection: Selection | null
   onProgram: (program: Program) => void
   onToggleBool: (name: string) => void
   onSetInt: (name: string, value: number) => void
 }) {
   const [tagQuery, setTagQuery] = useState('')
-  // issue #12：变量表可以按“第一次出现的程序段顺序”读，默认仍用自己的登记顺序。
-  const [orderByProgram, setOrderByProgram] = useState(false)
+  // 默认按程序段分组：一段一格、可折叠；「全部」保留整表平铺。
+  const [view, setView] = useState<'rungs' | 'list'>('rungs')
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => new Set())
+  const [flashTagId, setFlashTagId] = useState<string | null>(null)
+  const [announcement, setAnnouncement] = useState('')
+  const flashTimer = useRef<number | null>(null)
+  const scrollTimer = useRef<number | null>(null)
+  const searchInput = useRef<HTMLInputElement | null>(null)
+  useEffect(() => () => {
+    if (flashTimer.current !== null) window.clearTimeout(flashTimer.current)
+    if (scrollTimer.current !== null) window.clearTimeout(scrollTimer.current)
+  }, [])
   const instances = contentRungs(program)
     .map((rung) => rung.output)
     .filter((output) => {
@@ -249,11 +273,211 @@ function TagsPanel({
       return runtime.timers[name] || runtime.counters[name]
     })
   const normalizedQuery = tagQuery.trim().toLocaleLowerCase()
-  const orderedTags = orderByProgram ? tagsInProgramOrder(program) : program.tags
-  const visibleTags = normalizedQuery
-    ? orderedTags.filter((tag) => [tag.name, tag.address, tag.comment, tag.kind]
-      .some((value) => value.toLocaleLowerCase().includes(normalizedQuery)))
-    : orderedTags
+  const matchesQuery = (tag: TagDef) => !normalizedQuery
+    || [tag.name, tag.address, tag.comment, tag.kind]
+      .some((value) => value.toLocaleLowerCase().includes(normalizedQuery))
+  const visibleTags = program.tags.filter(matchesQuery)
+
+  // 每个变量只在自己的“第一个程序段”里显示可编辑卡片，后面的程序段用胶囊标签提示，
+  // 这样同一个变量不会在几段里各出现一张表单，改一处就是改全部。
+  const homeOf = new Map<string, string>()
+  const rungGroups = contentRungs(program)
+    .map((rung, index) => {
+      const tags = tagsInRung(program, rung)
+      const local: TagDef[] = []
+      const shared: TagDef[] = []
+      for (const tag of tags) {
+        if (homeOf.has(tag.id)) shared.push(tag)
+        else {
+          homeOf.set(tag.id, rungKey(rung.id))
+          local.push(tag)
+        }
+      }
+      return {
+        id: rung.id,
+        key: rungKey(rung.id),
+        title: `程序段 ${index + 1}`,
+        label: rung.label.trim(),
+        total: tags.length,
+        local,
+        shared,
+      }
+    })
+    .filter((group) => group.total > 0)
+  const unusedTags = program.tags.filter((tag) => !homeOf.has(tag.id))
+  const queryGroups = rungGroups
+    .map((group) => ({
+      ...group,
+      local: group.local.filter(matchesQuery),
+      shared: group.shared.filter(matchesQuery),
+    }))
+    .filter((group) => group.local.length > 0 || group.shared.length > 0)
+  const queryUnused = unusedTags.filter(matchesQuery)
+  const isOpen = (key: string) => !collapsedGroups.has(key)
+  // 开始搜索时默认全展开，搜索结果不会藏在前一次收起的段里；搜索后仍可手动收起。
+  const updateTagQuery = (value: string) => {
+    setTagQuery(value)
+    setCollapsedGroups((current) => (
+      value.trim() === '' || current.size === 0 ? current : new Set()
+    ))
+  }
+  const clearTagQuery = () => {
+    updateTagQuery('')
+    window.requestAnimationFrame(() => searchInput.current?.focus())
+  }
+  const toggleGroup = (key: string) => setCollapsedGroups((current) => {
+    const next = new Set(current)
+    if (next.has(key)) next.delete(key)
+    else next.add(key)
+    return next
+  })
+  const revealTag = (tag: TagDef, ownerKey: string) => {
+    setCollapsedGroups((current) => {
+      if (!current.has(ownerKey)) return current
+      const next = new Set(current)
+      next.delete(ownerKey)
+      return next
+    })
+    // 连续点同一个胶囊也要重新播放高亮动画。
+    setFlashTagId(null)
+    window.requestAnimationFrame(() => setFlashTagId(tag.id))
+    // 同一句播报重复写入时读屏不会再次朗读，先清空再在下一次播报时恢复。
+    setAnnouncement('')
+    if (flashTimer.current !== null) window.clearTimeout(flashTimer.current)
+    flashTimer.current = window.setTimeout(() => setFlashTagId(null), 1400)
+    if (scrollTimer.current !== null) window.clearTimeout(scrollTimer.current)
+    scrollTimer.current = window.setTimeout(() => {
+      const card = document.getElementById(cardDomId(tag.id))
+      if (!card) return
+      const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+      card.focus({ preventScroll: true })
+      card.scrollIntoView({ block: 'nearest', behavior: reduceMotion ? 'auto' : 'smooth' })
+      setAnnouncement(`已在${titleOf(ownerKey)}定位到变量 ${tag.name}`)
+    }, 80)
+  }
+
+  const titleOf = (key: string) => rungGroups.find((group) => group.key === key)?.title ?? '前面的程序段'
+
+  const renderTagCard = (tag: TagDef) => {
+    const usage = tagUsage(program, tag.name)
+    return (
+      <article
+        className="tag-card"
+        key={tag.id}
+        id={cardDomId(tag.id)}
+        data-flash={flashTagId === tag.id}
+        tabIndex={-1}
+        aria-label={`变量 ${tag.name}`}
+      >
+        <div className="tag-card-head">
+          <div className="tag-name-cell">
+            <span className="type-pill">{tag.kind}</span>
+            <input
+              key={`${tag.id}-name-${tag.name}`}
+              className="table-input mono tag-name-input"
+              defaultValue={tag.name}
+              maxLength={FIELD_LIMITS.tagName}
+              aria-label="变量名称"
+              onBlur={(event) => {
+                const name = event.target.value.trim()
+                if (name && name !== tag.name) onProgram(updateTag(program, tag.id, { name }))
+              }}
+              spellCheck={false}
+            />
+          </div>
+          <div className="tag-card-fields">
+            <label>
+              <span>地址</span>
+              <input
+                key={`${tag.id}-address-${tag.address}`}
+                className="table-input mono address-input"
+                maxLength={FIELD_LIMITS.address}
+                defaultValue={tag.address}
+                aria-label={`${tag.name} 地址`}
+                onBlur={(event) => onProgram(updateTag(program, tag.id, { address: event.target.value.toUpperCase() }))}
+                spellCheck={false}
+              />
+            </label>
+            <label>
+              <span>初值</span>
+              {tag.kind === 'BOOL' ? (
+                <select
+                  className="table-input"
+                  defaultValue={tag.initial ? 'true' : 'false'}
+                  aria-label={`${tag.name} 初值`}
+                  onChange={(event) => onProgram(updateTag(program, tag.id, { initial: event.target.value === 'true' }))}
+                >
+                  <option value="false">FALSE</option>
+                  <option value="true">TRUE</option>
+                </select>
+              ) : (
+                <input
+                  key={`${tag.id}-initial-${tag.initial}`}
+                  className="table-input mono"
+                  type="number"
+                  defaultValue={Number(tag.initial)}
+                  aria-label={`${tag.name} 初值`}
+                  onBlur={(event) => onProgram(updateTag(program, tag.id, { initial: Number(event.target.value) }))}
+                />
+              )}
+            </label>
+            <label>
+              <span>运行值</span>
+              {tag.kind === 'BOOL' ? (
+                <button
+                  type="button"
+                  className={runtime.bools[normalizeReference(tag.name)] ? 'live-value on' : 'live-value'}
+                  onClick={() => onToggleBool(tag.name)}
+                  title="点击切换运行值（仅浏览器仿真）"
+                  aria-label={`切换 ${tag.name} 仿真值`}
+                  aria-pressed={Boolean(runtime.bools[normalizeReference(tag.name)])}
+                >
+                  {readDisplay(program, runtime, tag.name)}
+                </button>
+              ) : (
+                <input
+                  key={`${tag.id}-runtime-${runtime.ints[normalizeReference(tag.name)] ?? 0}`}
+                  className="table-input mono runtime-input"
+                  type="number"
+                  defaultValue={runtime.ints[normalizeReference(tag.name)] ?? 0}
+                  aria-label={`${tag.name} 运行值`}
+                  onBlur={(event) => onSetInt(tag.name, Number(event.target.value) || 0)}
+                />
+              )}
+            </label>
+          </div>
+          <button
+            type="button"
+            className="delete-mini"
+            disabled={usage > 0}
+            onClick={() => onProgram(deleteTag(program, tag.id))}
+            aria-label={`删除变量 ${tag.name}`}
+            title={usage > 0 ? `被引用 ${usage} 次，不能删除` : '删除变量'}
+          >
+            <CloseIcon size={13} />
+          </button>
+        </div>
+        <input
+          key={`${tag.id}-comment-${tag.comment}`}
+          className="comment-input"
+          defaultValue={tag.comment}
+          maxLength={FIELD_LIMITS.tagComment}
+          placeholder="注释"
+          aria-label="变量注释"
+          onBlur={(event) => onProgram(updateTag(program, tag.id, { comment: event.target.value }))}
+        />
+      </article>
+    )
+  }
+
+  const emptyState = (
+    <div className="tag-empty">
+      <span>{normalizedQuery ? '没有匹配的变量' : '变量表还是空的'}</span>
+      {normalizedQuery !== '' && (
+        <button type="button" className="secondary-button" onClick={clearTagQuery}>清除搜索</button>
+      )}
+    </div>
+  )
 
   return (
     <div className="tags-panel">
@@ -265,11 +489,20 @@ function TagsPanel({
           <button
             type="button"
             className="secondary-button"
-            aria-pressed={orderByProgram}
-            title="按变量第一次出现的程序段顺序排列，没有被用到的变量排在最后"
-            onClick={() => setOrderByProgram((current) => !current)}
+            aria-pressed={view === 'rungs'}
+            title="按程序段分组，每一段可以单独收起"
+            onClick={() => setView('rungs')}
           >
-            按程序段排序
+            按程序段
+          </button>
+          <button
+            type="button"
+            className="secondary-button"
+            aria-pressed={view === 'list'}
+            title="整张变量表平铺显示"
+            onClick={() => setView('list')}
+          >
+            全部
           </button>
           <button type="button" className="secondary-button" onClick={() => onProgram(addTag(program, 'BOOL'))}>
             + BOOL
@@ -283,10 +516,11 @@ function TagsPanel({
       <div className="tag-search" role="search">
         <SearchIcon aria-hidden="true" />
         <input
+          ref={searchInput}
           className="tag-search-input"
           type="search"
           value={tagQuery}
-          onChange={(event) => setTagQuery(event.target.value)}
+          onChange={(event) => updateTagQuery(event.target.value)}
           onKeyDown={(event) => {
             if (event.key === 'Escape' && tagQuery) {
               event.preventDefault()
@@ -298,7 +532,7 @@ function TagsPanel({
           aria-label="搜索变量"
         />
         {tagQuery && (
-          <button type="button" className="tag-search-clear" onClick={() => setTagQuery('')} aria-label="清除搜索">
+          <button type="button" className="tag-search-clear" onClick={clearTagQuery} aria-label="清除搜索">
             <CloseIcon aria-hidden="true" />
           </button>
         )}
@@ -312,117 +546,90 @@ function TagsPanel({
         <span />
       </div>
 
-      <section className="tag-list" aria-label="PLC 变量表">
-        {visibleTags.map((tag) => {
-          const usage = tagUsage(program, tag.name)
-          return (
-            <article className="tag-card" key={tag.id}>
-              <div className="tag-card-head">
-                <div className="tag-name-cell">
-                  <span className="type-pill">{tag.kind}</span>
-                  <input
-                    key={`${tag.id}-name-${tag.name}`}
-                    className="table-input mono tag-name-input"
-                    defaultValue={tag.name}
-                    maxLength={FIELD_LIMITS.tagName}
-                    aria-label="变量名称"
-                    onBlur={(event) => {
-                      const name = event.target.value.trim()
-                      if (name && name !== tag.name) onProgram(updateTag(program, tag.id, { name }))
-                    }}
-                    spellCheck={false}
-                  />
-                </div>
-                <div className="tag-card-fields">
-                  <label>
-                    <span>地址</span>
-                    <input
-                      key={`${tag.id}-address-${tag.address}`}
-                      className="table-input mono address-input"
-                      maxLength={FIELD_LIMITS.address}
-                      defaultValue={tag.address}
-                      aria-label={`${tag.name} 地址`}
-                      onBlur={(event) => onProgram(updateTag(program, tag.id, { address: event.target.value.toUpperCase() }))}
-                      spellCheck={false}
-                    />
-                  </label>
-                  <label>
-                    <span>初值</span>
-                    {tag.kind === 'BOOL' ? (
-                      <select
-                        className="table-input"
-                        defaultValue={tag.initial ? 'true' : 'false'}
-                        aria-label={`${tag.name} 初值`}
-                        onChange={(event) => onProgram(updateTag(program, tag.id, { initial: event.target.value === 'true' }))}
-                      >
-                        <option value="false">FALSE</option>
-                        <option value="true">TRUE</option>
-                      </select>
-                    ) : (
-                      <input
-                        key={`${tag.id}-initial-${tag.initial}`}
-                        className="table-input mono"
-                        type="number"
-                        defaultValue={Number(tag.initial)}
-                        aria-label={`${tag.name} 初值`}
-                        onBlur={(event) => onProgram(updateTag(program, tag.id, { initial: Number(event.target.value) }))}
-                      />
-                    )}
-                  </label>
-                  <label>
-                    <span>运行值</span>
-                    {tag.kind === 'BOOL' ? (
-                      <button
-                        type="button"
-                        className={runtime.bools[normalizeReference(tag.name)] ? 'live-value on' : 'live-value'}
-                        onClick={() => onToggleBool(tag.name)}
-                        title="点击切换运行值（仅浏览器仿真）"
-                        aria-label={`切换 ${tag.name} 仿真值`}
-                        aria-pressed={Boolean(runtime.bools[normalizeReference(tag.name)])}
-                      >
-                        {readDisplay(program, runtime, tag.name)}
-                      </button>
-                    ) : (
-                      <input
-                        key={`${tag.id}-runtime-${runtime.ints[normalizeReference(tag.name)] ?? 0}`}
-                        className="table-input mono runtime-input"
-                        type="number"
-                        defaultValue={runtime.ints[normalizeReference(tag.name)] ?? 0}
-                        aria-label={`${tag.name} 运行值`}
-                        onBlur={(event) => onSetInt(tag.name, Number(event.target.value) || 0)}
-                      />
-                    )}
-                  </label>
-                </div>
+      <section className="tag-list" aria-label="PLC 变量表" data-view={view}>
+        {view === 'list' ? (
+          <>
+            {visibleTags.map(renderTagCard)}
+            {visibleTags.length === 0 && emptyState}
+          </>
+        ) : rungGroups.length > 0 ? (
+          <>
+            {queryGroups.map((group) => {
+              const open = isOpen(group.key)
+              const shown = group.local.length + group.shared.length
+              return (
+                <section
+                  className="tag-group"
+                  key={group.key}
+                  data-open={open}
+                  data-active={group.id === selection?.rungId}
+                >
+                  <button
+                    type="button"
+                    className="tag-group-head"
+                    aria-expanded={open}
+                    aria-controls={groupDomId(group.key)}
+                    onClick={() => toggleGroup(group.key)}
+                  >
+                    <ChevronRightIcon className="tag-group-chevron" size={14} />
+                    <span className="tag-group-title">{group.title}</span>
+                    {group.label !== '' && <span className="tag-group-label">{group.label}</span>}
+                    <span className="tag-group-count">
+                      {normalizedQuery === '' ? group.total : `${shown}/${group.total}`}
+                    </span>
+                  </button>
+                  <div className="tag-group-body" id={groupDomId(group.key)} data-collapsed={!open} inert={!open}>
+                    <div className="tag-group-inner">
+                      {group.shared.length > 0 && (
+                        <div className="tag-chip-row" role="group" aria-label={`${group.title}复用的变量`}>
+                          {group.shared.map((tag) => {
+                            const ownerKey = homeOf.get(tag.id) ?? UNUSED_KEY
+                            return (
+                              <button
+                                type="button"
+                                key={tag.id}
+                                className="tag-chip"
+                                title={`在${titleOf(ownerKey)}里维护`}
+                                aria-label={`${tag.name}，跳到${titleOf(ownerKey)}`}
+                                onClick={() => revealTag(tag, ownerKey)}
+                              >
+                                {tag.name}
+                              </button>
+                            )
+                          })}
+                        </div>
+                      )}
+                      {group.local.map(renderTagCard)}
+                    </div>
+                  </div>
+                </section>
+              )
+            })}
+            {queryUnused.length > 0 && (
+              <section className="tag-group tag-group-quiet" data-open={isOpen(UNUSED_KEY)} data-unused="true">
                 <button
                   type="button"
-                  className="delete-mini"
-                  disabled={usage > 0}
-                  onClick={() => onProgram(deleteTag(program, tag.id))}
-                  aria-label={`删除变量 ${tag.name}`}
-                  title={usage > 0 ? `被引用 ${usage} 次，不能删除` : '删除变量'}
+                  className="tag-group-head"
+                  aria-expanded={isOpen(UNUSED_KEY)}
+                  aria-controls={groupDomId(UNUSED_KEY)}
+                  onClick={() => toggleGroup(UNUSED_KEY)}
                 >
-                  <CloseIcon size={13} />
+                  <ChevronRightIcon className="tag-group-chevron" size={14} />
+                  <span className="tag-group-title">未引用</span>
+                  <span className="tag-group-count">
+                    {normalizedQuery === '' ? queryUnused.length : `${queryUnused.length}/${unusedTags.length}`}
+                  </span>
                 </button>
-              </div>
-              <input
-                key={`${tag.id}-comment-${tag.comment}`}
-                className="comment-input"
-                defaultValue={tag.comment}
-                maxLength={FIELD_LIMITS.tagComment}
-                placeholder="注释"
-                aria-label="变量注释"
-                onBlur={(event) => onProgram(updateTag(program, tag.id, { comment: event.target.value }))}
-              />
-            </article>
-          )
-        })}
-        {visibleTags.length === 0 && (
-          <div className="tag-empty">
-            <span>没有匹配的变量</span>
-            <button type="button" className="secondary-button" onClick={() => setTagQuery('')}>清除搜索</button>
-          </div>
+                <div className="tag-group-body" id={groupDomId(UNUSED_KEY)} data-collapsed={!isOpen(UNUSED_KEY)} inert={!isOpen(UNUSED_KEY)}>
+                  <div className="tag-group-inner">{queryUnused.map(renderTagCard)}</div>
+                </div>
+              </section>
+            )}
+          </>
+        ) : (
+          queryUnused.map(renderTagCard)
         )}
+        {view === 'rungs' && queryGroups.length === 0 && queryUnused.length === 0 && emptyState}
       </section>
 
       {instances.length > 0 && (
@@ -449,6 +656,9 @@ function TagsPanel({
           </div>
         </section>
       )}
+      <p className="sr-only" role="status">
+        {announcement}
+      </p>
     </div>
   )
 }
@@ -662,6 +872,7 @@ export default function Inspector({
           <TagsPanel
             program={program}
             runtime={runtime}
+            selection={selection}
             onProgram={onProgram}
             onToggleBool={onToggleBool}
             onSetInt={onSetInt}

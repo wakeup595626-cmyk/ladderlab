@@ -3169,6 +3169,225 @@ body[data-drag-kind] {
   border-color: var(--positive);
 }
 
+/* ================================================ tag groups by program
+   变量表按程序段分组：一段一格、可折叠。展开/收起用 grid-template-rows 过渡，
+   高度变化是连续的，不会一帧之内把整段内容顶掉；收起后内容仍留在 DOM 里，
+   搜索时能直接展开查看。 */
+
+.tag-list[data-view='rungs'] {
+  gap: 6px;
+}
+
+.tag-group {
+  min-width: 0;
+  border: 1px solid var(--rule);
+  border-radius: 9px;
+  background: var(--surface);
+  transition:
+    border-color var(--dur-quick) var(--ease-out),
+    background-color var(--dur-quick) var(--ease-out);
+}
+
+.tag-group:hover {
+  border-color: var(--control);
+}
+
+.tag-group[data-active='true'] {
+  border-color: color-mix(in srgb, var(--accent) 46%, var(--rule));
+  background: color-mix(in srgb, var(--accent-wash) 40%, var(--surface));
+}
+
+.tag-group-quiet {
+  border-style: dashed;
+  background: transparent;
+}
+
+.tag-group-head {
+  display: flex;
+  width: 100%;
+  min-height: 34px;
+  align-items: center;
+  gap: 6px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    color var(--dur-quick) var(--ease-out),
+    background-color var(--dur-quick) var(--ease-out);
+}
+
+.tag-group-head:hover {
+  background: var(--raised);
+  color: var(--text);
+}
+
+.tag-group-head:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 60%, transparent);
+  outline-offset: -2px;
+}
+
+.tag-group-chevron {
+  flex: 0 0 14px;
+  color: var(--faint);
+  transition:
+    transform var(--dur-sheet) var(--ease-out),
+    color var(--dur-quick) var(--ease-out);
+}
+
+.tag-group[data-open='true'] .tag-group-chevron {
+  transform: rotate(90deg);
+  color: var(--accent);
+}
+
+.tag-group-title {
+  flex: 0 0 auto;
+  letter-spacing: 0.01em;
+}
+
+.tag-group-label {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  color: var(--faint);
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tag-group-count {
+  margin-left: auto;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--raised);
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 18px;
+}
+
+.tag-group-body {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition: grid-template-rows var(--dur-sheet) var(--ease-out);
+}
+
+.tag-group-body[data-collapsed='true'] {
+  grid-template-rows: 0fr;
+}
+
+.tag-group-inner {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  gap: 4px;
+  padding: 0 4px;
+  overflow: hidden;
+  transition:
+    opacity var(--dur-base) var(--ease-out),
+    padding-bottom var(--dur-sheet) var(--ease-out);
+}
+
+.tag-group[data-open='true'] .tag-group-inner {
+  padding-bottom: 4px;
+}
+
+.tag-group-body[data-collapsed='true'] .tag-group-inner {
+  opacity: 0;
+}
+
+.tag-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 2px 2px 4px;
+}
+
+.tag-chip {
+  max-width: 100%;
+  overflow: hidden;
+  padding: 0 8px;
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  background: var(--raised);
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  line-height: 20px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    border-color var(--dur-quick) var(--ease-out),
+    background-color var(--dur-quick) var(--ease-out),
+    color var(--dur-quick) var(--ease-out),
+    transform var(--dur-press) var(--ease-out);
+}
+
+.tag-chip:hover {
+  border-color: var(--accent);
+  background: var(--accent-wash);
+  color: var(--text);
+}
+
+.tag-chip:active {
+  transform: scale(0.96);
+}
+
+.tag-card:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 60%, transparent);
+  outline-offset: 2px;
+}
+
+.tag-card[data-flash='true'] {
+  animation: tag-card-flash 1.4s var(--ease-out);
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+@keyframes tag-card-flash {
+  0%,
+  22% {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 26%, transparent);
+  }
+
+  100% {
+    border-color: var(--rule);
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tag-group-body,
+  .tag-group-inner,
+  .tag-group-chevron {
+    transition: none;
+  }
+
+  .tag-card[data-flash='true'] {
+    animation: none;
+    outline: 2px solid var(--accent);
+  }
+}
+
 .tags-help {
   gap: 3px;
   padding: 8px 0 0;

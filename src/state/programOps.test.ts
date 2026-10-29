@@ -30,7 +30,7 @@ import {
   pickDefaultTag,
   pruneOrphanTags,
   snapshotRung,
-  tagsInProgramOrder,
+  tagsInRung,
   tagsDependingOn,
   tagUsage,
   updateContact,
@@ -976,22 +976,147 @@ describe('programOps issue #12 变量表跟随程序', () => {
     expect(pruneOrphanTags(withManual)).toEqual({ program: withManual, removed: [] })
   })
 
-  it('按程序段和段内元件顺序列出变量，未引用的变量保持原顺序排在末尾', () => {
+})
+
+describe('programOps 程序段变量收集', () => {
+  it('串联触点按输入从左到右、输出最后的顺序返回并去重', () => {
+    const source = program(
+      [rung('r1', [
+        contact('c1', 'Start'),
+        contact('c2', 'Stop'),
+        contact('c3', 'Start'),
+      ])],
+      [tag('Start'), tag('Stop'), tag('Coil')],
+    )
+
+    // Start 出现两次只保留第一次的位置，输出端始终排在最后。
+    expect(tagsInRung(source, rungOf(source, 'r1')).map((item) => item.name))
+      .toEqual(['Start', 'Stop', 'Coil'])
+  })
+
+  it('并联支路及其嵌套分支里的触点都会被收集', () => {
+    const source = program(
+      [rung('r1', [
+        contact('c1', 'Start'),
+        parallel(
+          'p1',
+          [
+            contact('c2', 'A'),
+            parallel('p2', [contact('c3', 'B')], [contact('c4', 'C')]),
+          ],
+          [contact('c5', 'D')],
+        ),
+      ])],
+      [tag('Start'), tag('A'), tag('B'), tag('C'), tag('D'), tag('Coil')],
+    )
+
+    expect(tagsInRung(source, rungOf(source, 'r1')).map((item) => item.name))
+      .toEqual(['Start', 'A', 'B', 'C', 'D', 'Coil'])
+  })
+
+  it('定时器、计数器和 PATTERN 的输出操作数都算本段引用', () => {
     const source = program(
       [
-        rung('r1', [contact('c1', 'Third')]),
-        rung('r2', [contact('c2', 'First')]),
+        {
+          id: 'timer',
+          label: '定时',
+          nodes: [contact('c1', 'Start')],
+          output: {
+            id: 'timer-out',
+            kind: 'TON',
+            tag: 'T1',
+            pt: 100,
+            qTag: 'TimerQ',
+            valueTag: 'TimerET',
+            resetTag: 'TimerReset',
+          },
+        },
+        {
+          id: 'counter',
+          label: '计数',
+          nodes: [contact('c2', 'Pulse')],
+          output: {
+            id: 'counter-out',
+            kind: 'CTU',
+            tag: 'C1',
+            pv: 5,
+            qTag: 'CounterQ',
+            valueTag: 'CounterCV',
+            resetTag: 'CounterReset',
+          },
+        },
+        {
+          id: 'pattern',
+          label: '流水灯',
+          nodes: [],
+          output: {
+            id: 'pattern-out',
+            kind: 'PATTERN',
+            tag: 'LampByte',
+            pulseTag: 'Tick',
+            stepTag: 'Step',
+            pattern: [1, 2, 3],
+          },
+        },
       ],
       [
-        tag('Unused'),
-        tag('First'),
-        tag('Second'),
-        tag('Third'),
-        tag('Coil'),
+        tag('Start'),
+        tag('TimerQ'),
+        tag('TimerET'),
+        tag('TimerReset'),
+        tag('Pulse'),
+        tag('CounterQ'),
+        tag('CounterCV'),
+        tag('CounterReset'),
+        tag('LampByte', 'INT', 0),
+        tag('Tick'),
+        tag('Step', 'INT', 0),
       ],
     )
 
-    expect(tagsInProgramOrder(source).map((item) => item.name))
-      .toEqual(['Third', 'Coil', 'First', 'Unused', 'Second'])
+    expect(tagsInRung(source, rungOf(source, 'timer')).map((item) => item.name))
+      .toEqual(['Start', 'TimerReset', 'TimerQ', 'TimerET'])
+    expect(tagsInRung(source, rungOf(source, 'counter')).map((item) => item.name))
+      .toEqual(['Pulse', 'CounterReset', 'CounterQ', 'CounterCV'])
+    expect(tagsInRung(source, rungOf(source, 'pattern')).map((item) => item.name))
+      .toEqual(['LampByte', 'Tick', 'Step'])
+  })
+
+  it('引用位别名时连同所属字节变量一起返回', () => {
+    const byte = tag('Motor', 'INT', 0)
+    const alias = { ...tag('Motor.0'), id: 'alias-motor-0', address: '%M0.0', bitOf: ' Motor ' }
+    const source = program(
+      [rung('r1', [contact('c1', 'Motor.0')])],
+      [byte, alias, tag('Coil')],
+    )
+    const picked = tagsInRung(source, rungOf(source, 'r1'))
+
+    expect(picked.map((item) => item.name)).toEqual(['Motor.0', 'Motor', 'Coil'])
+    expect(picked).toContain(byte)
+  })
+
+  it('变量表只有基名时，程序里直接写位号也能按基名匹配', () => {
+    const byte = tag('Motor', 'INT', 0)
+    const source = program(
+      [rung('r1', [contact('c1', ' Motor.0 ')])],
+      [byte, tag('Coil')],
+    )
+
+    expect(tagsInRung(source, rungOf(source, 'r1')).map((item) => item.name))
+      .toEqual(['Motor', 'Coil'])
+  })
+
+  it('程序段没有引用任何变量时返回空数组', () => {
+    const source = program(
+      [{
+        id: 'r1',
+        label: '空段',
+        nodes: [],
+        output: { id: 'empty-out', kind: 'COIL', tag: '' },
+      }],
+      [tag('Start'), tag('Coil')],
+    )
+
+    expect(tagsInRung(source, rungOf(source, 'r1'))).toEqual([])
   })
 })

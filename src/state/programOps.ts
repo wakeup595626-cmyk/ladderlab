@@ -292,44 +292,49 @@ export function pruneOrphanTags(program: Program): TagPruneResult {
 }
 
 /**
- * 按“变量第一次出现在梯形图里的顺序”排序：先按程序段先后，再按段内从左上到右下的
- * 元件顺序，最后是输出端操作数。没被引用的变量保持原相对顺序排在末尾，
- * 这样变量表可以顺着程序往下读（issue #12 的第二条建议）。
+ * 一个程序段里引用到的变量：按「输入侧从左到右、最后输出」的元件顺序去重。
+ * 右侧变量表按程序段分组时用它决定每一个变量归到哪一段，
+ * 触点、并联支路、定时器/计数器/传送类指令的操作数都算引用。
  */
-export function tagsInProgramOrder(program: Program): TagDef[] {
-  const firstSeen = new Map<string, number>()
-  let position = 0
-  const note = (reference: string | undefined) => {
-    const base = baseReference(reference)
-    if (!base || firstSeen.has(base)) return
-    firstSeen.set(base, position)
-    position += 1
+export function tagsInRung(program: Program, rung: Rung): TagDef[] {
+  const byName = new Map<string, TagDef>()
+  for (const tag of program.tags) byName.set(normalizeReference(tag.name), tag)
+  const picked = new Map<string, TagDef>()
+  const add = (tag: TagDef | undefined) => {
+    if (!tag || picked.has(tag.id)) return
+    picked.set(tag.id, tag)
+    // 位别名被引用时，它所属的字节变量同样算这一段在用，
+    // 否则字节变量会被误判成“未引用”。
+    if (tag.bitOf !== undefined) add(byName.get(normalizeReference(tag.bitOf)))
+  }
+  const take = (reference: string | undefined) => {
+    const name = normalizeReference(reference ?? '')
+    if (!name) return
+    const exact = byName.get(name)
+    if (exact) {
+      add(exact)
+      return
+    }
+    // 直接写 Motor.0 这类位号时，变量表里可能只有基名 Motor；
+    // 只回退到同名基变量，别把同一字节下的其它位也拉进这一段。
+    const base = baseReference(name)
+    if (base !== name) add(byName.get(base))
   }
   const walk = (chain: LadderNode[]) => {
     for (const node of chain) {
-      if (node.type === 'contact') note(node.tag)
+      if (node.type === 'contact') take(node.tag)
       else node.branches.forEach(walk)
     }
   }
-  for (const rung of program.rungs) {
-    walk(rung.nodes)
-    note(rung.output.tag)
-    note(rung.output.resetTag)
-    note(rung.output.qTag)
-    note(rung.output.valueTag)
-    note(rung.output.sourceTag)
-    note(rung.output.pulseTag)
-    note(rung.output.stepTag)
-  }
-  return program.tags
-    .map((tag, index) => ({ tag, index, seen: firstSeen.get(baseReference(tag.name)) }))
-    .sort((left, right) => {
-      if (left.seen === undefined && right.seen === undefined) return left.index - right.index
-      if (left.seen === undefined) return 1
-      if (right.seen === undefined) return -1
-      return left.seen - right.seen
-    })
-    .map((entry) => entry.tag)
+  walk(rung.nodes)
+  take(rung.output.tag)
+  take(rung.output.resetTag)
+  take(rung.output.qTag)
+  take(rung.output.valueTag)
+  take(rung.output.sourceTag)
+  take(rung.output.pulseTag)
+  take(rung.output.stepTag)
+  return [...picked.values()]
 }
 
 function withRung(program: Program, rungId: string, update: (rung: Rung) => Rung): Program {
