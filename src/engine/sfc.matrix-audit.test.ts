@@ -575,7 +575,7 @@ describe('8 启保停', () => {
     expect(actionsOf(chart, 'h1')).toEqual([['输送运行', 'Q0.0=1'], ['运行灯', 'Q0.1=1']])
     expect(edgesOf(chart)).toEqual([
       '__initial→h1: 启动（I0.0） 且 停止（I0.1）=0',
-      'h1→__initial: 停止',
+      'h1→__initial: 停止（I0.1）',
     ])
   })
 

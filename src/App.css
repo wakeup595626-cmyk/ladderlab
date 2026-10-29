@@ -3732,3 +3732,9 @@ body[data-drag-kind] * {
     padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px));
   }
 }
+
+@media (pointer: coarse) {
+  .confirm-actions button {
+    min-height: 44px;
+  }
+}

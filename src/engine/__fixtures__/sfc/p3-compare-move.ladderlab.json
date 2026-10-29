@@ -1,0 +1,58 @@
+{
+  "schema": 1,
+  "name": "审核P3比较传送",
+  "profile": "v21",
+  "tags": [
+    { "id": "t-tick", "name": "Tick", "address": "%I0.2", "kind": "BOOL", "initial": false, "comment": "计数脉冲" },
+    { "id": "t-force", "name": "Force", "address": "%I0.3", "kind": "BOOL", "initial": false, "comment": "强制高速" },
+    { "id": "t-clear", "name": "ClearBtn", "address": "%I0.4", "kind": "BOOL", "initial": false, "comment": "清零按钮" },
+    { "id": "t-count", "name": "Count", "address": "%MW10", "kind": "INT", "initial": 0, "comment": "累计脉冲数" },
+    { "id": "t-speed", "name": "Speed", "address": "%MW12", "kind": "INT", "initial": 0, "comment": "速度档位" },
+    { "id": "t-high", "name": "High", "address": "%Q0.0", "kind": "BOOL", "initial": false, "comment": "高位指示灯" },
+    { "id": "t-low", "name": "Low", "address": "%Q0.1", "kind": "BOOL", "initial": false, "comment": "低速指示灯" }
+  ],
+  "rungs": [
+    {
+      "id": "r1",
+      "label": "每个脉冲计数加一",
+      "nodes": [ { "type": "contact", "id": "c1", "kind": "P", "tag": "Tick" } ],
+      "output": { "id": "o1", "kind": "ADD", "tag": "Count", "value": 1 }
+    },
+    {
+      "id": "r2",
+      "label": "计数大于等于 10 点亮高位灯",
+      "nodes": [ { "type": "contact", "id": "c2", "kind": "CMP", "tag": "Count", "compare": { "op": ">=", "value": 10 } } ],
+      "output": { "id": "o2", "kind": "COIL", "tag": "High" }
+    },
+    {
+      "id": "r3",
+      "label": "计数到 5 或强制定速时把速度写成 2",
+      "nodes": [
+        {
+          "type": "parallel",
+          "id": "p1",
+          "branches": [
+            [ { "type": "contact", "id": "c3", "kind": "CMP", "tag": "Count", "compare": { "op": ">=", "value": 5 } } ],
+            [ { "type": "contact", "id": "c4", "kind": "NO", "tag": "Force" } ]
+          ]
+        }
+      ],
+      "output": { "id": "o3", "kind": "MOVE", "tag": "Speed", "value": 2 }
+    },
+    {
+      "id": "r4",
+      "label": "未到高位且计数到 2 点亮低速灯",
+      "nodes": [
+        { "type": "contact", "id": "c5", "kind": "NC", "tag": "High" },
+        { "type": "contact", "id": "c6", "kind": "CMP", "tag": "Count", "compare": { "op": ">=", "value": 2 } }
+      ],
+      "output": { "id": "o4", "kind": "COIL", "tag": "Low" }
+    },
+    {
+      "id": "r5",
+      "label": "清零按钮把速度写回 0",
+      "nodes": [ { "type": "contact", "id": "c7", "kind": "NO", "tag": "ClearBtn" } ],
+      "output": { "id": "o5", "kind": "MOVE", "tag": "Speed", "value": 0 }
+    }
+  ]
+}

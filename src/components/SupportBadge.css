@@ -14,6 +14,13 @@
   -webkit-touch-callout: none;
 }
 
+/* A modal drawer or dialog owns the active layer; a floating donation badge
+   must not sit above its controls. Keep the subtree laid out because its
+   anchor probe is measured during resize, and exempt the badge's own panel. */
+body:has([role='dialog'][aria-modal='true'], .qe-panel) .support-badge {
+  visibility: hidden;
+}
+
 /*
  * 0×0 探针：钉在左下安全线上，JS 读它的位置即可拿到当前断点的边距，
  * 包括移动端标签栏和刘海屏的 env(safe-area-inset-bottom)。

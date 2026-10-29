@@ -52,7 +52,7 @@ const ACTION_TRUNK = 32
 
 /** 一条回跳条件从自己的水平引出线往上要占的高度（含与上一条引出线的净空）。 */
 function labelNeed(lines: number): number {
-  return 24 + (lines - 1) * LABEL_LINE
+  return 30 + (lines - 1) * LABEL_LINE
 }
 
 function escapeXml(value: string): string {

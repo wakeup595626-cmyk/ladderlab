@@ -306,3 +306,12 @@
     flex: 1;
   }
 }
+
+@media (pointer: coarse) {
+  .project-import-file,
+  .project-import-check,
+  .project-import-confirm,
+  .project-import-back {
+    min-height: 44px;
+  }
+}

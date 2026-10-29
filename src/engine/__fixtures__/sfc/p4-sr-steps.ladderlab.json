@@ -1,0 +1,97 @@
+{
+  "schema": 1,
+  "name": "审核P4置位复位步序",
+  "profile": "v21",
+  "tags": [
+    { "id": "t-start", "name": "Start", "address": "%I0.0", "kind": "BOOL", "initial": false, "comment": "启动按钮" },
+    { "id": "t-stop", "name": "Stop", "address": "%I0.1", "kind": "BOOL", "initial": false, "comment": "停止按钮" },
+    { "id": "t-s1", "name": "S1", "address": "%M0.0", "kind": "BOOL", "initial": false, "comment": "第一步：上料" },
+    { "id": "t-s2", "name": "S2", "address": "%M0.1", "kind": "BOOL", "initial": false, "comment": "第二步：加工" },
+    { "id": "t-s3", "name": "S3", "address": "%M0.2", "kind": "BOOL", "initial": false, "comment": "第三步：出料" },
+    { "id": "t-km1", "name": "KM1", "address": "%Q0.0", "kind": "BOOL", "initial": false, "comment": "上料电机" },
+    { "id": "t-km2", "name": "KM2", "address": "%Q0.1", "kind": "BOOL", "initial": false, "comment": "加工电机" },
+    { "id": "t-lamp", "name": "RunLamp", "address": "%Q0.2", "kind": "BOOL", "initial": false, "comment": "上料运行指示灯" }
+  ],
+  "rungs": [
+    {
+      "id": "r1",
+      "label": "启动进入第一步，S1 自保持",
+      "nodes": [
+        {
+          "type": "parallel",
+          "id": "p1",
+          "branches": [
+            [ { "type": "contact", "id": "c1", "kind": "NO", "tag": "Start" } ],
+            [ { "type": "contact", "id": "c2", "kind": "NO", "tag": "S1" } ]
+          ]
+        },
+        { "type": "contact", "id": "c3", "kind": "NC", "tag": "S2" },
+        { "type": "contact", "id": "c4", "kind": "NC", "tag": "Stop" }
+      ],
+      "output": { "id": "o1", "kind": "SET", "tag": "S1" }
+    },
+    {
+      "id": "r2",
+      "label": "第一步完成，置位第二步",
+      "nodes": [
+        { "type": "contact", "id": "c5", "kind": "NO", "tag": "S1" },
+        { "type": "contact", "id": "c6", "kind": "NC", "tag": "S3" }
+      ],
+      "output": { "id": "o2", "kind": "SET", "tag": "S2" }
+    },
+    {
+      "id": "r3",
+      "label": "第二步完成，置位第三步",
+      "nodes": [
+        { "type": "contact", "id": "c7", "kind": "NO", "tag": "S2" },
+        { "type": "contact", "id": "c8", "kind": "NC", "tag": "Stop" }
+      ],
+      "output": { "id": "o3", "kind": "SET", "tag": "S3" }
+    },
+    {
+      "id": "r4",
+      "label": "第三步结束按停止，复位第一步",
+      "nodes": [
+        { "type": "contact", "id": "c9", "kind": "NO", "tag": "S3" },
+        { "type": "contact", "id": "c10", "kind": "NO", "tag": "Stop" }
+      ],
+      "output": { "id": "o4", "kind": "RESET", "tag": "S1" }
+    },
+    {
+      "id": "r5",
+      "label": "第三步结束按停止，复位第二步",
+      "nodes": [
+        { "type": "contact", "id": "c11", "kind": "NO", "tag": "S3" },
+        { "type": "contact", "id": "c12", "kind": "NO", "tag": "Stop" }
+      ],
+      "output": { "id": "o5", "kind": "RESET", "tag": "S2" }
+    },
+    {
+      "id": "r6",
+      "label": "第三步结束按停止，复位第三步",
+      "nodes": [
+        { "type": "contact", "id": "c13", "kind": "NO", "tag": "S3" },
+        { "type": "contact", "id": "c14", "kind": "NO", "tag": "Stop" }
+      ],
+      "output": { "id": "o6", "kind": "RESET", "tag": "S3" }
+    },
+    {
+      "id": "r7",
+      "label": "第一步驱动上料电机",
+      "nodes": [ { "type": "contact", "id": "c15", "kind": "NO", "tag": "S1" } ],
+      "output": { "id": "o7", "kind": "COIL", "tag": "KM1" }
+    },
+    {
+      "id": "r8",
+      "label": "第一步同时点亮上料指示灯",
+      "nodes": [ { "type": "contact", "id": "c16", "kind": "NO", "tag": "S1" } ],
+      "output": { "id": "o8", "kind": "COIL", "tag": "RunLamp" }
+    },
+    {
+      "id": "r9",
+      "label": "第二步驱动加工电机",
+      "nodes": [ { "type": "contact", "id": "c17", "kind": "NO", "tag": "S2" } ],
+      "output": { "id": "o9", "kind": "COIL", "tag": "KM2" }
+    }
+  ]
+}

@@ -344,6 +344,38 @@ function faultExitProgram(): Program {
   }
 }
 
+/** 自保持进入第一步，第二步收尾时复位第一步。 */
+function selfHoldStepProgram(): Program {
+  return {
+    schema: 1,
+    name: '自建自保持步序',
+    profile: 'v21',
+    tags: [
+      tag('Start', '%I0.0', '启动按钮'),
+      tag('Stop', '%I0.1', '停止按钮'),
+      tag('S1', '%M0.0', '第一步'),
+      tag('S2', '%M0.1', '第二步'),
+      tag('KM1', '%Q0.0', '第一步电机'),
+    ],
+    rungs: [
+      setStep('h1', '启动进入第一步', [
+        parallel('h1-p', [[contact('h1-c1', 'Start')], [contact('h1-c2', 'S1')]]),
+        contact('h1-c3', 'S2', 'NC'),
+        contact('h1-c4', 'Stop', 'NC'),
+      ], 'S1'),
+      setStep('h2', '第一步完成进入第二步', [
+        contact('h2-c1', 'S1'),
+        contact('h2-c2', 'Stop', 'NC'),
+      ], 'S2'),
+      rung('h3', '第二步按停止复位第一步', [
+        contact('h3-c1', 'S2'),
+        contact('h3-c2', 'Stop'),
+      ], { kind: 'RESET', tag: 'S1' }),
+      coil('h4', '第一步驱动电机', [contact('h4-c1', 'S1')], 'KM1'),
+    ],
+  }
+}
+
 /** 只有 StepN / SN 这类名字（或“第 N 步”注释）才会被认成步骤位。 */
 function bankTags(prefix: string, container: string, base: number): TagDef[] {
   return Array.from({ length: 3 }, (_, i) => ({
@@ -424,10 +456,22 @@ describe('自建工程顺序功能图：不伪造拓扑', () => {
   it('单步复位网络保留成退出分支', () => {
     const chart = mustBuild(faultExitProgram())
     expect(chart.source).toBe('sr-steps')
-    const exit = chart.edges.find((edge) => edge.from === 'Step2' && edge.to === 'Step1')
+    // Step1 从未被置位，不是可执行的一步；故障复位第 2 步后回到空闲态，
+    // 画回 Step1 会伪造一条走不到的边。
+    const exit = chart.edges.find((edge) => edge.from === 'Step2' && edge.to === '__initial')
     expect(exit).toBeDefined()
     expect(exit!.label).toContain('故障信号')
     expect(labelOf(chart, 'Step2', 'Step3')).toContain('本步完成')
+  })
+
+  it('复位网络不当来源：自保持入口仍从初始步出发', () => {
+    const chart = mustBuild(selfHoldStepProgram())
+    expect(chart.source).toBe('sr-steps')
+    const entry = chart.edges.find((edge) => edge.from === '__initial' && edge.to === 'S1')
+    expect(entry).toBeDefined()
+    expect(entry!.label).toContain('启动按钮')
+    // 复位 S1 的网络里虽然有 S2 触点，但那是收尾条件，不是 S2→S1 的工艺转移。
+    expect(chart.edges.some((edge) => edge.from === 'S2' && edge.to === 'S1')).toBe(false)
   })
 
   it('多组步骤位按转移证据选主序列，落选的组写进 notes 而不是静默消失', () => {

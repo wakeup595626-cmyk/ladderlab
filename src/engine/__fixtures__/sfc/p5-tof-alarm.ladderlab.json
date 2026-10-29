@@ -1,0 +1,45 @@
+{
+  "schema": 1,
+  "name": "审核P5断电延时报警",
+  "profile": "v21",
+  "tags": [
+    { "id": "t-start", "name": "Start", "address": "%I0.0", "kind": "BOOL", "initial": false, "comment": "启动按钮" },
+    { "id": "t-stop", "name": "Stop", "address": "%I0.1", "kind": "BOOL", "initial": false, "comment": "停止按钮" },
+    { "id": "t-fan", "name": "Fan", "address": "%Q0.0", "kind": "BOOL", "initial": false, "comment": "风机接触器" },
+    { "id": "t-alarm", "name": "Alarm", "address": "%Q0.1", "kind": "BOOL", "initial": false, "comment": "故障报警灯" },
+    { "id": "t-door", "name": "Door", "address": "%I0.2", "kind": "BOOL", "initial": false, "comment": "柜门开关" }
+  ],
+  "rungs": [
+    {
+      "id": "r1",
+      "label": "启动后风机自锁运行，停止断开",
+      "nodes": [
+        {
+          "type": "parallel",
+          "id": "p1",
+          "branches": [
+            [ { "type": "contact", "id": "c1", "kind": "NO", "tag": "Start" } ],
+            [ { "type": "contact", "id": "c2", "kind": "NO", "tag": "Fan" } ]
+          ]
+        },
+        { "type": "contact", "id": "c3", "kind": "NC", "tag": "Stop" }
+      ],
+      "output": { "id": "o1", "kind": "COIL", "tag": "Fan" }
+    },
+    {
+      "id": "r2",
+      "label": "风机断电后延时 2 秒",
+      "nodes": [ { "type": "contact", "id": "c4", "kind": "NO", "tag": "Fan" } ],
+      "output": { "id": "o2", "kind": "TOF", "tag": "T2", "pt": 2000 }
+    },
+    {
+      "id": "r3",
+      "label": "延时结束且柜门打开时报警",
+      "nodes": [
+        { "type": "contact", "id": "c5", "kind": "NO", "tag": "T2.Q" },
+        { "type": "contact", "id": "c6", "kind": "NO", "tag": "Door" }
+      ],
+      "output": { "id": "o3", "kind": "COIL", "tag": "Alarm" }
+    }
+  ]
+}

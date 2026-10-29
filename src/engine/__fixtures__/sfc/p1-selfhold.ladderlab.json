@@ -1,0 +1,28 @@
+{
+  "schema": 1,
+  "name": "审核P1单段自锁",
+  "profile": "v21",
+  "tags": [
+    { "id": "t-start", "name": "Start", "address": "%I0.0", "kind": "BOOL", "initial": false, "comment": "启动按钮" },
+    { "id": "t-stop", "name": "Stop", "address": "%I0.1", "kind": "BOOL", "initial": false, "comment": "停止按钮" },
+    { "id": "t-motor", "name": "Motor", "address": "%Q0.0", "kind": "BOOL", "initial": false, "comment": "电机接触器" }
+  ],
+  "rungs": [
+    {
+      "id": "r1",
+      "label": "启动后自锁，按停止断开",
+      "nodes": [
+        {
+          "type": "parallel",
+          "id": "p1",
+          "branches": [
+            [ { "type": "contact", "id": "c1", "kind": "NO", "tag": "Start" } ],
+            [ { "type": "contact", "id": "c2", "kind": "NO", "tag": "Motor" } ]
+          ]
+        },
+        { "type": "contact", "id": "c3", "kind": "NC", "tag": "Stop" }
+      ],
+      "output": { "id": "o1", "kind": "COIL", "tag": "Motor" }
+    }
+  ]
+}
