@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type {
   CSSProperties,
@@ -1729,6 +1729,8 @@ interface RungSectionProps {
   rung: Program['rungs'][number]
   index: number
   total: number
+  /** 图纸统一宽度：由画布测一次往下传，避免每段各挂一个 ResizeObserver。 */
+  availableWidth: number
   segmentLabel: string
   context: DrawContext
   onDuplicateRung: (rungId: string) => void
@@ -1774,6 +1776,7 @@ function RungSection({
   rung,
   index,
   total,
+  availableWidth,
   segmentLabel,
   context,
   onDuplicateRung,
@@ -1790,12 +1793,15 @@ function RungSection({
   const cancelRenameRef = useRef(false)
   const seenNodesRef = useRef<Set<string> | null>(null)
   const seenOutputRef = useRef<string | null>(null)
-  const [availableWidth, setAvailableWidth] = useState(0)
   const [titleDraft, setTitleDraft] = useState<string | null>(null)
   const placeholder = isBlankRung(rung)
   const titleValue = titleDraft ?? rung.label
   const metrics = metricsFor(availableWidth)
-  const layout = measureRung(rung, availableWidth, metrics)
+  // 布点只跟本段内容和图纸宽度有关：滚动、选中、拖拽引起的重渲染不该重算一遍。
+  const layout = useMemo(
+    () => measureRung(rung, availableWidth, metrics),
+    [rung, availableWidth, metrics],
+  )
   const rungContext: DrawContext = {
     ...context,
     rungId: rung.id,
@@ -1827,16 +1833,6 @@ function RungSection({
   // 整段选择是显式状态，避免和“选中输出线圈”的 path:null 混淆。
   const wholeRungSelected = rungSelected && context.selection?.wholeRung === true
   const favoriteTargetHere = context.insertTarget?.rungId === rung.id
-  useLayoutEffect(() => {
-    const element = scrollRef.current
-    if (!element) return
-    const updateWidth = () => setAvailableWidth(element.clientWidth)
-    updateWidth()
-    const observer = new ResizeObserver(updateWidth)
-    observer.observe(element)
-    return () => observer.disconnect()
-  }, [])
-
   useLayoutEffect(() => {
     const container = scrollRef.current
     if (!container) return
@@ -2455,6 +2451,18 @@ export default function LadderCanvas({
   const [pendingFocus, setPendingFocus] = useState<SlotRef | null>(null)
   const [focusOpenBranch, setFocusOpenBranch] = useState(false)
   const [lastKind, setLastKind] = useState<ContactKind>('NO')
+  // 整张图纸共用一个宽度：1000 段工程也只挂一个 ResizeObserver、只读一次 clientWidth。
+  const sheetRef = useRef<HTMLDivElement>(null)
+  const [sheetWidth, setSheetWidth] = useState(0)
+  useLayoutEffect(() => {
+    const element = sheetRef.current
+    if (!element) return
+    const updateWidth = () => setSheetWidth(element.clientWidth)
+    updateWidth()
+    const observer = new ResizeObserver(updateWidth)
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [])
   const draggingRungId = isDragging && dragSource?.startsWith('rung:')
     ? dragSource.slice(5)
     : null
@@ -2677,7 +2685,10 @@ export default function LadderCanvas({
           onSelect(null)
         }}
       >
-        <div className="ll-program-sheet">
+        <div
+          className={['ll-program-sheet', program.rungs.length > 40 ? 'is-long' : ''].filter(Boolean).join(' ')}
+          ref={sheetRef}
+        >
           {program.rungs.map((rung, index) => (
             <Fragment key={rung.id}>
               <RungDropzone
@@ -2690,6 +2701,7 @@ export default function LadderCanvas({
                 rung={rung}
                 index={index}
                 total={contentIndexById.size}
+                availableWidth={sheetWidth}
                 segmentLabel={isBlankRung(rung)
                   ? '新程序段'
                   : '程序段 ' + (contentIndexById.get(rung.id) ?? 0)}

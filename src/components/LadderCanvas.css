@@ -39,6 +39,14 @@
   background: var(--surface);
 }
 
+/* 超长工程（几十上百段）滚动时，屏幕外的程序段不必做布局和绘制，
+   浏览器按上一次实测高度占位即可保住滚动条长度。小工程不启用，
+   免得给常规编辑和自动化测试增加无谓的可见性切换。 */
+.ll-program-sheet.is-long > .ll-rung {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 168px;
+}
+
 .ll-rung:has(.ll-rung-menu[open]) {
   z-index: 2;
 }
