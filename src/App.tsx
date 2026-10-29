@@ -31,6 +31,7 @@ import {
 } from './lib/theme'
 import ProjectDrawer from './components/ProjectDrawer'
 import ProjectImportDialog from './components/ProjectImportDialog'
+import NewProjectDialog from './components/NewProjectDialog'
 import SaveProjectDialog from './components/SaveProjectDialog'
 import ProgramImageExporter, { type ProgramImageMode } from './components/ProgramImageExporter'
 import QuickEditor from './components/QuickEditor'
@@ -618,6 +619,7 @@ export default function App() {
   // 本页仍保留旧版本号，下一次保存会提示先重新打开，避免静默覆盖新内容。
   const activeSavedProjectVersion = activeSavedProject?.savedAt ?? null
   const [saveDialogOpen, setSaveDialogOpen] = useState(false)
+  const [newProjectOpen, setNewProjectOpen] = useState(false)
   const [saveDialogError, setSaveDialogError] = useState<string | null>(null)
   const [manualSaveStatus, setManualSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
   const manualSaveStatusTimerRef = useRef<number | null>(null)
@@ -792,6 +794,17 @@ export default function App() {
       dismissToast()
     }, duration)
   }, [dismissToast, stopToastTimer])
+
+  useEffect(() => {
+    const showUpdate = () => {
+      notify('新版本已就绪', {
+        sticky: true,
+        action: { label: '立即刷新', run: () => window.location.reload() },
+      })
+    }
+    window.addEventListener('ladderlab:update-ready', showUpdate)
+    return () => window.removeEventListener('ladderlab:update-ready', showUpdate)
+  }, [notify])
 
   /** 停止或报错时把「仿真已开始」那条提示一起收掉，避免界面互相打脸。 */
   const clearRunToast = useCallback(() => {
@@ -2713,20 +2726,23 @@ export default function App() {
     notify(`已移除损坏记录「${record.name}」，原始数据已备份`)
   }
 
-  const newProject = async () => {
-    const accepted = await confirm({
-      title: '新建空白工程？',
-      description: '当前工程会被替换，新建后可以用撤销恢复。',
-      confirmLabel: '新建',
-    })
-    if (!accepted) return
-    const next = blankProgram()
+  const createNewProject = (name: string) => {
+    const next = setProjectName(blankProgram(), name)
     commit(next)
     setSelection(preferredRung(next) ? { rungId: preferredRung(next)!.id, path: null } : null)
     setActiveProject(null)
-    notify('已新建空白工程', {
+    setNewProjectOpen(false)
+    // 损坏工程还没处理时自动保存处于暂停状态：这时不能再提示「保存到项目库」，
+    // 否则用户会以为已经存下了，刷新之后才发现新内容没了。
+    if (corruptProject) {
+      notify(`已新建工程「${next.name}」；自动保存暂时暂停，请先处理上方那条损坏工程提示`, {
+        sticky: true,
+      })
+      return
+    }
+    notify(`已新建工程「${next.name}」`, {
       action: {
-        label: '命名并保存',
+        label: '保存到项目库',
         run: () => {
           setSaveDialogError(null)
           setSaveDialogOpen(true)
@@ -3235,7 +3251,7 @@ export default function App() {
         onSaveProject={requestSaveProject}
         saveBlocked={Boolean(projectLibraryError)}
         saveStatus={manualSaveStatus}
-        onNewProject={() => void newProject()}
+        onNewProject={() => setNewProjectOpen(true)}
         onImportProject={() => setImportOpen(true)}
         onExportProject={exportProject}
         onExportImage={startImageExport}
@@ -3773,6 +3789,12 @@ export default function App() {
         open={importOpen}
         onClose={() => setImportOpen(false)}
         onImport={applyImportedProject}
+      />
+
+      <NewProjectDialog
+        open={newProjectOpen}
+        onClose={() => setNewProjectOpen(false)}
+        onCreate={createNewProject}
       />
 
       <SaveProjectDialog
