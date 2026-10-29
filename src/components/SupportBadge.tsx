@@ -465,7 +465,7 @@ export default function SupportBadge() {
           aria-expanded={open}
           aria-controls={open ? panelId : undefined}
           aria-haspopup="dialog"
-          aria-label="请我喝杯咖啡（打赏与项目链接）"
+          aria-label="请杯咖啡（打赏与项目链接）"
           aria-describedby={hintId}
           title="打赏与项目链接（可拖动）"
           onClick={(event) => {
@@ -490,7 +490,7 @@ export default function SupportBadge() {
             setOpen((value) => !value)
           }}
         >
-          请我喝杯咖啡
+          请杯咖啡
         </span>
       </div>
 
@@ -505,7 +505,7 @@ export default function SupportBadge() {
           style={panelStyle}
         >
           <header className="support-badge-head">
-            <h2 id={titleId}>请我喝杯咖啡</h2>
+            <h2 id={titleId}>请杯咖啡</h2>
             <button
               type="button"
               ref={closeRef}

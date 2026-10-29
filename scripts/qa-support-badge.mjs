@@ -119,7 +119,10 @@ try {
       }
       return {
         root: rect(root), pill: rect(pill), trigger: rect(trigger),
-        caption: { ...rect(caption), text: caption.textContent, scrollWidth: caption.scrollWidth },
+        caption: {
+          ...rect(caption), text: caption.textContent, scrollWidth: caption.scrollWidth,
+          fontSize: parseFloat(getComputedStyle(caption).fontSize),
+        },
         viewport: { width: innerWidth, height: innerHeight },
         open: root.dataset.open === 'true',
         panel: document.querySelector('.support-badge-panel')?.getBoundingClientRect().toJSON() ?? null,
@@ -206,10 +209,11 @@ try {
   )
   check(
     'desktop/caption-fits-pill',
-    geometry.caption.text === '请我喝杯咖啡'
+    geometry.caption.text === '请杯咖啡'
+      && geometry.caption.fontSize >= 11
       && geometry.caption.top >= geometry.pill.top + 20
       && geometry.caption.scrollWidth <= Math.ceil(geometry.caption.width) + 1,
-    `${geometry.caption.text} · 文字宽 ${Math.round(geometry.caption.scrollWidth)} / 框宽 ${Math.round(geometry.caption.width)}`,
+    `${geometry.caption.text} · ${geometry.caption.fontSize}px · 文字宽 ${Math.round(geometry.caption.scrollWidth)} / 框宽 ${Math.round(geometry.caption.width)}`,
   )
   check(
     'desktop/defaults-bottom-left',
