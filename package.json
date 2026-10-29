@@ -22,6 +22,7 @@
     "qa:stress": "node scripts/qa-storage-stress.mjs",
     "qa:hardening": "node scripts/qa-hardening.mjs",
     "qa:accessibility": "node scripts/qa-accessibility.mjs",
+    "qa:badge": "node scripts/qa-support-badge.mjs",
     "qa:touch": "node scripts/qa-responsive-touch.mjs",
     "qa:tags": "node scripts/qa-tags.mjs",
     "qa:save": "node scripts/qa-save-button.mjs",

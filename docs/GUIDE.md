@@ -113,8 +113,10 @@ Worker 会在后续访问时更新缓存；若页面仍显示旧版本，完全�
 本站是 GitHub Pages 上的静态站点，访问页面时仍会经过托管平台正常的网络请求；这不
 等同于应用主动上传工程内容。公共电脑上使用后，可清理浏览器站点数据以移除本机工程。
 
-左下角 Star 入口会向 GitHub 公共 API 读取一次仓库星标数（结果在本机缓存半小时，读取
-失败就只显示按钮）。该请求只包含普通 HTTPS 访问，不携带梯形图、变量表或任何工程数据。
+常驻浮标会向 GitHub 公共 API 读取一次仓库星标数（结果在本机缓存半小时，读取失败就
+只显示按钮）。浮标可用鼠标或手指拖到界面任意位置，松手后会记住落点；键盘用户可按住
+Alt 再按方向键移动，按住 Shift 可加速。窗口尺寸变化时，浮标会自动回到可视范围内。
+该请求只包含普通 HTTPS 访问，不携带梯形图、变量表或任何工程数据。
 
 ## 指令档案
 
@@ -164,8 +166,8 @@ LadderLab 按从上到下的顺序执行程序段，每个扫描周期执行以�
 先运行 npm run preview，再用远程调试端口 9444 启动一个只用于验收的浏览器并打开
 http://127.0.0.1:4173/，然后按改动范围运行 npm run qa、npm run qa:project、
 npm run qa:branch、npm run qa:sheet、npm run qa:rungs、npm run qa:storage、
-npm run qa:stress、npm run qa:hardening、npm run qa:accessibility 和
-npm run qa:touch。
+npm run qa:stress、npm run qa:hardening、npm run qa:accessibility、
+npm run qa:touch 和 npm run qa:badge。
 
 npm run qa、npm run qa:storage、npm run qa:stress 和 npm run qa:touch 会在专用 QA
 浏览器中自建并关闭标签页；其余脚本只接受 URL 与 LADDERLAB_URL 完全一致的目标页，

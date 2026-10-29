@@ -1,106 +1,114 @@
-/* 「请我喝杯咖啡」：固定在左下角状态栏上方，抽屉里会被 backdrop 盖住。 */
+/* 常驻小浮标：默认贴左下角，拖动后由内联 left/top 接管，落点按比例记住。 */
 
 .support-badge {
+  --badge-gap: 12px;
+  --badge-gap-bottom: 46px; /* 状态栏 34px + 12px 间距 */
   position: fixed;
-  left: 16px;
-  bottom: 46px; /* 状态栏 34px + 12px 间距 */
-  z-index: 40;
+  left: var(--badge-gap);
+  bottom: var(--badge-gap-bottom);
+  /* 高于顶栏和移动端工具栏，拖到任意位置都能点到；仍让模态框与提示留在更上层。 */
+  z-index: 110;
   font-family: var(--sans);
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+/*
+ * 0×0 探针：钉在左下安全线上，JS 读它的位置即可拿到当前断点的边距，
+ * 包括移动端标签栏和刘海屏的 env(safe-area-inset-bottom)。
+ */
+.support-badge-probe {
+  position: fixed;
+  bottom: var(--badge-gap-bottom);
+  left: var(--badge-gap);
+  width: 0;
+  height: 0;
+  pointer-events: none;
 }
 
 .support-badge-pill {
   display: inline-flex;
-  height: 34px;
+  height: 30px;
   align-items: stretch;
   border: 1px solid var(--border);
   border-radius: 999px;
-  background: color-mix(in srgb, var(--surface) 88%, var(--ground));
-  box-shadow: 0 1px 2px rgba(21, 24, 22, 0.06), 0 4px 12px rgba(21, 24, 22, 0.06);
+  background: color-mix(in srgb, var(--surface) 90%, var(--ground));
+  box-shadow: 0 1px 2px rgba(21, 24, 22, 0.05), 0 2px 8px rgba(21, 24, 22, 0.05);
   color: var(--muted);
+  cursor: grab;
+  touch-action: none;
   transition:
     border-color var(--dur-quick) var(--ease-out),
     background-color var(--dur-quick) var(--ease-out),
     box-shadow var(--dur-quick) var(--ease-out),
+    color var(--dur-quick) var(--ease-out),
     transform var(--dur-quick) var(--ease-out);
 }
 
-.support-badge-pill:hover {
+@media (hover: hover) and (pointer: fine) {
+  .support-badge-pill:hover {
+    border-color: var(--control);
+    background: var(--surface);
+    box-shadow: 0 2px 4px rgba(21, 24, 22, 0.07), 0 8px 18px rgba(21, 24, 22, 0.09);
+    color: var(--frame-ink);
+  }
+}
+
+.support-badge[data-dragging='true'] .support-badge-pill {
   border-color: var(--control);
   background: var(--surface);
-  box-shadow: 0 2px 4px rgba(21, 24, 22, 0.08), 0 10px 22px rgba(21, 24, 22, 0.1);
+  box-shadow: 0 6px 18px rgba(21, 24, 22, 0.16);
   color: var(--frame-ink);
-  transform: translateY(-1px);
+  cursor: grabbing;
+  transform: scale(1.03);
+  transition: none;
+}
+
+.support-badge-trigger,
+.support-badge-star {
+  position: relative;
+  display: inline-flex;
+  width: 30px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  color: inherit;
+  cursor: inherit;
+  touch-action: none;
+  -webkit-user-drag: none;
+}
+
+/* 视觉只有 30px，但上下各借 7px 做命中区，手指点起来不至于太苛刻。 */
+.support-badge-trigger::after,
+.support-badge-star::after {
+  content: '';
+  position: absolute;
+  inset: -7px 0;
+  border-radius: 999px;
 }
 
 .support-badge-trigger {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  padding: 0 8px 0 11px;
   border: 0;
   border-radius: 999px 0 0 999px;
   background: transparent;
-  color: inherit;
-  font-size: 12px;
-  font-weight: 500;
-  letter-spacing: 0.01em;
-  cursor: pointer;
-}
-
-.support-badge-github {
-  display: grid;
-  width: 33px;
-  place-items: center;
-  border-left: 1px solid var(--rule);
-  color: inherit;
-  opacity: 0.86;
-  transition:
-    background-color var(--dur-quick) var(--ease-out),
-    color var(--dur-quick) var(--ease-out),
-    opacity var(--dur-quick) var(--ease-out);
-}
-
-.support-badge-github:hover {
-  background: var(--active);
-  color: var(--frame-ink);
-  opacity: 1;
 }
 
 .support-badge-star {
-  display: inline-flex;
-  height: 100%;
-  align-items: center;
-  gap: 5px;
-  padding: 0 11px 0 9px;
   border-left: 1px solid var(--rule);
   border-radius: 0 999px 999px 0;
-  color: inherit;
-  font-size: 11.5px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
   text-decoration: none;
-  transition:
-    background-color var(--dur-quick) var(--ease-out),
-    color var(--dur-quick) var(--ease-out);
 }
 
-.support-badge-star:hover {
-  background: var(--active);
-  color: var(--frame-ink);
-}
-
-.support-badge-star-count {
-  padding: 1px 5px;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--ground) 72%, transparent);
-  color: var(--muted);
-  font-size: 10.5px;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
+@media (hover: hover) and (pointer: fine) {
+  .support-badge-trigger:hover,
+  .support-badge-star:hover {
+    background: var(--active);
+    color: var(--frame-ink);
+  }
 }
 
 .support-badge-trigger:focus-visible,
-.support-badge-github:focus-visible,
 .support-badge-star:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
@@ -118,11 +126,12 @@
 }
 
 .support-badge-panel {
-  position: absolute;
-  bottom: calc(100% + 10px);
-  left: 0;
-  width: 272px;
-  padding: 14px;
+  position: fixed;
+  width: 264px;
+  max-width: calc(100vw - 16px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 12px;
   border: 1px solid var(--border);
   border-radius: var(--radius-card);
   background: var(--surface);
@@ -133,7 +142,7 @@
 @keyframes support-badge-in {
   from {
     opacity: 0;
-    transform: translateY(8px) scale(0.98);
+    transform: translateY(6px) scale(0.98);
   }
 
   to {
@@ -173,10 +182,12 @@
   cursor: pointer;
 }
 
-.support-badge-close:hover {
-  border-color: var(--border);
-  background: var(--raised);
-  color: var(--text);
+@media (hover: hover) and (pointer: fine) {
+  .support-badge-close:hover {
+    border-color: var(--border);
+    background: var(--raised);
+    color: var(--text);
+  }
 }
 
 .support-badge-copy {
@@ -187,7 +198,8 @@
 }
 
 .support-badge-qr {
-  margin: 0;
+  width: min(100%, 168px);
+  margin: 0 auto;
   padding: 8px;
   border: 1px solid var(--rule);
   border-radius: var(--radius-control);
@@ -236,12 +248,6 @@
     color var(--dur-quick) var(--ease-out);
 }
 
-.support-badge-link:hover {
-  border-color: var(--control);
-  background: var(--active);
-  color: var(--frame-ink);
-}
-
 .support-badge-link.is-primary {
   border-color: var(--accent-ink);
   background: var(--accent);
@@ -249,44 +255,34 @@
   font-weight: 600;
 }
 
-.support-badge-link.is-primary:hover {
-  border-color: var(--accent-ink);
-  background: var(--accent-ink);
-  color: #fff;
+.support-badge-count {
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.18);
+  font-size: 10px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.25;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .support-badge-link:hover {
+    border-color: var(--control);
+    background: var(--active);
+    color: var(--frame-ink);
+  }
+
+  .support-badge-link.is-primary:hover {
+    border-color: var(--accent-ink);
+    background: var(--accent-ink);
+    color: #fff;
+  }
 }
 
 @media (max-width: 720px) {
   .support-badge {
-    left: 12px;
-    bottom: calc(30px + 56px + 10px); /* 状态栏 30px + 底部标签栏 56px */
-  }
-
-  .support-badge-pill {
-    height: 32px;
-  }
-
-  .support-badge-trigger {
-    padding: 0 9px;
-  }
-
-  .support-badge-github {
-    width: 32px;
-  }
-
-  .support-badge-star {
-    padding: 0 10px 0 8px;
-  }
-
-  .support-badge-star-label {
-    display: none;
-  }
-
-  .support-badge-label {
-    display: none;
-  }
-
-  .support-badge-panel {
-    width: min(272px, calc(100vw - 24px));
+    --badge-gap: 8px;
+    --badge-gap-bottom: calc(30px + 56px + 8px + env(safe-area-inset-bottom));
   }
 }
 
@@ -295,7 +291,7 @@
     animation: none;
   }
 
-  .support-badge-pill:hover {
+  .support-badge[data-dragging='true'] .support-badge-pill {
     transform: none;
   }
 }
