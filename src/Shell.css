@@ -4438,8 +4438,8 @@ body[data-drag-kind] {
   color: var(--accent);
 }
 
-/* 手指操作的屏幕保留 44px 点击高度。 */
-@media (pointer: coarse) {
+/* 手指操作的屏幕、以及窄到只剩触屏形态的窗口，都保留 44px 点击高度。 */
+@media (pointer: coarse), (max-width: 720px) {
   .wb-file-menu .wb-menu-group > button {
     min-height: 44px;
   }
