@@ -39,7 +39,7 @@ const startTags = [
 ]
 
 describe('通用网络图：同条件布尔输出合并', () => {
-  it('连续两条同条件普通输出合并为一步两个动作', () => {
+  it('连续两条同条件普通输出收进组合步，两路动作各带条件', () => {
     const chart = chartOf(program('同条件双输出', [
       tag('Start', '%I0.0', '启动'),
       tag('Lamp1', '%Q0.0', '一号灯'),
@@ -50,21 +50,22 @@ describe('通用网络图：同条件布尔输出合并', () => {
     ]))
 
     expect(chart.source).toBe('network')
-    expect(chart.steps.map((step) => step.number)).toEqual(['0', '1'])
-    expect(chart.steps[1].title).toBe('一号灯')
-    expect(chart.steps[1].actions).toEqual([
-      { text: '一号灯', detail: 'Q0.0=1' },
-      { text: '二号灯', detail: 'Q0.1=1' },
-    ])
-    expect(chart.edges).toHaveLength(1)
-    expect(chart.edges[0]).toMatchObject({
-      from: '__initial',
-      to: 'n1',
-      label: '启动（I0.0）',
+    expect(chart.kind).toBe('combined')
+    expect(chart.steps).toHaveLength(1)
+    expect(chart.steps[0]).toMatchObject({
+      key: '__combined',
+      number: '1',
+      title: '组合逻辑',
+      initial: true,
     })
+    expect(chart.steps[0].actions).toEqual([
+      { text: '启动 时 一号灯', detail: 'Q0.0=1' },
+      { text: '启动 时 二号灯', detail: 'Q0.1=1' },
+    ])
+    expect(chart.edges).toEqual([])
   })
 
-  it('第二条网络引用第一条输出时保持一网络一步', () => {
+  it('第二条网络引用第一条输出时不伪造步骤先后，引用条件留在动作上', () => {
     const chart = chartOf(program('输出互引', [
       tag('Start', '%I0.0', '启动'),
       tag('Lamp1', '%Q0.0', '一号灯'),
@@ -74,10 +75,12 @@ describe('通用网络图：同条件布尔输出合并', () => {
       rung('n2', '二号灯', [contact('n2-a', 'Start'), contact('n2-b', 'Lamp1')], 'Lamp2'),
     ]))
 
-    expect(chart.steps.map((step) => step.number)).toEqual(['0', '1', '2'])
-    expect(chart.steps[1].actions).toEqual([{ text: '一号灯', detail: 'Q0.0=1' }])
-    expect(chart.steps[2].actions).toEqual([{ text: '二号灯', detail: 'Q0.1=1' }])
-    expect(chart.edges[1].label).toContain('一号灯（Q0.0）')
+    expect(chart.steps).toHaveLength(1)
+    expect(chart.steps[0].actions).toEqual([
+      { text: '启动 时 一号灯', detail: 'Q0.0=1' },
+      { text: '启动 且 一号灯 时 二号灯', detail: 'Q0.1=1' },
+    ])
+    expect(chart.edges).toEqual([])
   })
 
   it('两个网络互不引用时并入同一步，条件写在各自动作上', () => {
@@ -142,7 +145,7 @@ describe('通用网络图：同条件布尔输出合并', () => {
 
     expect(chart.source).toBe('network')
     expect(chart.steps.map((step) => step.number)).toEqual(['1'])
-    expect(chart.steps[0].title).toBe('')
+    expect(chart.steps[0].title).toBe('组合逻辑')
     expect(chart.steps[0].initial).toBe(true)
     expect(chart.steps[0].actions.map((action) => action.text)).toEqual([
       '启动 A 时 输出一',

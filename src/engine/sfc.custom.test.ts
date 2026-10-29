@@ -188,52 +188,45 @@ describe('自建工程顺序功能图：三种不同结构', () => {
     expect(chart.edges).toHaveLength(3)
   })
 
-  it('三步置位流程保留两条进入第 3 步的边与三条动作', () => {
+  it('三步置位流程没有可证明的状态链，统一收进组合逻辑', () => {
     const chart = mustBuild(threeStepJumpProgram())
-    expect(chart.source).toBe('sr-steps')
-    expect(chart.steps.map((step) => step.number)).toEqual(['0', '1', '2', '3'])
-    expect(chart.steps[0].initial).toBe(true)
-    expect(chart.steps[0].tagName).toBeUndefined()
-    expect(chart.steps[1].tagName).toBe('Step1')
-    expect(chart.steps[1].tagAddress).toBe('M1.0')
-
-    expect(labelOf(chart, '__initial', 'Step1')).toBe('启动循环（I0.0） 且 各步均未激活')
-    expect(labelOf(chart, 'Step1', 'Step2')).toBe('配料完成（I0.1）')
-    expect(labelOf(chart, 'Step1', 'Step3')).toBe('越级跳转（I0.2）')
-    expect(labelOf(chart, 'Step2', 'Step3')).toBe('正常完成（I0.3）')
-    expect(labelOf(chart, 'Step3', 'Step1')).toBe('循环结束（I0.4）')
-    expect(chart.edges).toHaveLength(5)
-
-    const stepActions = (name: string) => chart.steps.find((step) => step.tagName === name)!.actions
-    expect(stepActions('Step1')).toEqual([{ text: '配料泵', detail: 'Q0.0=1' }])
-    expect(stepActions('Step2')).toEqual([{ text: '加热器', detail: 'Q0.1=1' }])
-    expect(stepActions('Step3')).toEqual([{ text: '报警灯', detail: 'Q0.2=1' }])
+    expect(chart.source).toBe('network')
+    expect(chart.kind).toBe('combined')
+    expect(chart.steps).toHaveLength(1)
+    expect(chart.steps[0]).toMatchObject({
+      key: '__combined',
+      number: '1',
+      title: '组合逻辑',
+      initial: true,
+    })
+    expect(chart.steps[0].actions.map((action) => action.text)).toEqual([
+      '启动循环 时 第 1 步，配料 置位',
+      '配料完成 时 第 2 步，加热 置位',
+      '（越级跳转 或 正常完成） 时 第 3 步，报警 置位',
+      '循环结束 时 第 1 步，配料 置位',
+      '配料泵',
+      '加热器',
+      '报警灯',
+    ])
+    expect(chart.edges).toEqual([])
   })
 
-  it('两台计数器按网络顺序各自成步，不套用状态链模板', () => {
+  it('两台计数器收进同一个组合步，不按网络顺序伪造工艺步骤', () => {
     const chart = mustBuild(dualCounterProgram())
     expect(chart.source).toBe('network')
-    expect(chart.steps).toHaveLength(5)
-    expect(chart.steps[0].initial).toBe(true)
-    // 初始步只保留双边框，不编造输出电平。
-    expect(chart.steps[0].actions).toEqual([])
-    expect(chart.steps.map((step) => step.title)).toEqual([
-      '', '累计四个工件', '累计两个坏件', '批次完成启动堆垛', '坏件报警点亮指示灯',
+    expect(chart.kind).toBe('combined')
+    expect(chart.steps).toHaveLength(1)
+    expect(chart.steps[0].actions).toEqual([
+      { text: '工件传感器 时 工件计数 计数', detail: '计数到 4 · 清零 I0.2' },
+      { text: '坏件传感器 时 坏件计数 计数', detail: '计数到 2 · 清零 I0.2' },
+      { text: '批次完成 时 堆垛电机', detail: 'Q0.0=1' },
+      { text: '坏件报警 时 坏件灯', detail: 'Q0.1=1' },
     ])
-    expect(chart.steps.slice(1).map((step) => step.actions[0])).toEqual([
-      { text: '工件计数 计数', detail: '计数到 4 · 清零 I0.2' },
-      { text: '坏件计数 计数', detail: '计数到 2 · 清零 I0.2' },
-      { text: '堆垛电机', detail: 'Q0.0=1' },
-      { text: '坏件灯', detail: 'Q0.1=1' },
-    ])
-    expect(chart.edges.map((edge) => edge.label)).toEqual([
-      '工件传感器（I0.0）', '坏件传感器（I0.1）', '批次完成（M2.0）', '坏件报警（M2.1）',
-      '下一扫描周期',
-    ])
+    expect(chart.edges).toEqual([])
     // 计数器输入与输出条件都来自本工程，没有混进自保持或步骤位模板。
     const texts = actionTexts(chart)
-    expect(texts).toContain('工件计数 计数')
-    expect(texts).toContain('堆垛电机')
+    expect(texts.some((text) => text.includes('工件计数 计数'))).toBe(true)
+    expect(texts.some((text) => text.includes('堆垛电机'))).toBe(true)
     expect(texts.some((text) => text.includes('输送带'))).toBe(false)
   })
 })
@@ -274,9 +267,9 @@ describe('自建工程 SVG 互不串图', () => {
     expect(steps).toContain('配料泵')
     expect(steps).toContain('加热器')
     expect(steps).toContain('报警灯')
-    // 导出的转换条件按设计压缩成信号地址，说明文字只留在数据模型与界面上。
-    expect(steps).toContain('I0.2')
-    expect(steps).toContain('I0.3')
+    // 组合动作保留各自的前置条件；这里的条件使用短注释，而不是强制展开地址。
+    expect(steps).toContain('越级跳转')
+    expect(steps).toContain('正常完成')
     expect(steps).not.toContain('输送带运行')
     expect(steps).not.toContain('工件计数')
 
@@ -443,25 +436,29 @@ function byteStepsProgram(withShift: boolean): Program {
 }
 
 describe('自建工程顺序功能图：不伪造拓扑', () => {
-  it('串联的两个步骤触点只算一条转移，条件写进标签', () => {
+  it('串联步骤触点在无状态证据时退回组合视图，不拆成并联转移', () => {
     const chart = mustBuild(seriesHandoverProgram())
-    expect(chart.source).toBe('sr-steps')
-    const intoThird = chart.edges.filter((edge) => edge.to === 'Step3')
-    expect(intoThird).toHaveLength(1)
-    expect(intoThird[0].from).toBe('Step2')
-    expect(intoThird[0].label).toContain('来料就绪')
-    expect(intoThird[0].label).toContain('第 1 步')
+    expect(chart.source).toBe('network')
+    expect(chart.kind).toBe('combined')
+    expect(chart.steps).toHaveLength(1)
+    expect(chart.steps[0].actions).toEqual([
+      { text: '重启 时 第 1 步 置位', detail: 'M1.0=1' },
+      { text: '来料就绪 时 第 3 步 置位', detail: 'M3.0=1' },
+    ])
+    expect(chart.edges).toEqual([])
   })
 
-  it('单步复位网络保留成退出分支', () => {
+  it('单步复位网络不伪造退出边，复位动作仍保留', () => {
     const chart = mustBuild(faultExitProgram())
-    expect(chart.source).toBe('sr-steps')
-    // Step1 从未被置位，不是可执行的一步；故障复位第 2 步后回到空闲态，
-    // 画回 Step1 会伪造一条走不到的边。
-    const exit = chart.edges.find((edge) => edge.from === 'Step2' && edge.to === '__initial')
-    expect(exit).toBeDefined()
-    expect(exit!.label).toContain('故障信号')
-    expect(labelOf(chart, 'Step2', 'Step3')).toContain('本步完成')
+    expect(chart.source).toBe('network')
+    expect(chart.kind).toBe('combined')
+    expect(chart.steps).toHaveLength(1)
+    expect(chart.steps[0].actions).toEqual([
+      { text: '启动推进 时 第 2 步 置位', detail: 'M2.0=1' },
+      { text: '本步完成 时 第 3 步 置位', detail: 'M3.0=1' },
+      { text: '故障信号 时 第 2 步 复位', detail: 'M2.0=0' },
+    ])
+    expect(chart.edges).toEqual([])
   })
 
   it('复位网络不当来源：自保持入口仍从初始步出发', () => {
@@ -474,26 +471,41 @@ describe('自建工程顺序功能图：不伪造拓扑', () => {
     expect(chart.edges.some((edge) => edge.from === 'S2' && edge.to === 'S1')).toBe(false)
   })
 
-  it('多组步骤位按转移证据选主序列，落选的组写进 notes 而不是静默消失', () => {
+  it('多组步骤位退回组合视图后仍保留落选组的输出与取舍说明', () => {
     const chart = mustBuild(dualBankProgram())
-    expect(chart.source).toBe('sr-steps')
-    expect(chart.steps.map((step) => step.tagName)).toEqual(['Step1', 'Step2', 'Step3'])
+    expect(chart.source).toBe('network')
+    expect(chart.kind).toBe('combined')
+    expect(chart.steps).toHaveLength(1)
+    expect(chart.steps[0].actions.map((action) => action.detail)).toEqual([
+      'M2.1=1', 'M2.2=1', 'M4.1=1',
+    ])
     expect(chart.notes.some((note) => note.includes('LineB'))).toBe(true)
   })
 
-  it('两组证据打平时退回每网络一步，两条序列都留在图上', () => {
+  it('两组证据打平时收进一个组合步，两条序列都留在图上', () => {
     const program = dualBankProgram(true)
     const chart = mustBuild(program)
     expect(chart.source).toBe('network')
-    expect(chart.steps).toHaveLength(program.rungs.length + 1)
+    expect(chart.kind).toBe('combined')
+    expect(chart.steps).toHaveLength(1)
+    expect(chart.steps[0].actions).toHaveLength(program.rungs.length)
+    expect(chart.steps[0].actions.map((action) => action.detail)).toEqual([
+      'M2.1=1', 'M2.2=1', 'M4.1=1', 'M4.2=1',
+    ])
+    expect(chart.edges).toEqual([])
   })
 
-  it('没有移位指令就不套移位模型，SET 条件与原样保留', () => {
+  it('没有移位指令就不套移位模型，SET 条件原样进入组合动作', () => {
     const chart = mustBuild(byteStepsProgram(false))
-    expect(chart.source).toBe('sr-steps')
+    expect(chart.source).toBe('network')
+    expect(chart.kind).toBe('combined')
     expect(chart.container).toBeUndefined()
-    expect(labelOf(chart, 'Step1', 'Step2')).toContain('推进按钮')
-    expect(chart.edges.some((edge) => edge.from === 'Step4' && edge.to === 'Step1')).toBe(false)
+    expect(chart.steps[0].actions.map((action) => action.text)).toEqual([
+      '推进按钮 时 第 2 步 置位',
+      '推进按钮 时 第 3 步 置位',
+      '推进按钮 时 第 4 步 置位',
+    ])
+    expect(chart.edges).toEqual([])
   })
 
   it('容器上真的出现 SHL 时才用移位模型', () => {

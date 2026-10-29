@@ -83,6 +83,21 @@ function surfaceOf(chart: SfcChart): string {
   return [...actionPairs(chart).flat(), ...chart.edges.map((edge) => edge.label)].join(' | ')
 }
 
+/**
+ * 归纳不出可靠状态链的工程统一落到「组合逻辑」：一步、编号 1、动作各自带条件、
+ * 没有转移边。这里把这条契约收在一处，避免每个用例各写一遍。
+ */
+function combinedStepOf(chart: SfcChart) {
+  expect(chart.source).toBe('network')
+  expect(chart.steps).toHaveLength(1)
+  const [step] = chart.steps
+  expect([step.number, step.key, step.title]).toEqual(['1', '__combined', '组合逻辑'])
+  // 没有先后关系的网络不画转移边，避免伪造顺序。
+  expect(chart.edges).toEqual([])
+  expect(chart.notes.join('')).toContain('不表示工艺上的先后步骤')
+  return step
+}
+
 /* ------------------------------------------------------------------ */
 /* SVG 文档契约：在 Node 里只做字符串检查，不依赖浏览器渲染。          */
 /* ------------------------------------------------------------------ */
@@ -403,23 +418,18 @@ function andActionProgram(): Program {
 describe('1 单触点单线圈', () => {
   const chart = chartOf(singleContactProgram())
 
-  it('一条网络 = 初始步 + 一步，动作与转移都对得上', () => {
-    expect(chart.source).toBe('network')
-    expect(stepKeys(chart)).toEqual(['0:__initial', '1:n1'])
-    // 初始步只保留双边框，不声明输出电平。
-    expect(chart.steps[0].actions).toEqual([])
-    expect(actionsOf(chart, 'n1')).toEqual([['运行灯', 'Q0.0=1']])
-    expect(chart.edges).toEqual([{ from: '__initial', to: 'n1', label: '启动（I0.0）' }])
+  it('一条网络归纳成一个组合步，条件写在动作上、不伪造转移', () => {
+    const step = combinedStepOf(chart)
+    expect(actionsOf(chart, step.key)).toEqual([['启动 时 运行灯', 'Q0.0=1']])
     expect(compactSfcText('启动（I0.0）')).toBe('I0.0')
   })
 
-  it('导出的 SVG 合规，只有一条前向转移、不画回跳箭头', () => {
+  it('导出的 SVG 合规，只有一个动作框、不画箭头', () => {
     const rendered = renderChart(chart)
     expectSvgContract(rendered)
-    // 初始步不编造动作，只有本步的动作框。
     expect(actionBoxCount(rendered.svg)).toBe(1)
     expect(rendered.svg).toContain('>1</text>')
-    expect(svgTexts(rendered.svg)).toEqual(expect.arrayContaining(['运行灯', 'Q0.0=1', 'I0.0']))
+    expect(svgTexts(rendered.svg)).toEqual(expect.arrayContaining(['启动 时 运行灯', 'Q0.0=1']))
     expect(rendered.svg).not.toMatch(/<path\b/)
   })
 })
@@ -427,22 +437,20 @@ describe('1 单触点单线圈', () => {
 describe('2 同条件双输出', () => {
   const chart = chartOf(sameConditionProgram())
 
-  it('同一进入条件的两个线圈合并成一步、两个动作', () => {
-    expect(chart.source).toBe('network')
-    expect(stepKeys(chart)).toEqual(['0:__initial', '1:n1'])
-    expect(actionsOf(chart, 'n1')).toEqual([['一号灯', 'Q0.0=1'], ['二号灯', 'Q0.1=1']])
-    expect(edgesOf(chart)).toEqual(['__initial→n1: 启动（I0.0）'])
-    expect(chart.notes.join('')).toContain('已合并为同一步')
+  it('同一进入条件的两个线圈落在同一个组合步的两个动作上', () => {
+    const step = combinedStepOf(chart)
+    expect(actionsOf(chart, step.key)).toEqual([
+      ['启动 时 一号灯', 'Q0.0=1'],
+      ['启动 时 二号灯', 'Q0.1=1'],
+    ])
   })
 
-  it('图上只有一个动作框、一条进入线', () => {
+  it('图上只有一个动作框，两条动作共用一个条件', () => {
     const rendered = renderChart(chart)
     expectSvgContract(rendered)
-    // 初始步不编造动作，只有合并后的动作框。
     expect(actionBoxCount(rendered.svg)).toBe(1)
-    expect(svgTexts(rendered.svg)).toContain('一号灯')
-    expect(svgTexts(rendered.svg)).toContain('二号灯')
-    expect(svgTexts(rendered.svg).filter((text) => text === 'I0.0')).toHaveLength(1)
+    expect(svgTexts(rendered.svg)).toContain('启动 时 一号灯')
+    expect(svgTexts(rendered.svg)).toContain('启动 时 二号灯')
   })
 })
 
@@ -450,14 +458,11 @@ describe('3 异条件双输出', () => {
   const chart = chartOf(differentConditionProgram())
 
   it('两条网络互不引用，合成一步并把各自条件写在动作上', () => {
-    expect(chart.source).toBe('network')
-    expect(stepKeys(chart)).toEqual(['1:__parallel'])
-    expect(actionsOf(chart, '__parallel')).toEqual([
+    const step = combinedStepOf(chart)
+    expect(actionsOf(chart, step.key)).toEqual([
       ['启动一 时 一号灯', 'Q0.0=1'],
       ['启动二 时 二号灯', 'Q0.1=1'],
     ])
-    expect(chart.edges).toHaveLength(0)
-    expect(chart.notes.join('')).toContain('不表示先后顺序')
   })
 
   it('两个条件同时成立时两个动作同时生效，不会被画成先后两步', () => {
@@ -482,10 +487,10 @@ describe('4 置位复位步链', () => {
     expect(actionsOf(chart, 'Step2')).toEqual([['二号灯', 'Q0.1=1']])
     expect(actionsOf(chart, 'Step3')).toEqual([['三号灯', 'Q0.2=1']])
     expect(edgesOf(chart)).toEqual([
-      'Step1→Step2: 下一步（I0.1）',
-      'Step2→Step3: 完成（I0.2）',
-      'Step3→Step1: 重新开始（I0.3）',
-      '__initial→Step1: 启动（I0.0） 且 各步均未激活',
+      'Step1→Step2: 下一步',
+      'Step2→Step3: 完成',
+      'Step3→Step1: 重新开始',
+      '__initial→Step1: 启动 且 各步均未激活',
     ])
     expect(chart.notes.join('')).toContain('上电首次扫描应进入该步')
   })
@@ -497,7 +502,8 @@ describe('4 置位复位步链', () => {
     expect(actionBoxCount(rendered.svg)).toBe(4)
     expect(svgTexts(rendered.svg)).toContain('等待启动，各步复位')
     expect((rendered.svg.match(/<path\b/g) ?? []).length).toBeGreaterThanOrEqual(2)
-    expect(svgTexts(rendered.svg)).toContain('I0.3')
+    // 转移文案只用变量短名，不再把地址重复写一遍。
+    expect(svgTexts(rendered.svg)).toContain('重新开始')
     // 「各步均未激活」是初始步的进入前提，删掉就变成任何时刻都能从初始步起步。
     expect(compactSfcText('启动（I0.0） 且 各步均未激活')).toBe('I0.0 且 各步均未激活')
   })
@@ -506,34 +512,30 @@ describe('4 置位复位步链', () => {
 describe('5 定时步链', () => {
   const chart = chartOf(timerProgram())
 
-  it('T1 到时的转移条件能识别出来，步号与灯光动作正确', () => {
-    expect(chart.source).toBe('sr-steps')
-    expect(stepKeys(chart)).toEqual(['0:__initial', '1:Step1', '2:Step2'])
-    expect(actionsOf(chart, 'Step1')).toEqual([['T1 计时 2s', ''], ['一号灯', 'Q0.0=1']])
-    expect(actionsOf(chart, 'Step2')).toEqual([['二号灯', 'Q0.1=1']])
-    expect(edgesOf(chart)).toEqual([
-      'Step1→Step2: T1 到时（2s）',
-      '__initial→Step1: 启动（I0.0） 且 各步均未激活',
+  it('只有置位没有复位的步链走组合视图，定时与两盏灯一个不少', () => {
+    const step = combinedStepOf(chart)
+    expect(step.actions.map((action) => action.text)).toEqual([
+      '启动 时 第 1 步 置位',
+      'T1 计时 2s',
+      '两秒到 时 第 2 步 置位',
+      '一号灯',
+      '二号灯',
     ])
   })
 
   it('第 1 步必须启动 T1（2s），否则「T1 到时」这条转移永远不会成立', () => {
-    expect(actionsOf(chart, 'Step1').map(([text]) => text)).toContain('T1 计时 2s')
+    expect(actionPairs(chart).map(([text]) => text)).toContain('T1 计时 2s')
   })
 })
 
 describe('6 计数网络', () => {
   const chart = chartOf(counterProgram())
 
-  it('计数与堆垛按网络顺序成步，计数阀值写进动作细节', () => {
-    expect(chart.source).toBe('network')
-    expect(stepKeys(chart)).toEqual(['0:__initial', '1:c1', '2:c2'])
-    expect(actionsOf(chart, 'c1')).toEqual([['批次计数 计数', '计数到 3 · 清零 I0.1']])
-    expect(actionsOf(chart, 'c2')).toEqual([['堆垛电机', 'Q0.0=1']])
-    expect(edgesOf(chart)).toEqual([
-      '__initial→c1: 计数脉冲（I0.0）',
-      'c1→c2: 批次完成（M0.0）',
-      'c2→__initial: 下一扫描周期',
+  it('计数与堆垛在同一扫描周期内并列求值，阀值写进动作细节', () => {
+    const step = combinedStepOf(chart)
+    expect(actionsOf(chart, step.key)).toEqual([
+      ['计数脉冲 时 批次计数 计数', '计数到 3 · 清零 I0.1'],
+      ['批次完成 时 堆垛电机', 'Q0.0=1'],
     ])
   })
 
@@ -545,12 +547,9 @@ describe('6 计数网络', () => {
 describe('7 并联进入条件', () => {
   const chart = chartOf(orProgram())
 
-  it('并联支路被识别为 或 关系的一条进入条件', () => {
-    expect(chart.source).toBe('network')
-    expect(stepKeys(chart)).toEqual(['0:__initial', '1:n1'])
-    expect(chart.edges).toHaveLength(1)
-    expect(chart.edges[0].label).toBe('（启动（I0.0） 或 自动（I0.1））')
-    expect(actionsOf(chart, 'n1')).toEqual([['运行灯', 'Q0.0=1']])
+  it('并联支路写成 或 关系，一个动作一个条件', () => {
+    const step = combinedStepOf(chart)
+    expect(actionsOf(chart, step.key)).toEqual([['（启动 或 自动） 时 运行灯', 'Q0.0=1']])
   })
 
   it('收括号后必须配平：图上应显示「I0.0 或 I0.1」', () => {
@@ -562,25 +561,29 @@ describe('7 并联进入条件', () => {
 
   it('导出的 SVG 里不该留下孤立的右括号', () => {
     const rendered = renderChart(chart)
-    expect(svgTexts(rendered.svg).filter((text) => text.includes('I0.0'))).toEqual(['I0.0 或 I0.1'])
+    const texts = svgTexts(rendered.svg)
+    // 动作文字会按动作框宽度折行，括号必须在同一行内成对。
+    expect(texts.some((text) => text.startsWith('（启动 或 自动）'))).toBe(true)
+    for (const line of texts.filter((text) => text.includes('）'))) {
+      expect(line.includes('（'), line).toBe(true)
+    }
   })
 })
 
 describe('8 启保停', () => {
   const chart = chartOf(selfHoldProgram())
 
-  it('启动 / 停止联锁被识别，运行位与运行灯落在同一步', () => {
-    expect(chart.source).toBe('network')
-    expect(stepKeys(chart)).toEqual(['0:__initial', '1:h1'])
-    expect(actionsOf(chart, 'h1')).toEqual([['输送运行', 'Q0.0=1'], ['运行灯', 'Q0.1=1']])
-    expect(edgesOf(chart)).toEqual([
-      '__initial→h1: 启动（I0.0） 且 停止（I0.1）=0',
-      'h1→__initial: 停止（I0.1）',
+  it('启动 / 停止联锁写在动作条件上，运行位与运行灯落在同一步', () => {
+    const step = combinedStepOf(chart)
+    expect(actionsOf(chart, step.key)).toEqual([
+      ['启动 且 停止=0 时 输送运行', 'Q0.0=1'],
+      ['输送运行 时 运行灯', 'Q0.1=1'],
     ])
   })
 
-  it('按下停止必须能退回初始步，图上要有这条退出边', () => {
-    expect(chart.edges.filter((edge) => /停止/.test(edge.label) && edge.to === '__initial')).toHaveLength(1)
+  it('按下停止必须断开自保持：停止联锁不能从图上消失', () => {
+    // 组合视图不画转移边，停止条件只能落在动作框里，写成「停止=0」。
+    expect(surfaceOf(chart)).toMatch(/停止=0/)
   })
 
   it('运行灯与输送运行在同一扫描周期得电，不能排到下一步', () => {
@@ -637,28 +640,31 @@ describe('10 空工程 / 11 只有触点', () => {
   it('界面在 null 时给出提示并提前返回，不会把 null 交给 serializeSfcSvg', () => {
     const start = appSource.indexOf('const startSfcExport')
     expect(start).toBeGreaterThan(-1)
-    const body = appSource.slice(start, start + 700)
+    const body = appSource.slice(start)
     expect(body).toContain('const chart = buildSfc(program)')
     expect(body).toContain('if (!chart)')
     expect(body).toContain('这个工程还没有梯形图网络')
-    expect(body.indexOf('if (!chart)')).toBeLessThan(body.indexOf('serializeSfcSvg'))
+    const guard = body.indexOf('if (!chart)')
+    // 提示文案变长也不该把这条顺序断言挤掉：按相对位置比，不按固定字数截断。
+    expect(guard).toBeGreaterThan(-1)
+    expect(body.indexOf('serializeSfcSvg')).toBeGreaterThan(guard)
   })
 })
 
 describe('12 同条件换序', () => {
   const chart = chartOf(commutativeMergeProgram())
 
-  it('两条网络条件写法不同（A 且 B / B 且 A），逻辑相同就合并成一步', () => {
-    expect(chart.source).toBe('network')
-    expect(stepKeys(chart)).toEqual(['0:__initial', '1:n1'])
-    expect(edgesOf(chart)).toEqual(['__initial→n1: 条件 A（I0.0） 且 条件 B（I0.1）'])
-    expect(compactSfcText(chart.edges[0].label)).toBe('I0.0 且 I0.1')
+  it('两条网络条件写法不同（A 且 B / B 且 A），逻辑相同就合在一步', () => {
+    combinedStepOf(chart)
+    expect(chart.steps[0].actions.map((action) => action.text)).toEqual([
+      '条件 A 且 条件 B 时 一号灯',
+      '条件 B 且 条件 A 时 二号灯',
+    ])
   })
 
-  it('A AND B 与 B AND A 是同一个条件，应合并成一步两个动作', () => {
+  it('A AND B 与 B AND A 是同一个条件，两个动作并列在同一个组合步里', () => {
     expect(chart.steps.map((step) => step.actions.map((action) => action.text))).toEqual([
-      [],
-      ['一号灯', '二号灯'],
+      ['条件 A 且 条件 B 时 一号灯', '条件 B 且 条件 A 时 二号灯'],
     ])
   })
 })
@@ -705,16 +711,16 @@ describe('13 启保停加定时和运行灯', () => {
 describe('14 两触点同时到位的动作', () => {
   const chart = chartOf(andActionProgram())
 
-  it('步链与转移正常，串联的两个步骤位没有伪造出额外边', () => {
-    expect(chart.source).toBe('sr-steps')
-    expect(stepKeys(chart)).toEqual(['0:__initial', '1:Step1', '2:Step2'])
-    expect(edgesOf(chart)).toEqual([
-      'Step1→Step2: 下一步（I0.1）',
-      '__initial→Step1: 启动（I0.0） 且 各步均未激活',
+  it('两个步骤位只出现在各自的置位动作里，没有伪造出额外边', () => {
+    const step = combinedStepOf(chart)
+    expect(actionsOf(chart, step.key)).toEqual([
+      ['启动 时 第 1 步 置位', 'M1.0=1'],
+      ['下一步 时 第 2 步 置位', 'M1.1=1'],
+      ['两步同时灯', 'Q0.0=1'],
     ])
   })
 
-  it('两步同时才亮的灯不能无条件写进单独一步，最多只能落在一个动作框', () => {
+  it('两步同时才亮的灯不能重复画：只能落在一个动作框里', () => {
     expect(chart.steps.filter((step) => step.actions.some((action) => action.detail === 'Q0.0=1'))).toHaveLength(1)
   })
 })
@@ -896,10 +902,11 @@ function hostileTextProgram(): Program {
 describe('15 双运行周期', () => {
   it('两条独立启保停链不能只画第一条，第二台电机和定时器必须保留', () => {
     const chart = chartOf(dualRunCycleProgram())
-    expect(chart.source).toBe('network')
+    const step = combinedStepOf(chart)
     expect(surfaceOf(chart)).toContain('电机二')
     expect(surfaceOf(chart)).toMatch(/T2|电机二到时/)
-    expect(chart.steps.length).toBeGreaterThanOrEqual(5)
+    // 两条链各自是一组自保持条件，同一扫描周期内并列求值，动作一条都不能丢。
+    expect(step.actions).toHaveLength(4)
   })
 })
 

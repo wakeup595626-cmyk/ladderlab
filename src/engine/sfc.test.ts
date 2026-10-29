@@ -97,8 +97,14 @@ describe('顺序功能图归纳', () => {
     const chart = buildSfc(lab(id))
     expect(chart).not.toBeNull()
     expect(chart!.source).toBe(expectedSource[id])
-    expect(chart!.steps.length).toBeGreaterThanOrEqual(2)
-    expect(chart!.edges.length).toBeGreaterThanOrEqual(2)
+    if (chart!.kind === 'combined') {
+      expect(chart!.steps).toHaveLength(1)
+      expect(chart!.steps[0].actions.length).toBeGreaterThan(0)
+      expect(chart!.edges).toEqual([])
+    } else {
+      expect(chart!.steps.length).toBeGreaterThanOrEqual(2)
+      expect(chart!.edges.length).toBeGreaterThanOrEqual(2)
+    }
   })
 
   it('六个实验的步骤与动作互不相同，不会共用同一张图', () => {
@@ -113,33 +119,33 @@ describe('顺序功能图归纳', () => {
 
   it('实验一按允许抢答与抢答锁存归纳', () => {
     const chart = buildSfc(lab('course-1'))!
-    expect(chart.steps.map((step) => step.number)).toEqual(['0', '1', '2'])
-    expect(chart.steps[1].actions).toEqual([{ text: '允许抢答', detail: 'M0.0=1' }])
-    expect(chart.steps[2].actions.map((action) => action.text)).toEqual(['抢答灯', '数码管段 A–C'])
+    expect(chart.steps.map((step) => step.number)).toEqual(['0', '1', '2', '3', '4', '5'])
+    expect(chart.steps[1]).toMatchObject({ key: 'Allow', title: '允许抢答', actions: [] })
+    expect(chart.steps[2]).toMatchObject({ key: 'L1', title: '1 号抢答灯' })
+    expect(chart.steps[2].actions).toEqual([{ text: '数码管段 A', detail: 'Q1.0=1' }])
+    expect(chart.steps[4].actions.map((action) => action.text)).toEqual(['数码管段 A', '数码管段 B'])
   })
 
-  it('实验二按网络顺序保留运行、计时、计数、回读', () => {
+  it('实验二把同一扫描周期的运行、计时、计数、回读收进组合步', () => {
     const chart = buildSfc(lab('course-2'))!
-    // 计数脉冲是独立网络，套「初始 / 运行 / 完成」会把它和回读网络一起吞掉，
-    // 所以这个实验必须走逐网络图：一拍一步，四段逻辑各占一步。
     expect(chart.source).toBe('network')
-    expect(chart.steps.map((step) => step.number)).toEqual(['0', '1', '2', '3', '4'])
-    expect(chart.steps[1].actions).toEqual([{ text: 'LED1 五秒熄灭', detail: 'Q0.0=1' }])
-    expect(chart.steps[2].actions).toEqual([{ text: 'T1 计时 5s', detail: 'M0.0=1' }])
-    expect(chart.steps[3].actions).toEqual([{ text: 'C1 计数', detail: '计数到 5 · 清零 I0.3' }])
-    expect(chart.steps[4].actions).toEqual([{ text: 'LED1 状态回读', detail: 'Q0.2=1' }])
-    const labels = chart.edges.map((edge) => edge.label).join(' | ')
-    expect(labels).toContain('启动按钮')
-    expect(labels).toContain('停止按钮')
-    expect(labels).toContain('计数脉冲')
-    expect(labels).toContain('下一扫描周期')
+    expect(chart.kind).toBe('combined')
+    expect(chart.steps).toHaveLength(1)
+    expect(chart.steps[0].actions).toEqual([
+      { text: '停止按钮=0 且 五秒到点=0 且 启动按钮 时 LED1 五秒熄灭', detail: 'Q0.0=1' },
+      { text: 'LED1 时 T1 计时 5s', detail: 'M0.0=1' },
+      { text: '计数脉冲 时 C1 计数', detail: '计数到 5 · 清零 I0.3' },
+      { text: 'LED1 时 LED1 状态回读', detail: 'Q0.2=1' },
+    ])
+    expect(chart.edges).toEqual([])
+    expect(chart.notes.join(' ')).toContain('同一扫描周期')
   })
 
   it('实验四按上行与下行方向归纳', () => {
     const chart = buildSfc(lab('course-4'))!
     expect(chart.steps.map((step) => step.number)).toEqual(['0', '1', '2'])
-    expect(chart.steps[1].actions[0]).toEqual({ text: '上行方向', detail: 'M1.0=1、Q0.3=1' })
-    expect(chart.steps[2].actions[0]).toEqual({ text: '下行方向', detail: 'M1.1=1、Q0.4=1' })
+    expect(chart.steps[1].actions[0]).toEqual({ text: 'UP', detail: 'Q0.3=1' })
+    expect(chart.steps[2].actions[0]).toEqual({ text: 'DOWN', detail: 'Q0.4=1' })
     expect(chart.edges.map((edge) => edge.label)).toEqual([
       '上行需求',
       '下行需求',
@@ -153,7 +159,8 @@ describe('顺序功能图归纳', () => {
     expect(chart.steps).toHaveLength(19)
     expect(chart.steps[1].actions[0].text).toBe('喷泉 1')
     expect(chart.steps[18].actions[0].text).toBe('喷泉 1·2·3·4·5·6·7·8')
-    expect(new Set(chart.edges.map((edge) => edge.label)).size).toBe(2)
+    expect(new Set(chart.edges.map((edge) => edge.label)).size).toBe(1)
+    expect(chart.edges.every((edge) => edge.label === 'Start 且 T1.Q')).toBe(true)
   })
 
   it('实验三按定时器串出六步循环和初始步', () => {
@@ -178,8 +185,11 @@ describe('顺序功能图归纳', () => {
     expect(edge('Step1', 'Step2')?.label).toBe('T1 到时（20s）')
     expect(edge('Step5', 'Step6')?.label).toBe('T5 到时（3s）')
     expect(edge('Step6', 'Step1')?.label).toBe('T6 到时（2s）')
-    expect(edge('__initial', 'Step1')?.label).toBe('运行状态（M0.0） 且 各步均未激活')
-    expect(chart!.edges).toHaveLength(7)
+    expect(edge('__initial', 'Step1')?.label).toBe('运行状态 且 各步均未激活')
+    const stops = chart!.edges.filter((item) => item.to === '__initial')
+    expect(stops).toHaveLength(6)
+    expect(stops.every((item) => item.label === '运行状态=0')).toBe(true)
+    expect(chart!.edges).toHaveLength(13)
   })
 
   it('实验六按移位容器排出八步，并带上回跳与停机分支', () => {
@@ -198,63 +208,53 @@ describe('顺序功能图归纳', () => {
     const edge = (from: string, to: string) => chart!.edges.find(
       (item) => item.from === from && item.to === to,
     )
-    expect(edge('Step1', 'Step2')?.label).toBe('单步 · 移位脉冲（M4.5） 或 自动 · 一秒节拍（M5.0）')
+    expect(edge('Step1', 'Step2')?.label).toBe('单步 · 移位脉冲 或 自动 · 一秒节拍')
     expect(edge('Step8', 'Step1')?.label)
       .toBe('单步 H 且 SD 保持 · 循环回 D 或 自动 H 且 SD 稳定 · 保持 / 循环')
     expect(edge('Step8', '__initial')?.label)
       .toBe('单步 H 且 SD 松开 · 入库结束 或 自动 H 松开 SD 清工位')
-    expect(edge('__initial', 'Step1')?.label).toContain('启动脉冲（M4.3）')
+    expect(edge('__initial', 'Step1')?.label).toBe('复位脉冲 或 启动脉冲 或 移位脉冲')
   })
 
-  it('手写置位复位程序：常闭步骤触点不会伪造转移来源', () => {
+  it('无法证明互斥的手写置位复位程序退回组合逻辑，不伪造转移来源', () => {
     const chart = buildSfc(srFixture())
     expect(chart).not.toBeNull()
-    expect(chart!.steps.map((step) => step.number)).toEqual(['0', '1', '2'])
-    expect(chart!.edges).toHaveLength(3)
-
-    const intoFirst = chart!.edges.filter((edge) => edge.to === 'Step1')
-    expect(intoFirst.map((edge) => edge.from).sort()).toEqual(['Step2', '__initial'])
-    expect(intoFirst.find((edge) => edge.from === '__initial')?.label)
-      .toBe('运行状态（M0.0） 且 各步均未激活')
-    expect(chart!.edges.find((edge) => edge.from === 'Step1' && edge.to === 'Step2')?.label)
-      .toBe('第 1 步完成')
-
-    const first = chart!.steps.find((step) => step.tagName === 'Step1')!
-    expect(first.actions).toEqual([{ text: '一号灯', detail: 'Q0.0=1' }])
+    expect(chart!.source).toBe('network')
+    expect(chart!.kind).toBe('combined')
+    expect(chart!.steps).toHaveLength(1)
+    expect(chart!.edges).toEqual([])
+    expect(chart!.steps[0].actions.map((action) => action.text)).toEqual([
+      '运行状态 时 第 1 步 置位',
+      '第 2 步 置位',
+      '第 1 步 置位',
+      '一号灯',
+      '二号灯',
+    ])
   })
 
   it('同一扫描周期内串联得到的输出并入同一步', () => {
     const chart = buildSfc(customFixture())
     expect(chart).not.toBeNull()
     expect(chart!.source).toBe('network')
-    expect(chart!.steps.map((step) => step.number)).toEqual(['0', '1'])
-    expect(chart!.steps[0].initial).toBe(true)
-    // 初始步只保留双边框，不编造输出电平。
-    expect(chart!.steps[0].actions).toEqual([])
-    expect(chart!.steps[1].title).toBe('一号电机')
-    expect(chart!.steps[1].actions).toEqual([
-      { text: '一号电机', detail: 'Q0.0=1' },
-      { text: '二号电机', detail: 'Q0.1=1' },
-      { text: '三号电机', detail: 'Q0.2=1' },
+    expect(chart!.kind).toBe('combined')
+    expect(chart!.steps).toHaveLength(1)
+    expect(chart!.steps[0]).toMatchObject({ key: '__combined', number: '1', initial: true })
+    expect(chart!.steps[0].actions).toEqual([
+      { text: '启动 且 停止=0 时 一号电机', detail: 'Q0.0=1' },
+      { text: '一号电机 时 二号电机', detail: 'Q0.1=1' },
+      { text: '二号电机 时 三号电机', detail: 'Q0.2=1' },
     ])
-    expect(chart!.edges).toHaveLength(2)
-    expect(chart!.edges[0].from).toBe('__initial')
-    expect(chart!.edges[0].to).toBe('n1')
-    // 输出自身的保持触点不进转移条件，进入第一步的是启动且停止未按下。
-    expect(chart!.edges[0].label).toContain('启动')
-    expect(chart!.edges[0].label).toContain('停止')
-    expect(chart!.edges[0].label).not.toContain('一号电机')
-    expect(chart!.edges[1].from).toBe('n1')
-    expect(chart!.edges[1].to).toBe('__initial')
-    expect(chart!.edges[1].label).toContain('停止')
+    expect(chart!.edges).toEqual([])
   })
 
   it('只有一条网络的自建工程也能导出单步图', () => {
     const base = customFixture()
     const chart = buildSfc({ ...base, name: '单网络', rungs: [base.rungs[0]] })!
-    expect(chart.steps).toHaveLength(2)
-    // 自保持网络里的停止触点同时形成一条回初始步的退出分支。
-    expect(chart.edges).toHaveLength(2)
+    expect(chart.steps).toHaveLength(1)
+    expect(chart.steps[0].actions).toEqual([
+      { text: '启动 且 停止=0 时 一号电机', detail: 'Q0.0=1' },
+    ])
+    expect(chart.edges).toEqual([])
     expect(() => renderSfcSvg(chart)).not.toThrow()
   })
 
@@ -303,17 +303,17 @@ describe('顺序功能图渲染', () => {
     // 导出只做无损缩写：M4.5 / M5.0 各自属于哪种运行模式必须留在图上。
     // 条件文字会按排版宽度折行，按 <text> 片段匹配，避免被行尾折断误判。
     const svgTexts = Array.from(rendered.svg.matchAll(/<text[^>]*>([^<]*)<\/text>/g), (match) => match[1])
-    expect(svgTexts.some((line) => line.includes('单步·M4.5'))).toBe(true)
+    expect(svgTexts.some((line) => line.includes('单步·移位脉冲'))).toBe(true)
     expect(svgTexts.some((line) => line.includes('自动'))).toBe(true)
-    expect(svgTexts.some((line) => line.includes('M5.0'))).toBe(true)
+    expect(svgTexts.some((line) => line.includes('一秒节拍'))).toBe(true)
     expect(rendered.svg).toContain('单步 H 且 SD 保持')
     expect(rendered.svg).toContain('SD=0 清工位')
     expect(rendered.svg).toContain('全部工位输出关闭')
     expect(rendered.svg).toContain('工位 D')
     expect(rendered.svg).toContain('Q0.3=1')
     expect(rendered.svg).not.toContain('（')
-    expect(rendered.svg).not.toContain('移位脉冲')
-    expect(rendered.svg).not.toContain('一秒节拍')
+    expect(rendered.svg).not.toContain('M4.5')
+    expect(rendered.svg).not.toContain('M5.0')
     expect(rendered.svg).not.toContain('LADDERLAB')
     expect(rendered.svg).not.toContain('实验六 · 装配流水线移位控制')
     expect(rendered.svg).not.toContain('SFC 导出')

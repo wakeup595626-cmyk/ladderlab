@@ -248,9 +248,14 @@ describe('SFC 差分 · 干净三步循环必须与图严格等价', () => {
     expect(chart).not.toBeNull()
     const model = chart as SfcChart
     // 只认结构，不认分类名：sr-steps / sr-states 都是「置位-复位步序」的不同归纳方式。
+    // Stop 会复位全部活动步，所以除正常推进外还必须有回到初始伪步的停止边。
     expect(model.edges.map((edge) => `${edge.from}->${edge.to}`).sort()).toEqual([
-      'S1->S2', 'S2->S3', 'S3->S1', '__initial->S1',
+      'S1->S2', 'S1->__initial',
+      'S2->S3', 'S2->__initial',
+      'S3->S1', 'S3->__initial',
+      '__initial->S1',
     ])
+    expect(model.edges).toHaveLength(7)
     const { states } = simulate(program, model, CLEAN_FRAMES)
     expect([...new Set(states)].sort()).toEqual(['', 'S1', 'S2', 'S3'])
     expect(compare(model, states)).toEqual({ unreachable: [], unvisited: [] })

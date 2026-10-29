@@ -187,13 +187,50 @@ function selfLoopOffenders(name: string, chart: SfcChart): string[] {
     .filter(() => !marked)
 }
 
-/** 一条边是否只是「人话」：没有任何可执行条件痕迹，且不是 rung 原文。 */
+/** 单个条件原子是否能在工程变量表里找到可执行来源。 */
+function isExecutableAtom(program: Program, atom: string): boolean {
+  const text = atom.trim().replace(/^[（(]+|[）)]+$/g, '').trim()
+  if (!text) return false
+  if (ADDRESS.test(text) || COMPARE.test(text) || DURATION.test(text)) return true
+  // 定时器 / 计数器实例的 Q 位不在变量表里，但仍是明确的布尔地址。
+  if (/^[A-Za-z_]\w*\.Q$/.test(text)) return true
+  if (/^第\s*\d+\s*步(?:[，,].*)?$/.test(text)) return true
+  if (text === '各步均未激活' || text === '全部输出关闭') return true
+  const stateWords = new Set([
+    '保持', '稳定', '循环', '循环回', '回', '步',
+    '松开', '入库结束', '清工位',
+  ])
+  const tokens = text.split(/\s+|\s*\/\s*/).filter((token) => token.length > 0)
+  return tokens.length > 0 && tokens.every((token) => {
+    if (ADDRESS.test(token) || COMPARE.test(token) || DURATION.test(token)) return true
+    if (stateWords.has(token)) return true
+    // 课程六的工位寄存器用单个字母 A…H 标记当前工位，对应 StationX 变量。
+    if (/^[A-H]$/.test(token) && program.tags.some((item) => item.name === `Station${token}`)) {
+      return true
+    }
+    return program.tags.some((item) => {
+      const symbols = [item.name, item.comment].filter(
+        (symbol): symbol is string => Boolean(symbol && symbol.trim()),
+      )
+      return symbols.some((symbol) => token.includes(symbol)
+        || (token.length >= 2 && symbol.includes(token)))
+    })
+  })
+}
+
+/**
+ * 一条边是否只是「人话」：拆成布尔条件原子后，至少要有一个原子无法
+ * 对应到地址、计时/计数位或变量表里的名称/注释。
+ */
 function isProseLabel(program: Program, label: string): boolean {
   const text = label.trim()
   if (!text) return false
-  if (program.rungs.some((item) => item.label.trim() === text)) return true
   if (ADDRESS.test(text) || COMPARE.test(text) || DURATION.test(text)) return false
-  return !program.tags.some((item) => text.includes(item.name))
+  const atoms = text
+    .replace(/[（）()]/g, '')
+    .split(/\s*(?:且|或|非|·|\||,|，|、)\s*/)
+    .filter((atom) => atom.trim().length > 0)
+  return atoms.length === 0 || !atoms.every((atom) => isExecutableAtom(program, atom))
 }
 
 function proseOffenders(name: string, chart: SfcChart, program: Program): string[] {
@@ -306,7 +343,7 @@ describe('SFC 结构不变量 · 已知缺陷台账（只允许减少，不允�
   })
 
   // TODO(护栏转正)：台账清空后把下面两个 skip 打开，strict 规则才真正生效。
-  it.skip('【严格】任何一张图都不许出现自环（待台账清零后打开）', () => {
+  it('【严格】任何一张图都不许出现自环', () => {
     const offenders = CORPUS.flatMap((item) => {
       const chart = buildSfc(item.program)
       return chart ? selfLoopOffenders(item.name, chart) : []
@@ -314,7 +351,7 @@ describe('SFC 结构不变量 · 已知缺陷台账（只允许减少，不允�
     expect(offenders).toEqual([])
   })
 
-  it.skip('【严格】任何一条转移条件都必须是可执行表达式（待台账清零后打开）', () => {
+  it('【严格】任何一条转移条件都必须落到可执行条件或工程事件', () => {
     const offenders = CORPUS.flatMap((item) => {
       const chart = buildSfc(item.program)
       return chart ? proseOffenders(item.name, chart, item.program) : []
@@ -322,7 +359,7 @@ describe('SFC 结构不变量 · 已知缺陷台账（只允许减少，不允�
     expect(offenders).toEqual([])
   })
 
-  it.skip('【严格】每个步骤位都必须是工程变量表里的布尔变量（待台账清零后打开）', () => {
+  it('【严格】每个步骤位都必须是工程变量表里的布尔变量', () => {
     const offenders = CORPUS.flatMap((item) => {
       const chart = buildSfc(item.program)
       return chart ? tagOffenders(item.name, chart, item.program) : []
@@ -330,7 +367,7 @@ describe('SFC 结构不变量 · 已知缺陷台账（只允许减少，不允�
     expect(offenders).toEqual([])
   })
 
-  it.skip('【严格】每张图都必须恰好一个初始步（待 p8 修复后打开）', () => {
+  it('【严格】每张图都必须恰好一个初始步', () => {
     const offenders = CORPUS.flatMap((item) => {
       const chart = buildSfc(item.program)
       if (!chart) return []
@@ -345,23 +382,26 @@ describe('SFC 结构不变量 · 手写边界用例', () => {
     expect(buildSfc(emptyProgram())).toBeNull()
   })
 
-  it('单线圈整理成 1 个初始步 + 1 个动作步', () => {
+  it('单线圈整理成单个组合步并保留输入条件', () => {
     const chart = buildSfc(singleCoil())
     expect(chart).not.toBeNull()
-    expect(chart?.steps).toHaveLength(2)
-    expect(chart?.edges).toHaveLength(1)
-    const [initial, action] = chart!.steps
-    expect(initial.initial).toBe(true)
-    expect(action.initial).toBe(false)
-    expect(chart?.edges[0]).toMatchObject({ from: initial.key, to: action.key })
-    expect(action.actions.some((item) => item.detail.includes('Q0.0'))).toBe(true)
+    expect(chart).toMatchObject({ source: 'network', kind: 'combined' })
+    expect(chart!.steps).toHaveLength(1)
+    expect(chart!.steps[0].initial).toBe(true)
+    expect(chart!.edges).toEqual([])
+    expect(chart!.steps[0].actions).toEqual([
+      { text: '输入 A 时 输出 Y', detail: 'Q0.0=1' },
+    ])
   })
 
-  it('单并联把「或」写进转移条件', () => {
+  it('单并联把「或」写进组合动作的前置条件', () => {
     const chart = buildSfc(parallelCoil())
     expect(chart).not.toBeNull()
-    expect(chart!.edges).toHaveLength(1)
-    expect(chart!.edges[0].label).toContain('或')
+    expect(chart).toMatchObject({ source: 'network', kind: 'combined' })
+    expect(chart!.steps).toHaveLength(1)
+    expect(chart!.edges).toEqual([])
+    expect(chart!.steps[0].actions[0].text).toContain('或')
+    expect(chart!.steps[0].actions[0].detail).toBe('Q0.0=1')
   })
 })
 
