@@ -55,9 +55,10 @@ npm run preview
 LadderLab 由个人利用业余时间维护，没有广告和内购。如果它帮你省下了一段调试时间，可以：
 
 - 在页面左下角点「请我喝杯咖啡」，用支付宝扫码支持；
-- 给仓库点个 Star，或到 [作者 GitHub 主页](https://github.com/wakeup595626-cmyk) 看看
-  其他项目；
-- 提交 Issue 反馈问题，同样很有帮助。
+- 点左下角的 Star 入口打开仓库，登录 GitHub 后点右上角 Star 即可（GitHub 不允许
+  第三方网页代点，必须本人确认）；
+- 到 [作者 GitHub 主页](https://github.com/wakeup595626-cmyk) 看看其他项目，或者提交
+  Issue 反馈问题。
 
 ## 参与贡献与许可
 
