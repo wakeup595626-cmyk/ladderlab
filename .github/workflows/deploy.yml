@@ -36,6 +36,21 @@ jobs:
           ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
           persist-credentials: false
 
+      - name: Gate manual deploy on CI
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          gate="$(gh run list --repo "$REPO" --workflow CI --commit "$SHA" \
+            --event push --limit 1 --json status,conclusion \
+            --jq '.[0] | "\(.status)/\(.conclusion)"')"
+          test "$gate" = "completed/success" || {
+            echo "::error::$SHA 没有成功的 push CI（含 e2e），拒绝手动部署"; exit 1;
+          }
+
       - name: Set up Node.js
         uses: actions/setup-node@v7
         with:
@@ -50,14 +65,25 @@ jobs:
 
       - name: Check the build is still the tip of main
         id: freshness
-        if: github.event_name == 'workflow_run'
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
           built="$(git rev-parse HEAD)"
-          latest="$(gh api "repos/$REPO/commits/main" --jq .sha)"
+          latest=""
+          for attempt in 1 2 3; do
+            if latest="$(gh api "repos/$REPO/commits/main" --jq .sha)" && [ -n "$latest" ]; then
+              break
+            fi
+            latest=""
+            echo "::warning::读取 main 最新提交失败（第 $attempt 次），3 秒后重试"
+            sleep 3
+          done
+          if [ -z "$latest" ]; then
+            echo "::error::无法确认 main 最新提交，拒绝部署以免把旧版本覆盖回 Pages。"
+            exit 1
+          fi
           if [ "$built" != "$latest" ]; then
             echo "stale=true" >> "$GITHUB_OUTPUT"
             echo "::warning::提交 $built 已不是 main 最新提交（$latest），跳过部署以免把旧版本覆盖回 Pages。"

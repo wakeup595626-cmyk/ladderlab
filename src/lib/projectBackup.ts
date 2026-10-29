@@ -1,5 +1,6 @@
 import type { Program } from '../engine/types'
-import { parseProgram } from './io'
+import type { ProgramIssue } from './io'
+import { parseProgram, parseProgramStructure } from './io'
 import { FIELD_LIMITS } from './limits'
 import type { SavedProject } from './projectLibrary'
 
@@ -24,12 +25,23 @@ export interface LibraryBackup {
   projects: SavedProject[]
 }
 
+/**
+ * 恢复时能读、但需要用户回头修正的工程。
+ * 空地址、重复地址、未定义引用都可能在编辑中间态里出现；备份恢复不该把它们
+ * 判成文件损坏，只提示用户去变量表修好后再保存。
+ */
+export interface BackupProjectWarning {
+  projectId: string
+  projectName: string
+  issues: ProgramIssue[]
+}
+
 export type ParseLibraryBackupResult =
-  | { ok: true; backup: LibraryBackup; projects: SavedProject[] }
+  | { ok: true; backup: LibraryBackup; projects: SavedProject[]; warnings: BackupProjectWarning[] }
   | { ok: false; error: string }
 
 export type ValidateBackupProjectsResult =
-  | { ok: true; projects: SavedProject[] }
+  | { ok: true; projects: SavedProject[]; warnings: BackupProjectWarning[] }
   | { ok: false; error: string }
 
 export interface LibraryMergeResult {
@@ -167,6 +179,7 @@ export function validateBackupProjects(value: unknown): ValidateBackupProjectsRe
   }
   const ids = new Set<string>()
   const projects: SavedProject[] = []
+  const warnings: BackupProjectWarning[] = []
   for (const [index, item] of value.entries()) {
     const record = asRecord(item)
     if (!record) {
@@ -184,10 +197,19 @@ export function validateBackupProjects(value: unknown): ValidateBackupProjectsRe
       return { ok: false, error: `备份中的工程「${id}」缺少有效的保存时间。` }
     }
     let program: Program
+    let issues: ProgramIssue[] = []
     try {
       program = parseProgram(record.program)
-    } catch (error) {
-      return { ok: false, error: `备份中的工程「${id}」内容无法读取：${errorText(error)}` }
+    } catch (strictError) {
+      // 结构完好、只是带着空地址/重复地址/未定义引用的备份仍然可以恢复，
+      // 记一条警告让界面提示用户去变量表修正。结构真坏了才拒绝。
+      try {
+        const parsed = parseProgramStructure(record.program)
+        program = parsed.program
+        issues = parsed.issues
+      } catch {
+        return { ok: false, error: `备份中的工程「${id}」内容无法读取：${errorText(strictError)}` }
+      }
     }
     const name = typeof record.name === 'string' ? record.name.trim() : ''
     if (name && name !== program.name) {
@@ -203,8 +225,11 @@ export function validateBackupProjects(value: unknown): ValidateBackupProjectsRe
       savedAt: record.savedAt,
       program,
     })
+    if (issues.length > 0) {
+      warnings.push({ projectId: id, projectName: program.name, issues })
+    }
   }
-  return { ok: true, projects }
+  return { ok: true, projects, warnings }
 }
 
 /**
@@ -282,6 +307,7 @@ export function parseLibraryBackup(text: string): ParseLibraryBackupResult {
       projects: validated.projects,
     },
     projects: validated.projects,
+    warnings: validated.warnings,
   }
 }
 

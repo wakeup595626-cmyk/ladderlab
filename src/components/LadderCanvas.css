@@ -47,7 +47,11 @@
   contain-intrinsic-size: auto 168px;
 }
 
+/* 菜单是段头的绝对定位子元素；content-visibility:auto 建立绘制包含后，
+   底部选项即使提高 z-index 也会被裁掉。只在菜单打开期间取消本段裁剪，
+   关闭后重新启用长工程的屏外跳过。 */
 .ll-rung:has(.ll-rung-menu[open]) {
+  content-visibility: visible;
   z-index: 2;
 }
 

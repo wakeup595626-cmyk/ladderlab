@@ -7,7 +7,7 @@ import type {
   TagKind,
 } from '../engine/types'
 import { contentRungs, ensureTrailingBlankRung } from '../engine/rungInvariant'
-import { splitReference } from '../engine/references'
+import { normalizeBitAddress, normalizeByteAddress, splitReference } from '../engine/references'
 import { FIELD_LIMITS, programTextFieldIssues, utf8ByteLength } from './limits'
 
 const CONTACT_KINDS: ContactKind[] = ['NO', 'NC', 'P', 'N', 'CMP']
@@ -28,6 +28,24 @@ const MAX_NODES = 5000
 const MAX_PATTERN = 1024
 export const MAX_IMPORT_BYTES = 5 * 1024 * 1024
 const RUNG_LIMIT_MESSAGE = `程序段数量超过上限 ${MAX_RUNGS} 条（末尾空白占位段不计入上限）。`
+
+/**
+ * 可修复的语义问题。它们不破坏文件结构，因此草稿、项目库和整包恢复都要
+ * 允许带着问题载入，由界面提示用户去变量表逐个修正；严格导入仍然拒绝。
+ */
+export type ProgramIssueCode = 'empty-address' | 'duplicate-address' | 'undefined-reference'
+
+export interface ProgramIssue {
+  code: ProgramIssueCode
+  message: string
+  tagId?: string
+  rungNumber?: number
+}
+
+export interface ParsedProgramStructure {
+  program: Program
+  issues: ProgramIssue[]
+}
 
 export interface LatestRequestGate {
   begin(): number
@@ -85,11 +103,17 @@ function isBlankRungInput(value: unknown): boolean {
 }
 
 function canonicalAddress(address: string): string {
-  // 地址层级（例如 %M0 与 %M0.0）是合法的父子关系，不能按区间重叠误判为冲突。
-  return address.trim().toUpperCase().replace(/\s+/g, '')
+  // 统一成 TIA 写法后再比较：M10.0 与 %M10.0 是同一个地址；
+  // 但 %M0 与 %M0.0 仍是两个不同的键，不能被强行合并。
+  const compact = address.trim().toUpperCase().replace(/\s+/g, '')
+  return normalizeBitAddress(compact) ?? normalizeByteAddress(compact) ?? compact
 }
 
-function validateReferences(rungs: Program['rungs'], tags: Program['tags']) {
+function validateReferences(
+  rungs: Program['rungs'],
+  tags: Program['tags'],
+  report: (issue: ProgramIssue) => void,
+): void {
   const tagNames = new Set(tags.map((tag) => tag.name))
   const tagIds = new Set(tags.map((tag) => tag.id))
   const timers = new Set<string>()
@@ -109,7 +133,7 @@ function validateReferences(rungs: Program['rungs'], tags: Program['tags']) {
     if (!tag.bitOf) continue
     const reference = tag.bitOf.trim()
     if (reference && !tagNames.has(reference)) {
-      fail(`位别名“${tag.name}”引用了未定义变量“${reference}”。`)
+      report({ code: 'undefined-reference', message: `位别名“${tag.name}”引用了未定义变量“${reference}”。` })
     }
   }
 
@@ -117,7 +141,11 @@ function validateReferences(rungs: Program['rungs'], tags: Program['tags']) {
     if (!reference?.trim()) return
     const { base } = splitReference(reference)
     if (!tagNames.has(base)) {
-      fail(`第 ${rungNumber} 条程序段的${label}引用了未定义变量“${reference.trim()}”。`)
+      report({
+        code: 'undefined-reference',
+        rungNumber,
+        message: `第 ${rungNumber} 条程序段的${label}引用了未定义变量“${reference.trim()}”。`,
+      })
     }
   }
 
@@ -126,12 +154,20 @@ function validateReferences(rungs: Program['rungs'], tags: Program['tags']) {
     const { base, field } = splitReference(reference)
     if (field?.toUpperCase() === 'Q') {
       if (!timers.has(base) && !counters.has(base)) {
-        fail(`第 ${rungNumber} 条程序段的${label}引用了不存在的定时器/计数器 Q 位“${reference.trim()}”。`)
+        report({
+          code: 'undefined-reference',
+          rungNumber,
+          message: `第 ${rungNumber} 条程序段的${label}引用了不存在的定时器/计数器 Q 位“${reference.trim()}”。`,
+        })
       }
       return
     }
     if (field === null && !tagNames.has(base)) {
-      fail(`第 ${rungNumber} 条程序段的${label}引用了未定义变量“${reference.trim()}”。`)
+      report({
+        code: 'undefined-reference',
+        rungNumber,
+        message: `第 ${rungNumber} 条程序段的${label}引用了未定义变量“${reference.trim()}”。`,
+      })
     }
   }
 
@@ -139,41 +175,85 @@ function validateReferences(rungs: Program['rungs'], tags: Program['tags']) {
     for (const node of nodes) {
       if (node.type === 'parallel') {
         if (node.autoTagId && !tagIds.has(node.autoTagId)) {
-          fail(`第 ${rungNumber} 条程序段的并联分支引用了不存在的自动变量 ID“${node.autoTagId}”。`)
+          report({
+            code: 'undefined-reference',
+            rungNumber,
+            message: `第 ${rungNumber} 条程序段的并联分支引用了不存在的自动变量 ID“${node.autoTagId}”。`,
+          })
         }
         node.branches.forEach((branch) => visitNodes(branch, rungNumber))
         continue
       }
 
-      const reference = node.tag.trim()
-      if (!reference) continue
       const label = CONTACT_LABELS[node.kind]
+      const reference = node.tag.trim()
+      // 空操作数不是“还没填”的正常中间态：它会直接让整条网络失效，
+      // 所以在导入、项目库、分享链接的统一检查里也要报出来。
+      if (!reference) {
+        report({
+          code: 'undefined-reference',
+          rungNumber,
+          message: `第 ${rungNumber} 条程序段的${label}没有填写变量。`,
+        })
+        continue
+      }
       const { base, field } = splitReference(reference)
       const fieldName = field?.toUpperCase() ?? null
       if (node.kind === 'CMP') {
         if (fieldName === 'CV') {
           if (!counters.has(base)) {
-            fail(`第 ${rungNumber} 条程序段的比较触点引用了不存在的计数器“${reference}”。`)
+            report({
+              code: 'undefined-reference',
+              rungNumber,
+              message: `第 ${rungNumber} 条程序段的比较触点引用了不存在的计数器“${reference}”。`,
+            })
           }
         } else if (field === null && !tagNames.has(base)) {
-          fail(`第 ${rungNumber} 条程序段的比较触点引用了未定义变量“${reference}”。`)
+          report({
+            code: 'undefined-reference',
+            rungNumber,
+            message: `第 ${rungNumber} 条程序段的比较触点引用了未定义变量“${reference}”。`,
+          })
         }
       } else if (fieldName === 'Q') {
         if (!timers.has(base) && !counters.has(base)) {
-          fail(`第 ${rungNumber} 条程序段的${label}引用了不存在的定时器/计数器 Q 位“${reference}”。`)
+          report({
+            code: 'undefined-reference',
+            rungNumber,
+            message: `第 ${rungNumber} 条程序段的${label}引用了不存在的定时器/计数器 Q 位“${reference}”。`,
+          })
         }
       } else if (field === null && !tagNames.has(base)) {
-        fail(`第 ${rungNumber} 条程序段的${label}引用了未定义变量“${reference}”。`)
+        report({
+          code: 'undefined-reference',
+          rungNumber,
+          message: `第 ${rungNumber} 条程序段的${label}引用了未定义变量“${reference}”。`,
+        })
       }
     }
   }
 
   rungs.forEach((rung, index) => {
     const rungNumber = index + 1
+    // 末尾空白占位段是编辑器的正常状态：没有节点、没有输出变量，
+    // 不能因为“输出为空”就把它算成待修正问题。
+    // 带工程名/备注的空占位段同样算占位：真实空输出段的 nodes 不会为空。
+    const blankPlaceholder = rung.nodes.length === 0
+      && rung.output.kind === 'COIL'
+      && !rung.output.tag.trim()
+    if (blankPlaceholder) return
     visitNodes(rung.nodes, rungNumber)
     const output = rung.output
     if (output.kind !== 'TON' && output.kind !== 'TOF' && output.kind !== 'TONR' && output.kind !== 'CTU') {
-      requireVariable(output.tag, rungNumber, `${output.kind} 输出变量`)
+      if (!output.tag.trim()) {
+        report({
+          code: 'undefined-reference',
+          rungNumber,
+          message: `第 ${rungNumber} 条程序段的${output.kind} 输出变量没有填写。`,
+        })
+      } else {
+        requireVariable(output.tag, rungNumber, `${output.kind} 输出变量`)
+      }
     }
     requireVariable(output.resetTag, rungNumber, '复位变量')
     requireVariable(output.qTag, rungNumber, '状态输出变量')
@@ -229,7 +309,14 @@ function parseNode(value: unknown, where: string, depth = 0): LadderNode {
   return fail(`${where}.type 只能是 contact 或 parallel。`)
 }
 
-export function parseProgram(input: unknown): Program {
+function parseProgramValue(input: unknown, strict: boolean): ParsedProgramStructure {
+  const issues: ProgramIssue[] = []
+  // 严格模式沿用旧行为：遇到第一处问题立刻抛出，消息与顺序保持不变；
+  // 宽松模式只记录问题，把工程原样交还给编辑界面。
+  const report = (issue: ProgramIssue): void => {
+    if (strict) fail(issue.message)
+    issues.push(issue)
+  }
   const data = record(input, '根对象')
   if (data.schema !== 1) fail('schema 必须是 1。')
   const profile = text(data.profile, 'profile') as ProfileId
@@ -271,13 +358,23 @@ export function parseProgram(input: unknown): Program {
       '变量地址',
       `${where}.address`,
     )
-    if (!address) fail(`变量“${name}”的地址为空。`)
-    const normalizedAddress = canonicalAddress(address)
-    const previousAddress = addresses.get(normalizedAddress)
-    if (previousAddress) {
-      fail(`变量“${previousAddress.name}”与“${name}”使用了重复地址“${normalizedAddress}”。`)
+    if (!address) {
+      report({ code: 'empty-address', message: `变量“${name}”的地址为空。`, tagId: id })
     }
-    addresses.set(normalizedAddress, { name, address })
+    // 空地址不参与重复判定，否则两个待补地址的变量会互相“撞车”。
+    const normalizedAddress = canonicalAddress(address)
+    if (normalizedAddress) {
+      const previousAddress = addresses.get(normalizedAddress)
+      if (previousAddress) {
+        report({
+          code: 'duplicate-address',
+          message: `变量“${previousAddress.name}”与“${name}”使用了重复地址“${normalizedAddress}”。`,
+          tagId: id,
+        })
+      } else {
+        addresses.set(normalizedAddress, { name, address })
+      }
+    }
     return {
       id,
       name,
@@ -391,21 +488,37 @@ export function parseProgram(input: unknown): Program {
   })
   const content = contentRungs(normalized)
   if (content.length > MAX_RUNGS) fail(RUNG_LIMIT_MESSAGE)
-  validateReferences(content, parsedTags)
-  return normalized
+  validateReferences(content, parsedTags, report)
+  return { program: normalized, issues }
 }
 
-export function parseProgramText(text: string): Program {
+function parseProgramJson(text: string): unknown {
   if (utf8ByteLength(text) > MAX_IMPORT_BYTES) {
     throw new Error(`工程文件超过 ${MAX_IMPORT_BYTES / (1024 * 1024)} MB 上限，请精简变量、程序段和注释后重试。`)
   }
-  let data: unknown
   try {
-    data = JSON.parse(text)
+    return JSON.parse(text)
   } catch {
     throw new Error('工程文件不是有效的 JSON。')
   }
-  return parseProgram(data)
+}
+
+/** 严格入口：导入外部工程时，任何语义问题都必须拒绝。 */
+export function parseProgram(input: unknown): Program {
+  return parseProgramValue(input, true).program
+}
+
+/** 宽松入口：草稿、项目库和备份恢复用它，语义问题收进 issues 交给界面提示。 */
+export function parseProgramStructure(input: unknown): ParsedProgramStructure {
+  return parseProgramValue(input, false)
+}
+
+export function parseProgramText(text: string): Program {
+  return parseProgram(parseProgramJson(text))
+}
+
+export function parseProgramStructureText(text: string): ParsedProgramStructure {
+  return parseProgramStructure(parseProgramJson(text))
 }
 
 export function serializeProgram(program: Program): string {

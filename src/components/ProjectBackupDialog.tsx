@@ -8,6 +8,7 @@ import {
   createLibraryBackup,
   parseLibraryBackup,
   serializeLibraryBackup,
+  type BackupProjectWarning,
   type LibraryBackup,
 } from '../lib/projectBackup'
 import type {
@@ -36,8 +37,35 @@ interface ProjectBackupDialogProps {
 
 type Step =
   | { kind: 'menu' }
-  | { kind: 'preview'; backup: LibraryBackup; source: string; baseline: SavedProject[] }
-  | { kind: 'done'; added: number; merged: number; renamed: number }
+  | {
+    kind: 'preview'
+    backup: LibraryBackup
+    source: string
+    baseline: SavedProject[]
+    warnings: BackupProjectWarning[]
+  }
+  | {
+    kind: 'done'
+    added: number
+    merged: number
+    renamed: number
+    warnings: BackupProjectWarning[]
+  }
+
+/**
+ * 整包恢复放宽到“结构正确即可载入”，所以这里要把语义问题翻译成用户看得懂的
+ * 待办：哪些工程、几处、修好之前不能再次存进项目库。
+ */
+function warningSummary(warnings: BackupProjectWarning[]): string {
+  const total = warnings.reduce((count, warning) => count + warning.issues.length, 0)
+  const detail = warnings
+    .slice(0, 2)
+    .map((warning) => `“${warning.projectName}”${warning.issues.length} 处`)
+    .join('、')
+  const more = warnings.length > 2 ? `等 ${warnings.length} 个工程` : ''
+  return `其中 ${warnings.length} 个工程共有 ${total} 处待修正的变量问题（${detail}${more}）。`
+    + '恢复后可以在变量表里补上空地址、改掉重复地址或修好未定义引用；这些工程修好之前无法再次保存到项目库。'
+}
 
 function pad(value: number): string {
   return String(value).padStart(2, '0')
@@ -117,7 +145,13 @@ function ProjectBackupDialogContent({
       }
       setError('')
       setNotice('')
-      setStep({ kind: 'preview', backup: result.backup, source: file.name, baseline: projects })
+      setStep({
+        kind: 'preview',
+        backup: result.backup,
+        source: file.name,
+        baseline: projects,
+        warnings: result.warnings,
+      })
     } catch (reason) {
       setStep({ kind: 'menu' })
       setNotice('')
@@ -127,7 +161,11 @@ function ProjectBackupDialogContent({
     }
   }
 
-  const handleRestore = async (backup: LibraryBackup, baseline: SavedProject[]) => {
+  const handleRestore = async (
+    backup: LibraryBackup,
+    baseline: SavedProject[],
+    warnings: BackupProjectWarning[],
+  ) => {
     setBusy(true)
     setError('')
     setNotice('')
@@ -144,7 +182,13 @@ function ProjectBackupDialogContent({
         return
       }
       onRestored(result.projects, result.broken)
-      setStep({ kind: 'done', added: result.added, merged: result.merged, renamed: result.renamed })
+      setStep({
+        kind: 'done',
+        added: result.added,
+        merged: result.merged,
+        renamed: result.renamed,
+        warnings,
+      })
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '恢复失败，请重试。')
     } finally {
@@ -259,12 +303,13 @@ function ProjectBackupDialogContent({
             projects={step.baseline}
             backup={step.backup}
             source={step.source}
+            warnings={step.warnings}
             busy={busy}
             onBack={() => {
               setStep({ kind: 'menu' })
               setError('')
             }}
-            onConfirm={() => void handleRestore(step.backup, step.baseline)}
+            onConfirm={() => void handleRestore(step.backup, step.baseline, step.warnings)}
           />
         )}
 
@@ -279,6 +324,9 @@ function ProjectBackupDialogContent({
               </small>
             </div>
             <p className="project-import-note">当前正在编辑的工程不会被替换，关掉这个窗口后即可从项目列表打开恢复的工程。</p>
+            {step.warnings.length > 0 && (
+              <p className="project-backup-warning" role="alert">{warningSummary(step.warnings)}</p>
+            )}
             <div className="project-import-actions">
               <button type="button" className="project-import-confirm" onClick={onClose}>完成</button>
             </div>
@@ -295,6 +343,7 @@ function BackupPreview({
   projects,
   backup,
   source,
+  warnings,
   busy,
   onBack,
   onConfirm,
@@ -302,6 +351,7 @@ function BackupPreview({
   projects: SavedProject[]
   backup: LibraryBackup
   source: string
+  warnings: BackupProjectWarning[]
   busy: boolean
   onBack: () => void
   onConfirm: () => void
@@ -330,6 +380,9 @@ function BackupPreview({
         <p className="project-backup-warning" role="alert">
           其中 {olderCount} 个工程在备份里的版本比本机现有的更旧，确认恢复会用备份内容覆盖本机版本。
         </p>
+      )}
+      {warnings.length > 0 && (
+        <p className="project-backup-warning" role="alert">{warningSummary(warnings)}</p>
       )}
       {visible.length > 0 && (
         <ul className="project-backup-list">

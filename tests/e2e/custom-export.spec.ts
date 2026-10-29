@@ -12,13 +12,16 @@ export interface RungSpec {
   title: string
   /** 主线路上的常开触点，按从左到右的顺序。 */
   contacts: string[]
-  output: { kind: 'COIL' | 'SET'; tag: string }
+  output: { kind: 'COIL' | 'SET' | 'RESET'; tag: string }
 }
 
 /**
  * 自定义工程：第 1 步既能正常移交第 2 步，也能在 SkipRequest 下越级跳到第 3 步。
  * 三个 StepN 变量会被顺序功能图识别成步骤位（Step1/Step2/Step3），
  * 因此这张 SFC 只能由本工程现算，内置实验的固定模板里没有这些名字。
+ * 后两步各自复位第 1 步，构成真实的单令牌交接；只置位不复位的工程会
+ * 故意降级成「组合逻辑」单步图（见 src/engine/sfc.custom.test.ts），
+ * 这里不拿它冒充顺序步链。
  */
 export const CUSTOM_PROGRAM = {
   name: '越级跳步验收工程',
@@ -26,6 +29,8 @@ export const CUSTOM_PROGRAM = {
     { title: '启动进入第一步', contacts: ['StartCycle'], output: { kind: 'SET', tag: 'Step1' } },
     { title: '第一步移交第二步', contacts: ['Step1'], output: { kind: 'SET', tag: 'Step2' } },
     { title: '跳过第二步', contacts: ['Step1', 'SkipRequest'], output: { kind: 'SET', tag: 'Step3' } },
+    { title: '第二步结束复位第一步', contacts: ['Step2'], output: { kind: 'RESET', tag: 'Step1' } },
+    { title: '第三步结束复位第一步', contacts: ['Step3'], output: { kind: 'RESET', tag: 'Step1' } },
     { title: '第二步驱动输送带', contacts: ['Step2'], output: { kind: 'COIL', tag: 'ConveyorRun' } },
     { title: '第三步点亮报警灯', contacts: ['Step3'], output: { kind: 'COIL', tag: 'AlarmLamp' } },
   ] satisfies RungSpec[],
@@ -229,7 +234,7 @@ async function setOutput(page: Page, spec: RungSpec['output']): Promise<void> {
   await lastRung(page).locator('[data-output-id]').click()
   const panel = page.locator('.qe-panel')
   await panel.getByLabel('指令类型').selectOption({
-    label: spec.kind === 'SET' ? '置位线圈' : '线圈',
+    label: spec.kind === 'SET' ? '置位线圈' : spec.kind === 'RESET' ? '复位线圈' : '线圈',
   })
   const target = panel.getByLabel('输出变量')
   await target.fill(spec.tag)

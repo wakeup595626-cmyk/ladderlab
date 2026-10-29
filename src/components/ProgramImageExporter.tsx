@@ -464,15 +464,34 @@ function serializeSvg(source: SVGSVGElement) {
   }
 }
 
-function loadSvgImage(xml: string) {
+function loadSvgImage(xml: string, signal?: AbortSignal) {
   const url = URL.createObjectURL(new Blob([xml], { type: 'image/svg+xml;charset=utf-8' }))
   const image = new Image()
   image.decoding = 'sync'
   const loaded = new Promise<void>((resolve, reject) => {
-    image.onload = () => resolve()
-    image.onerror = () => reject(new Error('程序段图形解码失败'))
+    const cleanup = () => signal?.removeEventListener('abort', onAbort)
+    const onAbort = () => {
+      cleanup()
+      image.onload = null
+      image.onerror = null
+      image.src = ''
+      reject(new DOMException('导出已取消', 'AbortError'))
+    }
+    if (signal?.aborted) {
+      onAbort()
+      return
+    }
+    signal?.addEventListener('abort', onAbort, { once: true })
+    image.onload = () => {
+      cleanup()
+      resolve()
+    }
+    image.onerror = () => {
+      cleanup()
+      reject(new Error('程序段图形解码失败'))
+    }
   })
-  image.src = url
+  if (!signal?.aborted) image.src = url
   return { image, url, loaded }
 }
 
@@ -507,11 +526,12 @@ function findContentBounds(canvas: HTMLCanvasElement) {
   return { left, top, right, bottom }
 }
 
-async function prepareRung(svg: SVGSVGElement, label: string, title: string) {
+async function prepareRung(svg: SVGSVGElement, label: string, title: string, signal?: AbortSignal) {
   const serialized = serializeSvg(svg)
-  const { image, url, loaded } = loadSvgImage(serialized.xml)
+  const { image, url, loaded } = loadSvgImage(serialized.xml, signal)
   try {
     await loaded
+    if (signal?.aborted) throw new DOMException('导出已取消', 'AbortError')
     await image.decode().catch(() => {})
 
     const rasterWidth = Math.ceil(serialized.width * SOURCE_SCALE)
@@ -982,6 +1002,7 @@ export default function ProgramImageExporter({
 
   useEffect(() => {
     let cancelled = false
+    const controller = new AbortController()
 
     const capture = async () => {
       // 光栅化出来的每段小图都要在导出结束（含失败、取消）后统一释放。
@@ -1023,12 +1044,16 @@ export default function ProgramImageExporter({
             throw new Error('有程序段没有绘制内容，无法生成 SVG')
           }
           const markup = mode === 'plain'
-            ? await buildPlainVector(vectorRungs, planPlainLayout(vectorRungs), () => cancelled)
+            ? await buildPlainVector(
+              vectorRungs,
+              planPlainLayout(vectorRungs),
+              () => cancelled || controller.signal.aborted,
+            )
             : await buildCompleteVector(
               program,
               vectorRungs,
               planCompleteLayout(vectorRungs),
-              () => cancelled,
+              () => cancelled || controller.signal.aborted,
             )
           if (markup && !cancelled) onComplete({ format: 'svg', data: markup })
           return
@@ -1039,7 +1064,12 @@ export default function ProgramImageExporter({
           if (cancelled) return
           const rung = exportProgram.rungs[index]
           if (!rung) break
-          const result = await prepareRung(svg, '程序段 ' + (index + 1), rung.label)
+          const result = await prepareRung(
+            svg,
+            '程序段 ' + (index + 1),
+            rung.label,
+            controller.signal,
+          )
           if (cancelled) return
           if (result) {
             prepared.push(result)
@@ -1074,7 +1104,10 @@ export default function ProgramImageExporter({
     }
 
     void capture()
-    return () => { cancelled = true }
+    return () => {
+      cancelled = true
+      controller.abort()
+    }
     // 每一张图片只挂载一次；StrictMode 的第一次重放不能抢先交付半成品。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])

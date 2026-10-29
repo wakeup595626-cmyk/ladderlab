@@ -1,5 +1,6 @@
 import type { Program } from '../engine/types'
-import { parseProgram, parseProgramText, serializeProgram } from './io'
+import type { ProgramIssue } from './io'
+import { parseProgramStructure, parseProgramStructureText, serializeProgram } from './io'
 
 const LEGACY_STORAGE_KEY = 'ladderlab.project.v1'
 const MIRROR_STORAGE_KEY = 'ladderlab.project.v1.mirror.v2'
@@ -20,6 +21,8 @@ export type LoadSavedProgramResult =
   | {
     status: 'ok'
     program: Program
+    /** 载入时发现的可修复语义问题（空地址、重复地址、未定义引用）。 */
+    issues: ProgramIssue[]
     savedAt: number
     projectId: string | null
     baseSavedAt: number | null
@@ -38,6 +41,7 @@ export type SaveProgramResult = { ok: true; savedAt: number } | { ok: false; err
 
 export interface ProgramDraftSnapshot {
   program: Program
+  issues: ProgramIssue[]
   projectId: string | null
   baseSavedAt: number | null
   tabId: string
@@ -99,45 +103,74 @@ function optionalSavedAt(value: unknown): number | null {
   return number
 }
 
-/** 解析新旧两种草稿格式；旧格式只能推断为“无项目作用域”。 */
-export function parseProgramDraft(raw: string): ProgramDraftSnapshot | null {
+export type ProgramDraftParseResult =
+  | { ok: true; snapshot: ProgramDraftSnapshot }
+  | { ok: false; message: string }
+
+/**
+ * 解析新旧两种草稿格式；旧格式只能推断为“无项目作用域”。
+ *
+ * 草稿是用户还没写完的中间态：空地址、重复地址、未定义引用都可能在编辑器里
+ * 真实出现，随后被自动保存。这些属于可修复的语义问题，不能当成“工程损坏”
+ * 拒绝载入；它们收进 issues 交给界面提示，工程本体照常还回去。
+ */
+export function parseProgramDraftResult(raw: string): ProgramDraftParseResult {
   let value: unknown
   try {
     value = JSON.parse(raw)
   } catch {
-    return null
+    return { ok: false, message: '草稿不是有效的 JSON' }
   }
 
   if (value && typeof value === 'object' && !Array.isArray(value)) {
     const data = value as Record<string, unknown>
-    if (data.schema === DRAFT_SCHEMA && data.program && typeof data.program === 'object') {
+    if (data.schema === DRAFT_SCHEMA) {
+      if (!data.program || typeof data.program !== 'object') {
+        return { ok: false, message: '草稿信封里缺少工程内容' }
+      }
       try {
+        const parsed = parseProgramStructure(data.program)
         return {
-          program: parseProgram(data.program),
-          projectId: typeof data.projectId === 'string' && data.projectId.trim()
-            ? data.projectId
-            : null,
-          baseSavedAt: optionalSavedAt(data.baseSavedAt),
-          tabId: typeof data.tabId === 'string' && data.tabId ? data.tabId : 'legacy-envelope',
-          savedAt: optionalSavedAt(data.savedAt) ?? Date.now(),
+          ok: true,
+          snapshot: {
+            program: parsed.program,
+            issues: parsed.issues,
+            projectId: typeof data.projectId === 'string' && data.projectId.trim()
+              ? data.projectId
+              : null,
+            baseSavedAt: optionalSavedAt(data.baseSavedAt),
+            tabId: typeof data.tabId === 'string' && data.tabId ? data.tabId : 'legacy-envelope',
+            savedAt: optionalSavedAt(data.savedAt) ?? Date.now(),
+          },
         }
-      } catch {
-        return null
+      } catch (error) {
+        return { ok: false, message: `草稿里的工程内容已损坏：${errorMessage(error)}` }
       }
     }
   }
 
   try {
+    const parsed = parseProgramStructure(value)
     return {
-      program: parseProgram(value),
-      projectId: null,
-      baseSavedAt: null,
-      tabId: 'legacy',
-      savedAt: getLegacySavedAt() ?? Date.now(),
+      ok: true,
+      snapshot: {
+        program: parsed.program,
+        issues: parsed.issues,
+        projectId: null,
+        baseSavedAt: null,
+        tabId: 'legacy',
+        savedAt: getLegacySavedAt() ?? Date.now(),
+      },
     }
-  } catch {
-    return null
+  } catch (error) {
+    return { ok: false, message: `草稿内容无法读取：${errorMessage(error)}` }
   }
+}
+
+/** 兼容只需要“能不能读”的旧调用方；诊断信息用 parseProgramDraftResult。 */
+export function parseProgramDraft(raw: string): ProgramDraftSnapshot | null {
+  const result = parseProgramDraftResult(raw)
+  return result.ok ? result.snapshot : null
 }
 
 type DraftReadResult =
@@ -157,10 +190,10 @@ function readDraft(
     return { status: 'corrupt', raw: '', message: errorMessage(error) }
   }
   if (!raw) return { status: 'missing' }
-  const snapshot = parseProgramDraft(raw)
-  return snapshot
-    ? { status: 'ok', raw, snapshot }
-    : { status: 'corrupt', raw, message: '草稿格式无法识别或工程内容不完整' }
+  const parsed = parseProgramDraftResult(raw)
+  return parsed.ok
+    ? { status: 'ok', raw, snapshot: parsed.snapshot }
+    : { status: 'corrupt', raw, message: parsed.message }
 }
 
 /** Storage 访问器本身也可能在隐私模式或禁用 Cookie 时抛错。 */
@@ -447,9 +480,11 @@ export function loadSavedProgram(): LoadSavedProgramResult {
   if (!legacyText) return { status: 'none' }
 
   try {
+    const parsed = parseProgramStructureText(legacyText)
     return {
       status: 'ok',
-      program: parseProgramText(legacyText),
+      program: parsed.program,
+      issues: parsed.issues,
       projectId: null,
       baseSavedAt: null,
       tabId: 'legacy',

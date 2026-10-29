@@ -54,19 +54,49 @@ function svgRects(svg: string, canvasWidth: number, canvasHeight: number): Box[]
   ))
 }
 
+function decodeXmlText(value: string): string {
+  const entities: Record<string, string> = {
+    amp: '&',
+    lt: '<',
+    gt: '>',
+    quot: '"',
+    apos: "'",
+  }
+  return value.replace(/&(amp|lt|gt|quot|apos);/g, (_, name: string) => entities[name])
+}
+
+function svgTexts(svg: string): Array<{ x: number; y: number; text: string }> {
+  return Array.from(svg.matchAll(/<text\s([^>]*)>([^<]*)<\/text>/g), (match) => {
+    const map: Record<string, string> = {}
+    for (const attr of match[1].matchAll(/([A-Za-z0-9-]+)="([^"]*)"/g)) map[attr[1]] = attr[2]
+    return { x: Number(map.x), y: Number(map.y), text: decodeXmlText(match[2]) }
+  })
+}
+
 describe('顺序功能图的回跳走线与标签槽', () => {
   it('course-1 的交叉数压到结构下限，所有回跳条件落进无冲突的同一列', () => {
-    const layout = computeSfcLayout(courseChart('course-1'))
+    const chart = courseChart('course-1')
+    const layout = computeSfcLayout(chart)
     // 五条回跳（含一条把第 2–5 步合成的「复位按钮」总线）各占一条通道，条件统一
     // 进同一标签槽；同源出口还必须错开，穷举通道顺序与出口高度后交叉最小值仍是 5。
-    // 这里锁住上限，避免改线时退化回 8。
-    expect(layout.crossingCount).toBeLessThanOrEqual(5)
+    // 这里同时锁住上下限，避免改线退化，也避免交叉检测器静默失效。
+    expect(layout.crossingCount).toBe(5)
     // 每个计到的交叉都必须在竖线上切出 6px 缺口，不能只剩统计数字。
     expect(layout.crossingGapCount).toBe(layout.crossingCount)
+    expect(layout.crossingGapCount).toBeGreaterThan(0)
     expect(layout.labelConflictCount).toBe(0)
     expect(layout.labels.length).toBeGreaterThan(0)
     const rightEdges = new Set(layout.labels.map((label) => label.box.x + label.box.width))
     expect(rightEdges.size).toBe(1)
+
+    // 从最终 SVG 反解文字坐标，确认真实画面仍落在布局给出的标签槽里。
+    const firstLabel = layout.labels[0]
+    const texts = svgTexts(renderSfcSvg(chart).svg)
+    expect(texts).toContainEqual({
+      x: firstLabel.anchor.x,
+      y: firstLabel.box.y + 13,
+      text: firstLabel.lines[0],
+    })
   })
 
   it('course-6 的两条回跳不交叉，短跨度通道排在长跨度里侧', () => {

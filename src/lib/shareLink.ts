@@ -1,5 +1,6 @@
 import type { Program } from '../engine/types'
-import { MAX_IMPORT_BYTES, parseProgramText, serializeProgram } from './io'
+import { MAX_IMPORT_BYTES, parseProgramStructureText, serializeProgram } from './io'
+import type { ParsedProgramStructure } from './io'
 
 /**
  * 分享链接：把整份工程压进 URL 片段，AI 生成工程后给学生一个可以直接点开的地址。
@@ -119,7 +120,8 @@ export async function encodeProgramShare(program: Program): Promise<string> {
   return `${HASH_PREFIX}${FORMAT_PLAIN}.${toBase64Url(bytes)}`
 }
 
-export async function decodeProgramShare(hash: string): Promise<Program> {
+/** 分享链接是编辑器入口之一，结构正确但变量待修正的工程也必须能读回。 */
+export async function decodeProgramShareStructure(hash: string): Promise<ParsedProgramStructure> {
   if (!isShareProgramHash(hash)) throw new Error('这不是 LadderLab 的分享链接。')
   const payload = hash.slice(HASH_PREFIX.length)
   const split = payload.indexOf('.')
@@ -158,8 +160,17 @@ export async function decodeProgramShare(hash: string): Promise<Program> {
   }
 
   try {
-    return parseProgramText(text)
+    return parseProgramStructureText(text)
   } catch (reason) {
     throw new Error(`分享链接里的工程无法导入：${reason instanceof Error ? reason.message : '格式不正确'}`)
   }
+}
+
+/** 保留严格解码入口，供只接受完整工程的调用方和既有测试使用。 */
+export async function decodeProgramShare(hash: string): Promise<Program> {
+  const { program, issues } = await decodeProgramShareStructure(hash)
+  if (issues.length > 0) {
+    throw new Error(`分享链接里的工程无法导入：${issues[0]?.message ?? '工程仍有待修正的问题'}`)
+  }
+  return program
 }

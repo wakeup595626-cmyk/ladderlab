@@ -30,6 +30,7 @@ import {
   pickDefaultTag,
   pruneOrphanTags,
   snapshotRung,
+  tagAddressProblem,
   tagsInRung,
   tagsDependingOn,
   tagUsage,
@@ -212,6 +213,7 @@ describe('programOps 拖放操作', () => {
   it('makeContactNode 为 CMP 自动补 INT，为普通触点补 BOOL', () => {
     const source = program([rung('r1', [])], [])
     const compared = makeContactNode(source, 'CMP')
+    if (!compared.node) throw new Error('CMP 触点应自动创建 INT 变量')
 
     expect(source.tags).toEqual([])
     expect(compared.program.tags).toHaveLength(1)
@@ -222,6 +224,7 @@ describe('programOps 拖放操作', () => {
     expect(compared.node.compare).toEqual({ op: '>=', value: 1 })
 
     const ordinary = makeContactNode(compared.program, 'NO')
+    if (!ordinary.node) throw new Error('普通触点应自动创建 BOOL 变量')
     expect(ordinary.program.tags.filter((item) => item.kind === 'BOOL')).toHaveLength(1)
     expect(ordinary.node.kind).toBe('NO')
     expect(ordinary.node.tag).toBe(ordinary.program.tags.find((item) => item.kind === 'BOOL')?.name)
@@ -251,9 +254,11 @@ describe('programOps 拖放操作', () => {
     )
 
     const made = makeContactNode(source, 'NO')
+    if (!made.node) throw new Error('触点应自动创建变量')
+    const madeNode = made.node
     expect(made.program.tags).toHaveLength(3)
-    expect(made.node.tag).toBe('Tag1')
-    expect(made.program.tags.filter((item) => item.name === made.node.tag)).toHaveLength(1)
+    expect(madeNode.tag).toBe('Tag1')
+    expect(made.program.tags.filter((item) => item.name === madeNode.tag)).toHaveLength(1)
   })
 
   it('insertContactAt 使用新建触点并插到指定位置', () => {
@@ -931,6 +936,7 @@ describe('programOps issue #12 变量表跟随程序', () => {
     )
     const made = makeContactNode(source, 'NO')
     expect(made.createdTag?.auto).toBe(true)
+    if (!made.node) throw new Error('触点应自动创建变量')
 
     const inserted = insertNodeAt(
       made.program,
@@ -1118,5 +1124,91 @@ describe('programOps 程序段变量收集', () => {
     )
 
     expect(tagsInRung(source, rungOf(source, 'r1'))).toEqual([])
+  })
+})
+
+describe('programOps 变量地址字段校验', () => {
+  const at = (name: string, address: string, kind: TagKind = 'BOOL'): TagDef => ({
+    ...tag(name, kind),
+    address,
+  })
+
+  it('updateTag 拒绝空地址、超过 32 字符的地址和规范化后重复的地址', () => {
+    const start = at('Start', '%M0.0')
+    const done = at('Done', '%M0.1')
+    const input = at('Input', '%I0.0')
+    const source = program([rung('r1', [contact('c', 'Start')])], [start, done, input])
+
+    expect(updateTag(source, start.id, { address: '   ' })).toBe(source)
+    expect(updateTag(source, start.id, { address: `%M${'7'.repeat(30)}.0` })).toBe(source)
+    // 大小写不同、空白不同也算同一个地址
+    expect(updateTag(source, start.id, { address: '%m0.1' })).toBe(source)
+    expect(updateTag(source, start.id, { address: '%i 0.0' })).toBe(source)
+    // 自己那一行不算和自己重复，同值提交仍然不重建工程
+    expect(updateTag(source, start.id, { address: '%M0.0' })).toBe(source)
+    expect(updateTag(source, start.id, { address: ' %M0.2 ' }).tags[0].address).toBe('%M0.2')
+  })
+
+  it('updateTag 把合法的简写地址规范成 %M3.0', () => {
+    const start = at('Start', '%M0.0')
+    const source = program([rung('r1', [contact('c', 'Start')])], [start])
+    expect(updateTag(source, start.id, { address: 'm3.0' }).tags[0].address).toBe('%M3.0')
+  })
+
+  it('addTag 不会重复分配旧工程里省略百分号的地址', () => {
+    const legacy = at('Legacy', 'M0.0')
+    const source = program([rung('r1', [contact('c', 'Legacy')])], [legacy])
+    const next = addTag(source, 'BOOL')
+    expect(next.tags).toHaveLength(2)
+    expect(next.tags.at(-1)?.address).toBe('%M1.0')
+  })
+
+  it('tagAddressProblem 合法地址返回 null，三类非法地址给出中文原因', () => {
+    const start = at('Start', '%M0.0')
+    const done = at('Done', '%M0.1')
+    const source = program([rung('r1', [contact('c', 'Start')])], [start, done])
+    const long = `%M${'7'.repeat(30)}.0`
+
+    expect(tagAddressProblem(source, start.id, '%M5.0')).toBeNull()
+    expect(tagAddressProblem(source, start.id, '%M0.0')).toBeNull()
+    expect(tagAddressProblem(source, start.id, '  ')).toBe('变量地址不能为空。')
+    expect(tagAddressProblem(source, start.id, long)).toBe(`变量地址最多 32 个字符（现在是 ${long.length} 个）。`)
+    expect(tagAddressProblem(source, start.id, ' %m0.1 ')).toBe('地址 %M0.1 已被变量“Done”占用。')
+    expect(tagAddressProblem(source, start.id, 'ABC'))
+      .toBe('“ABC”不是有效的 PLC 地址，请写成 M10.0 或 MW10 这样的形式。')
+  })
+
+  it('地址池耗尽后 addTag 不再新增空地址变量', () => {
+    const full: TagDef[] = []
+    for (let index = 0; index < 512; index += 1) {
+      full.push(at(`M${index}`, `%M${index}.0`))
+    }
+    const source = program([rung('r1', [contact('c', 'M0')])], full)
+
+    const next = addTag(source, 'BOOL')
+    expect(next).toBe(source)
+    expect(next.tags).toHaveLength(512)
+    expect(next.tags.every((item) => item.address !== '')).toBe(true)
+  })
+
+  it('ensureAddressTag 建出的变量直接带用户输入的地址，并且仍算自动变量', () => {
+    const source = program([rung('r1', [contact('c', 'Start')])])
+    const result = ensureAddressTag(source, 'm100.0', 'BOOL')
+    if ('error' in result) throw new Error(result.error)
+
+    expect(result.tag.address).toBe('%M100.0')
+    expect(result.tag.auto).toBe(true)
+    expect(result.program.tags.at(-1)).toBe(result.tag)
+    expect(result.program.tags).toHaveLength(source.tags.length + 1)
+  })
+
+  it('ensureAddressTag 遇到同地址不同类型的手改变量时报冲突且不建新变量', () => {
+    const wrongKind = at('Count', '%MW10', 'BOOL')
+    const source = program([rung('r1', [contact('c', 'Start')])], [tag('Start'), wrongKind])
+
+    expect(ensureAddressTag(source, 'MW10', 'INT')).toEqual({
+      error: '%MW10 已被 BOOL 变量“Count”占用。',
+    })
+    expect(source.tags).toHaveLength(2)
   })
 })

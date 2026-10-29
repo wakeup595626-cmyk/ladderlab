@@ -592,30 +592,30 @@ export default function WorkspaceTopBar({
               </div>
               <div className="wb-menu-group" role="group" aria-label="矢量图 SVG">
                 <span className="wb-menu-label">矢量图 SVG</span>
-                <button type="button" role="menuitem" onClick={() => chooseFileMenuAction(() => onExportSfc('svg'))}>
+                <button type="button" role="menuitem" {...exportGuard} onClick={() => chooseFileMenuAction(() => onExportSfc('svg'))}>
                   <StepIcon size={16} />
                   <span>顺序功能图 SVG</span>
                 </button>
-                <button type="button" role="menuitem" onClick={() => chooseFileMenuAction(() => onExportImage('complete', 'svg'))}>
+                <button type="button" role="menuitem" {...exportGuard} onClick={() => chooseFileMenuAction(() => onExportImage('complete', 'svg'))}>
                   <ImageIcon size={16} />
                   <span>完整程序 SVG</span>
                 </button>
-                <button type="button" role="menuitem" onClick={() => chooseFileMenuAction(() => onExportImage('plain', 'svg'))}>
+                <button type="button" role="menuitem" {...exportGuard} onClick={() => chooseFileMenuAction(() => onExportImage('plain', 'svg'))}>
                   <ImageIcon size={16} />
                   <span>纯梯形图 SVG</span>
                 </button>
               </div>
               <div className="wb-menu-group" role="group" aria-label="位图 PNG">
                 <span className="wb-menu-label">位图 PNG</span>
-                <button type="button" role="menuitem" onClick={() => chooseFileMenuAction(() => onExportImage('complete', 'png'))}>
+                <button type="button" role="menuitem" {...exportGuard} onClick={() => chooseFileMenuAction(() => onExportImage('complete', 'png'))}>
                   <ImageIcon size={16} />
                   <span>完整程序 PNG</span>
                 </button>
-                <button type="button" role="menuitem" onClick={() => chooseFileMenuAction(() => onExportImage('plain', 'png'))}>
+                <button type="button" role="menuitem" {...exportGuard} onClick={() => chooseFileMenuAction(() => onExportImage('plain', 'png'))}>
                   <ImageIcon size={16} />
                   <span>纯梯形图 PNG</span>
                 </button>
-                <button type="button" role="menuitem" onClick={() => chooseFileMenuAction(() => onExportSfc('png'))}>
+                <button type="button" role="menuitem" {...exportGuard} onClick={() => chooseFileMenuAction(() => onExportSfc('png'))}>
                   <StepIcon size={16} />
                   <span>顺序功能图 PNG</span>
                 </button>

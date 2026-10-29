@@ -36,6 +36,7 @@ import ProjectImportDialog from './components/ProjectImportDialog'
 import NewProjectDialog from './components/NewProjectDialog'
 import SaveProjectDialog from './components/SaveProjectDialog'
 import ProjectBackupDialog from './components/ProjectBackupDialog'
+import ProgramIssuesDialog from './components/ProgramIssuesDialog'
 import type {
   ProgramImageFormat,
   ProgramImageMode,
@@ -75,14 +76,15 @@ import {
   downloadDataUrl,
   downloadText,
   downloadTimestamp,
-  parseProgramText,
+  parseProgramStructureText,
   serializeProgram,
 } from './lib/io'
+import type { ProgramIssue } from './lib/io'
 import { safeFileName } from './lib/filename'
 import { copyText } from './lib/clipboard'
 import {
   buildShareUrl,
-  decodeProgramShare,
+  decodeProgramShareStructure,
   encodeProgramShare,
   isShareProgramHash,
   SHARE_LINK_SOFT_LIMIT,
@@ -209,6 +211,15 @@ interface StartupState {
 
 function programsEqual(left: Program, right: Program): boolean {
   return programsEqualIgnoringPlaceholder(left, right)
+}
+
+/** 载入后的工程可能带着空地址、重复地址或未定义引用；这些问题不挡载入，但要能一次看全。 */
+function issuesOfProgram(program: Program): ProgramIssue[] {
+  try {
+    return parseProgramStructureText(serializeProgram(program)).issues
+  } catch {
+    return []
+  }
 }
 
 /** 默认操作段：优先第一个有内容的程序段，空白工程才落到末尾占位段。 */
@@ -605,6 +616,7 @@ export default function App() {
     mode: ProgramImageMode
     format: ProgramImageFormat
   } | null>(null)
+  const [sfcExporting, setSfcExporting] = useState(false)
   const [coachDismissed, setCoachDismissed] = useState(() => {
     try {
       return Boolean(window.localStorage.getItem(COACH_KEY))
@@ -633,6 +645,7 @@ export default function App() {
   const [saveDialogOpen, setSaveDialogOpen] = useState(false)
   const [newProjectOpen, setNewProjectOpen] = useState(false)
   const [saveDialogError, setSaveDialogError] = useState<string | null>(null)
+  const [issuesDialog, setIssuesDialog] = useState<ProgramIssue[] | null>(null)
   const [manualSaveStatus, setManualSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
   const manualSaveStatusTimerRef = useRef<number | null>(null)
   const editorRef = useRef<HTMLElement>(null)
@@ -677,8 +690,11 @@ export default function App() {
   // 导出请求必须每次唯一：同一毫秒里连点两个不同导出，key 重复会让
   // ProgramImageExporter 不重新挂载，第二个请求就不会执行。
   const imageExportSeqRef = useRef(0)
+  // 图片导出与顺序功能图导出必须互斥；仅靠 state 会有一拍延迟，连点仍会双开。
+  const imageExportBusyRef = useRef(false)
   // 顺序功能图导出是「同步归纳 + 异步栅格化」，连点会同时跑两份，这里串行化。
   const sfcExportBusyRef = useRef(false)
+  const appMountedRef = useRef(true)
   const program = history.present
   const compileResult = useMemo(() => compile(program), [program])
 
@@ -703,9 +719,13 @@ export default function App() {
     setProjectLibraryError(null)
   }, [])
 
-  useEffect(() => () => {
-    if (manualSaveStatusTimerRef.current !== null) {
-      window.clearTimeout(manualSaveStatusTimerRef.current)
+  useEffect(() => {
+    appMountedRef.current = true
+    return () => {
+      appMountedRef.current = false
+      if (manualSaveStatusTimerRef.current !== null) {
+        window.clearTimeout(manualSaveStatusTimerRef.current)
+      }
     }
   }, [])
 
@@ -787,6 +807,30 @@ export default function App() {
       focusAction: options?.focusAction,
     })
   }, [])
+
+  const showIssues = useCallback((issues: ProgramIssue[]) => {
+    if (issues.length > 0) setIssuesDialog(issues)
+  }, [])
+
+  // 草稿解析放宽后，语义问题不再算“工程损坏”；但自动保存会继续写这份半成品，
+  // 所以启动时必须提醒一次，让用户知道该去变量表补什么。
+  useEffect(() => {
+    if (startup.status !== 'ok' || startup.issues.length === 0) return
+    // 项目冲突时可能选择工程库里的另一份工程；被舍弃草稿的问题不能误报给当前工程。
+    if (!programsEqual(startup.program, initialProgram)) return
+    const shown = startup.issues.slice(0, 2).map((issue) => issue.message)
+    const rest = startup.issues.length > shown.length
+      ? `；另有 ${startup.issues.length - shown.length} 处`
+      : ''
+    notify(
+      `草稿已载入，但有 ${startup.issues.length} 处变量问题待修正：${shown.join('；')}${rest}`,
+      {
+        tone: 'info',
+        sticky: true,
+        action: { label: '查看全部', run: () => showIssues(startup.issues) },
+      },
+    )
+  }, [initialProgram, notify, showIssues, startup])
 
   /** 收掉提示时如果焦点还在提示里（撤销按钮），把它交回画布，别落到 body。 */
   const dismissToast = useCallback(() => {
@@ -1968,6 +2012,10 @@ export default function App() {
   const insert = useCallback((kind: ContactKind, slot?: { rungId: string; chain: number[]; index: number }) => {
     if (slot) {
       const made = makeContactNode(program, kind)
+      if (!made.node) {
+        notify('地址池已经用完，没有可用地址了；请先在变量表腾出一个地址')
+        return
+      }
       const next = insertNodeAt(made.program, slot.rungId, slot, made.node)
       if (next === made.program) {
         notify('这个位置不能放置触点')
@@ -1990,6 +2038,10 @@ export default function App() {
     }
 
     const made = makeContactNode(program, kind)
+    if (!made.node) {
+      notify('地址池已经用完，没有可用地址了；请先在变量表腾出一个地址')
+      return
+    }
     const next = insertNodeAt(made.program, insertTarget.rungId, insertTarget, made.node)
     if (next === made.program) {
       notify('这个位置放不下新的触点，请在程序段里点一个插入位')
@@ -2017,6 +2069,10 @@ export default function App() {
   // 插入点菜单选中的触点：精确落在刚点的那个“+”，不做二次猜测。
   const insertAt = useCallback((slot: SlotRef, kind: ContactKind) => {
     const made = makeContactNode(program, kind)
+    if (!made.node) {
+      notify('地址池已经用完，没有可用地址了；请先在变量表腾出一个地址')
+      return
+    }
     const next = insertNodeAt(made.program, slot.rungId, slot, made.node)
     if (next === made.program) {
       notify('这个位置不能放置触点')
@@ -2609,8 +2665,13 @@ export default function App() {
       return
     }
     let restored: Program
+    let restoreIssues: ProgramIssue[] = []
     try {
-      restored = parseProgramText(raw)
+      // 恢复副本是本应用自己写出来的中间态，可能带着待修正的空地址/重复地址；
+      // 结构没坏就应该能载回来，问题交给提示，而不是把用户挡在门外。
+      const parsed = parseProgramStructureText(raw)
+      restored = parsed.program
+      restoreIssues = parsed.issues
     } catch (error) {
       notify(`这份恢复副本无法解析：${error instanceof Error ? error.message : '未知错误'}`)
       return
@@ -2633,9 +2694,21 @@ export default function App() {
       ? { rungId: preferredRung(opened)!.id, path: null }
       : null)
     setActiveProject(null)
-    notify(corruptProject
+    const restoreNote = corruptProject
       ? '已载入恢复副本；请确认恢复横幅中的「接受当前工程」以恢复自动保存'
-      : '已从恢复副本载入工程，会作为当前工程自动保存')
+      : '已从恢复副本载入工程，会作为当前工程自动保存'
+    if (restoreIssues.length > 0) {
+      const first = restoreIssues[0]?.message ?? ''
+      const rest = restoreIssues.length > 1 ? `；另有 ${restoreIssues.length - 1} 处` : ''
+      // 提示条同一时刻只显示一条，问题和“接受当前工程”的指引必须合在一句里。
+      notify(`${restoreNote}；不过这份副本有 ${restoreIssues.length} 处变量问题待修正：${first}${rest}`, {
+        tone: 'info',
+        sticky: true,
+        action: { label: '查看全部', run: () => showIssues(restoreIssues) },
+      })
+    } else {
+      notify(restoreNote)
+    }
   }
 
   const openSavedProject = async (saved: SavedProject) => {
@@ -2670,6 +2743,15 @@ export default function App() {
     setRunning(false)
     setMobilePanel('none')
     setActiveProject(saved.id, saved.savedAt, opened)
+    const openedIssues = issuesOfProgram(opened)
+    if (openedIssues.length > 0) {
+      notify(`已打开「${saved.name}」，有 ${openedIssues.length} 处变量问题待修正`, {
+        tone: 'info',
+        sticky: true,
+        action: { label: '查看全部', run: () => showIssues(openedIssues) },
+      })
+      return
+    }
     notify(`已打开「${saved.name}」`)
   }
 
@@ -2807,10 +2889,17 @@ export default function App() {
     setActiveProject(null)
     setImportOpen(false)
     setMobilePanel('none')
+    const importedIssues = issuesOfProgram(opened)
+    const importedTrouble = importedIssues.length > 0
+      ? `；另有 ${importedIssues.length} 处变量问题待修正`
+      : ''
     notify(corruptProject
-      ? `已导入「${opened.name}」；现在可点「接受当前工程并恢复自动保存」`
-      : `已导入「${opened.name}」`, {
-        action: corruptProject
+      ? `已导入「${opened.name}」；现在可点「接受当前工程并恢复自动保存」${importedTrouble}`
+      : `已导入「${opened.name}」${importedTrouble}`, {
+        sticky: importedIssues.length > 0,
+        action: importedIssues.length > 0
+          ? { label: '查看全部', run: () => showIssues(importedIssues) }
+          : corruptProject
           ? undefined
           : {
               label: '保存到项目库',
@@ -2823,14 +2912,19 @@ export default function App() {
   }
 
   const startImageExport = (mode: ProgramImageMode, format: ProgramImageFormat) => {
-    if (imageExportRequest) {
-      // 直接替换请求会让上一张图静默消失，学生只会看到界面卡住又弹一条新提示。
-      notify('上一张图还在生成中，等它完成再导出；要中止请点提示里的「取消导出」', {
-        tone: 'error',
-      })
+    if (imageExportRequest || imageExportBusyRef.current || sfcExportBusyRef.current || sfcExporting) {
+      if (imageExportRequest || imageExportBusyRef.current) {
+        // 直接替换请求会让上一张图静默消失，学生只会看到界面卡住又弹一条新提示。
+        notify('上一张图还在生成中，等它完成再导出；要中止请点提示里的「取消导出」', {
+          tone: 'error',
+        })
+      } else {
+        notify('顺序功能图还在生成中，等它结束再导出图片', { tone: 'error' })
+      }
       return
     }
     imageExportSeqRef.current += 1
+    imageExportBusyRef.current = true
     setImageExportRequest({
       id: imageExportSeqRef.current,
       program,
@@ -2844,6 +2938,7 @@ export default function App() {
       action: {
         label: '取消导出',
         run: () => {
+          imageExportBusyRef.current = false
           setImageExportRequest(null)
           notify('已取消导出')
         },
@@ -2887,8 +2982,11 @@ export default function App() {
     }
     void (async () => {
       let incoming: Program
+      let shareIssues: ProgramIssue[] = []
       try {
-        incoming = await decodeProgramShare(rawHash)
+        const parsed = await decodeProgramShareStructure(rawHash)
+        incoming = parsed.program
+        shareIssues = parsed.issues
       } catch (reason) {
         notify(reason instanceof Error ? reason.message : '分享链接读不出来，可能在复制时被截断了。', {
           tone: 'error',
@@ -2903,7 +3001,7 @@ export default function App() {
         : ''
       const accepted = await confirm({
         title: `导入分享的工程「${incoming.name}」？`,
-        description: `共 ${contentRungs(incoming).length} 段梯形图、${incoming.tags.length} 个变量。当前工程会被替换（可撤销）。${trouble}`,
+        description: `共 ${contentRungs(incoming).length} 段梯形图、${incoming.tags.length} 个变量。当前工程会被替换（可撤销）。${trouble}${shareIssues.length > 0 ? ` 其中 ${shareIssues.length} 处变量问题，导入后可在变量表修正。` : ''}`,
         confirmLabel: '导入',
         cancelLabel: '先不导入',
       })
@@ -2933,11 +3031,15 @@ export default function App() {
   // 顺序功能图由步骤位、步进网络和线圈条件现场归纳，不写入工程文件。
   const startSfcExport = async (format: ProgramImageFormat) => {
     if (sfcExportBusyRef.current) return
-    if (imageExportRequest) {
-      notify('梯形图图片还在生成，先等它结束再导出顺序功能图', { tone: 'error' })
+    if (imageExportRequest || imageExportBusyRef.current || sfcExporting) {
+      if (imageExportRequest || imageExportBusyRef.current) {
+        notify('梯形图图片还在生成，先等它结束再导出顺序功能图', { tone: 'error' })
+      }
       return
     }
     sfcExportBusyRef.current = true
+    setSfcExporting(true)
+    const controller = new AbortController()
     try {
       const chart = buildSfc(program)
       if (!chart) {
@@ -2948,23 +3050,36 @@ export default function App() {
         { tone: 'error' })
         return
       }
-      notify('正在生成顺序功能图 ' + format.toUpperCase() + '…')
+      notify('正在生成顺序功能图 ' + format.toUpperCase() + '…', {
+        sticky: format === 'png',
+        action: format === 'png'
+          ? {
+              label: '取消导出',
+              run: () => {
+                controller.abort()
+                notify('已取消导出')
+              },
+            }
+          : undefined,
+      })
       const base = safeFileName(program.name) + '-顺序功能图-' + downloadTimestamp()
       if (format === 'svg') {
         downloadText(base + '.svg', serializeSfcSvg(chart), 'image/svg+xml;charset=utf-8')
         notify('已导出顺序功能图 SVG（' + chart.steps.length + ' 步）')
         return
       }
-      const dataUrl = await rasterizeSfcPng(chart)
+      const dataUrl = await rasterizeSfcPng(chart, controller.signal)
       downloadDataUrl(base + '.png', dataUrl)
       notify('已导出顺序功能图 PNG（' + chart.steps.length + ' 步）')
     } catch (reason) {
+      if (reason instanceof DOMException && reason.name === 'AbortError') return
       notify(
         reason instanceof Error ? reason.message : '顺序功能图生成失败',
         { tone: 'error' },
       )
     } finally {
       sfcExportBusyRef.current = false
+      if (appMountedRef.current) setSfcExporting(false)
     }
   }
 
@@ -3332,7 +3447,7 @@ export default function App() {
         onExportProject={exportProject}
         onExportImage={startImageExport}
         onExportSfc={(format) => void startSfcExport(format)}
-        exporting={imageExportRequest !== null}
+        exporting={imageExportRequest !== null || sfcExporting}
         onCopyShareLink={() => void copyShareLink()}
         onGuide={() => setGuideOpen(true)}
         onAbout={() => setAboutOpen(true)}
@@ -3890,6 +4005,17 @@ export default function App() {
         }}
       />
 
+      {issuesDialog && (
+        <ProgramIssuesDialog
+          issues={issuesDialog}
+          onClose={() => setIssuesDialog(null)}
+          onOpenTags={() => {
+            setIssuesDialog(null)
+            openInspector('tags')
+          }}
+        />
+      )}
+
       <SaveProjectDialog
         open={saveDialogOpen}
         program={program}
@@ -3934,10 +4060,12 @@ export default function App() {
               } else {
                 downloadBlob(base + '.png', result.data)
               }
+              imageExportBusyRef.current = false
               setImageExportRequest(null)
               notify('已导出' + suffix + ' ' + result.format.toUpperCase())
             }}
             onError={(message) => {
+              imageExportBusyRef.current = false
               setImageExportRequest(null)
               notify(message, { tone: 'error' })
             }}

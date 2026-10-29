@@ -22,6 +22,7 @@ import {
   deleteBranch,
   ensureAddressTag,
   getNodeAtPath,
+  tagAddressProblem,
   updateContact,
   updateOutput,
   updateTag,
@@ -85,7 +86,9 @@ function ensureNamedTag(program: Program, name: string, kind: 'BOOL' | 'INT'): P
   const trimmed = name.trim()
   if (!trimmed || trimmed.includes('.') || program.tags.some((tag) => tag.name === trimmed)) return program
   const next = addTag(program, kind)
-  const added = next.tags.at(-1)
+  // addTag 在地址池耗尽时原样返回工程；这时绝不能把“表里的最后一个变量”当成新变量去改名。
+  if (next.tags.length === program.tags.length) return program
+  const added = next.tags[next.tags.length - 1]
   return added ? updateTag(next, added.id, { name: trimmed }, { keepAuto: true }) : program
 }
 
@@ -153,11 +156,14 @@ function AddressField({
   value,
   kind,
   onCommit,
+  validate,
   hint,
 }: {
   value: string
   kind: TagKind
   onCommit: (address: string) => void
+  /** 字段级复查：规范化之后再交给调用方判断是否与别的变量撞地址。 */
+  validate?: (address: string) => string | null
   hint?: string
 }) {
   const [draft, setDraft] = useState(value)
@@ -169,6 +175,11 @@ function AddressField({
       setError(kind === 'BOOL'
         ? '位地址要写成 M4.0 或 %M100.0，位号 0～7。'
         : '整数地址要写成 MW10、MD10 或 %MW100。')
+      return
+    }
+    const problem = validate ? validate(address) : null
+    if (problem) {
+      setError(problem)
       return
     }
     setError('')
@@ -418,7 +429,12 @@ export default function QuickEditor({
     let next = program
     if (value && !exists) next = ensureNamedTag(next, value, node.kind === 'CMP' ? 'INT' : 'BOOL')
     onProgram(updateContact(next, rung.id, contactPath, { tag: value }))
-    if (value && !exists) onNotify(`已建立变量 ${value}`)
+    if (value && !exists) {
+      // 地址池耗尽时 addTag 不建变量，这里不能报“已建立”，否则界面上会出现一句谎话。
+      onNotify(next.tags.length > program.tags.length
+        ? `已建立变量 ${value}`
+        : `没能新建变量 ${value}：地址已用完或已有同名变量。`)
+    }
   }
 
   const commitOutputTag = (value: string) => {
@@ -460,7 +476,11 @@ export default function QuickEditor({
     const exists = program.tags.some((tag) => tag.name === value && tag.kind === kind)
     const next = ensureNamedTag(program, value, kind)
     onProgram(updateOutput(next, rung.id, { tag: value }))
-    if (!exists) onNotify(`已建立${kind === 'INT' ? ' INT ' : ' BOOL '}变量 ${value}`)
+    if (!exists) {
+      onNotify(next.tags.length > program.tags.length
+        ? `已建立${kind === 'INT' ? ' INT ' : ' BOOL '}变量 ${value}`
+        : `没能新建变量 ${value}：地址已用完或已有同名变量。`)
+    }
   }
 
   const output = rung.output
@@ -564,14 +584,10 @@ export default function QuickEditor({
                 key={`${boundTag.id}-${boundTag.address}`}
                 value={boundTag.address}
                 kind={boundTag.kind}
+                validate={(address) => tagAddressProblem(program, boundTag.id, address)}
                 onCommit={(address) => {
-                  const duplicate = program.tags.find((tag) => (
-                    tag.id !== boundTag.id && tag.address.trim().toUpperCase() === address
-                  ))
                   onProgram(updateTag(program, boundTag.id, { address }))
-                  onNotify(duplicate
-                    ? `地址已改为 ${address}，与“${duplicate.name}”重复`
-                    : `地址已改为 ${address}，所有引用同步更新`)
+                  onNotify(`地址已改为 ${address}，所有引用同步更新`)
                 }}
                 hint={`符号名“${boundTag.name}”，改地址会同步所有引用`}
               />
@@ -714,14 +730,10 @@ export default function QuickEditor({
                 key={`${outputTag.id}-${outputTag.address}`}
                 value={outputTag.address}
                 kind={outputTag.kind}
+                validate={(address) => tagAddressProblem(program, outputTag.id, address)}
                 onCommit={(address) => {
-                  const duplicate = program.tags.find((tag) => (
-                    tag.id !== outputTag.id && tag.address.trim().toUpperCase() === address
-                  ))
                   onProgram(updateTag(program, outputTag.id, { address }))
-                  onNotify(duplicate
-                    ? `地址已改为 ${address}，与“${duplicate.name}”重复`
-                    : `地址已改为 ${address}，所有引用同步更新`)
+                  onNotify(`地址已改为 ${address}，所有引用同步更新`)
                 }}
                 hint={`符号名“${outputTag.name}”，改地址会同步所有引用`}
               />

@@ -1,0 +1,24 @@
+.issues-dialog {
+  width: min(560px, 100%);
+  max-height: min(72vh, 640px);
+  display: flex;
+  flex-direction: column;
+}
+
+.issues-dialog p {
+  margin: 0 0 12px;
+}
+
+.issues-list {
+  margin: 0;
+  padding-left: 22px;
+  overflow-y: auto;
+  display: grid;
+  gap: 8px;
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+.issues-list li {
+  overflow-wrap: anywhere;
+}

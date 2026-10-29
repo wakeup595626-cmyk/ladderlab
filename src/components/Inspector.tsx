@@ -22,6 +22,7 @@ import {
   deleteNode,
   deleteTag,
   getNodeAtPath,
+  tagAddressProblem,
   tagsInRung,
   tagUsage,
   updateContact,
@@ -245,6 +246,7 @@ function TagsPanel({
   onProgram,
   onToggleBool,
   onSetInt,
+  onNotify,
 }: {
   program: Program
   runtime: Runtime
@@ -252,6 +254,7 @@ function TagsPanel({
   onProgram: (program: Program) => void
   onToggleBool: (name: string) => void
   onSetInt: (name: string, value: number) => void
+  onNotify: (message: string) => void
 }) {
   const [tagQuery, setTagQuery] = useState('')
   // 默认按程序段分组：一段一格、可折叠；「全部」保留整表平铺。
@@ -394,7 +397,21 @@ function TagsPanel({
                 maxLength={FIELD_LIMITS.address}
                 defaultValue={tag.address}
                 aria-label={`${tag.name} 地址`}
-                onBlur={(event) => onProgram(updateTag(program, tag.id, { address: event.target.value.toUpperCase() }))}
+                onBlur={(event) => {
+                  const input = event.currentTarget
+                  const address = input.value.toUpperCase()
+                  const problem = tagAddressProblem(program, tag.id, address)
+                  if (problem) {
+                    // 就地退回原值并把输入框标红：变量表用 display:contents 排版，塞不下行内错误文字。
+                    input.value = tag.address
+                    input.setAttribute('aria-invalid', 'true')
+                    onNotify(problem)
+                    return
+                  }
+                  input.removeAttribute('aria-invalid')
+                  onProgram(updateTag(program, tag.id, { address }))
+                }}
+                onInput={(event) => event.currentTarget.removeAttribute('aria-invalid')}
                 spellCheck={false}
               />
             </label>
@@ -504,10 +521,33 @@ function TagsPanel({
           >
             全部
           </button>
-          <button type="button" className="secondary-button" onClick={() => onProgram(addTag(program, 'BOOL'))}>
+          <button
+            type="button"
+            className="secondary-button"
+            onClick={() => {
+              const next = addTag(program, 'BOOL')
+              // addTag 在地址池耗尽时不改动工程，这里必须说清楚，否则按钮看起来“点了没反应”。
+              if (next.tags.length === program.tags.length) {
+                onNotify('没有可用的地址了：请先删掉一些 BOOL 变量或腾出 M 区别的字节。')
+                return
+              }
+              onProgram(next)
+            }}
+          >
             + BOOL
           </button>
-          <button type="button" className="secondary-button" onClick={() => onProgram(addTag(program, 'INT'))}>
+          <button
+            type="button"
+            className="secondary-button"
+            onClick={() => {
+              const next = addTag(program, 'INT')
+              if (next.tags.length === program.tags.length) {
+                onNotify('没有可用的地址了：请先删掉一些 INT 变量或腾出 M 区的字节。')
+                return
+              }
+              onProgram(next)
+            }}
+          >
             + INT
           </button>
         </div>
@@ -876,6 +916,7 @@ export default function Inspector({
             onProgram={onProgram}
             onToggleBool={onToggleBool}
             onSetInt={onSetInt}
+            onNotify={onNotify}
           />
         )}
         {tab === 'diagnostics' && (

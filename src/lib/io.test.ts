@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import type { LadderNode, OutputElement, OutputKind, Program, Rung, TagDef, TagKind } from '../engine/types'
-import { createLatestRequestGate, downloadTimestamp, parseProgramText } from './io'
+import {
+  createLatestRequestGate,
+  downloadTimestamp,
+  parseProgramStructureText,
+  parseProgramText,
+} from './io'
 
 function tag(
   name: string,
@@ -166,5 +171,118 @@ describe('downloadTimestamp', () => {
       expect(value).toHaveLength(19)
       expect(value).not.toMatch(/[\\/:*?"<>|\s]/)
     }
+  })
+})
+
+describe('草稿与备份的宽松结构解析', () => {
+  const structure = (value: Program) => parseProgramStructureText(JSON.stringify(value))
+
+  it('空地址变量照常载入，并给出可读问题', () => {
+    const parsed = structure(program([tag('NoAddress', '')], []))
+    expect(parsed.program.tags[0]).toMatchObject({ name: 'NoAddress', address: '' })
+    expect(parsed.issues).toHaveLength(1)
+    expect(parsed.issues[0]).toMatchObject({ code: 'empty-address', tagId: 'tag-NoAddress' })
+    expect(parsed.issues[0].message).toBe('变量“NoAddress”的地址为空。')
+  })
+
+  it('两个空地址互不算重复', () => {
+    const parsed = structure(program([tag('A', ''), tag('B', '')], []))
+    expect(parsed.issues.map((issue) => issue.code)).toEqual(['empty-address', 'empty-address'])
+  })
+
+  it('规范化后重复的地址照常载入，并保留原始写法', () => {
+    const parsed = structure(program([tag('First', '%I0.0'), tag('Second', ' %i0.0 ')], []))
+    expect(parsed.program.tags.map((item) => item.address)).toEqual(['%I0.0', '%i0.0'])
+    expect(parsed.issues).toHaveLength(1)
+    expect(parsed.issues[0].code).toBe('duplicate-address')
+    expect(parsed.issues[0].message).toBe('变量“First”与“Second”使用了重复地址“%I0.0”。')
+  })
+
+  it('触点和线圈的未定义引用逐条收集，不中断解析', () => {
+    const value = program(
+      [tag('Start', '%I0.0')],
+      [rung('r1', [contact('c1', 'MISSING_CONTACT')], output('COIL', 'MISSING_OUTPUT'))],
+    )
+    const parsed = structure(value)
+    expect(parsed.program.rungs).toHaveLength(2)
+    expect(parsed.issues.map((issue) => issue.message)).toEqual([
+      '第 1 条程序段的常开触点引用了未定义变量“MISSING_CONTACT”。',
+      '第 1 条程序段的COIL 输出变量引用了未定义变量“MISSING_OUTPUT”。',
+    ])
+    expect(parsed.issues.every((issue) => issue.rungNumber === 1)).toBe(true)
+  })
+
+  it('位别名的未定义引用也只记问题', () => {
+    const alias: TagDef = { ...tag('Step1', '%M0.0'), bitOf: 'MISSING_BYTE' }
+    const parsed = structure(program([alias], []))
+    expect(parsed.program.tags[0]).toMatchObject({ name: 'Step1', bitOf: 'MISSING_BYTE' })
+    expect(parsed.issues.map((issue) => issue.code)).toEqual(['undefined-reference'])
+  })
+
+  it('没有问题时 issues 是空数组', () => {
+    const parsed = structure(program([tag('Start', '%I0.0')], []))
+    expect(parsed.issues).toEqual([])
+  })
+
+  it('触点和输出变量留空时给出问题而不是静默通过', () => {
+    const value = program(
+      [tag('Start', '%I0.0')],
+      [rung('r1', [contact('c1', '   ')], output('COIL', ''))],
+    )
+    const parsed = structure(value)
+    expect(parsed.issues.map((issue) => issue.message)).toEqual([
+      '第 1 条程序段的常开触点没有填写变量。',
+      '第 1 条程序段的COIL 输出变量没有填写。',
+    ])
+  })
+
+  it('带工程名的末尾空白占位段不算问题', () => {
+    const placeholder: Rung = {
+      id: 'r2',
+      label: '我的工程',
+      nodes: [],
+      output: output('COIL', ''),
+    }
+    const parsed = structure(program(
+      [tag('Start', '%I0.0')],
+      [rung('r1', [contact('c1', 'Start')], output('COIL', 'Start')), placeholder],
+    ))
+    expect(parsed.issues).toEqual([])
+  })
+
+  it('有节点但输出留空仍然算问题', () => {
+    const parsed = structure(program(
+      [tag('Start', '%I0.0')],
+      [rung('r1', [contact('c1', 'Start')], output('COIL', ''))],
+    ))
+    expect(parsed.issues.map((issue) => issue.code)).toEqual(['undefined-reference'])
+  })
+
+  it('省略百分号的地址与带百分号的地址视为重复', () => {
+    const parsed = structure(program([tag('A', '%M10.0'), tag('B', 'M10.0')], []))
+    expect(parsed.issues.map((issue) => issue.code)).toEqual(['duplicate-address'])
+    const byteVsBit = structure(program([tag('C', '%M0'), tag('D', '%M0.0')], []))
+    expect(byteVsBit.issues).toEqual([])
+  })
+
+  it('严格导入仍然逐条拒绝同样的输入', () => {
+    expect(() => parse(program([tag('NoAddress', '')], [])))
+      .toThrow('变量“NoAddress”的地址为空。')
+    expect(() => parse(program([tag('First', '%I0.0'), tag('Second', ' %i0.0 ')], [])))
+      .toThrow('变量“First”与“Second”使用了重复地址“%I0.0”。')
+    expect(() => parse(program(
+      [tag('Lamp', '%Q0.0')],
+      [rung('r1', [contact('c1', 'MISSING_CONTACT')], output('COIL', 'Lamp'))],
+    ))).toThrow('第 1 条程序段的常开触点引用了未定义变量“MISSING_CONTACT”。')
+  })
+
+  it('真正的结构损坏仍然拒绝', () => {
+    const brokenNodes = { ...program([tag('A', '%I0.0')], []), rungs: [{ id: 'r1', label: '', nodes: 'oops', output: { id: 'o1', kind: 'COIL', tag: 'A' } }] }
+    expect(() => structure(brokenNodes as unknown as Program)).toThrow('rungs[0].nodes 必须是数组。')
+    const duplicateId = program([
+      tag('A', '%I0.0'),
+      { ...tag('B', '%I0.1'), id: 'tag-A' },
+    ], [])
+    expect(() => structure(duplicateId)).toThrow('变量 ID“tag-A”重复。')
   })
 })

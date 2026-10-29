@@ -5219,6 +5219,15 @@ body[data-drag-kind] {
   text-align: center;
 }
 
+.tag-card .table-input[aria-invalid='true'] {
+  border-color: var(--negative);
+  background: var(--negative-wash);
+}
+
+.tag-card .table-input[aria-invalid='true']:focus {
+  outline-color: color-mix(in srgb, var(--negative) 30%, transparent);
+}
+
 .tag-card select.table-input {
   appearance: none;
   padding: 0 12px 0 3px;

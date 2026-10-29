@@ -54,6 +54,21 @@ function namedProgram(name: string, label = name): Program {
   })
 }
 
+function programWithSemanticIssues(name: string): Program {
+  const program = namedProgram(name)
+  return {
+    ...program,
+    tags: program.tags.map((tag, index) => {
+      if (index === 1) return { ...tag, address: ' %i0.0 ' }
+      if (index === 2) return { ...tag, address: '' }
+      return tag
+    }),
+    rungs: program.rungs.map((rung, index) => (
+      index === 0 ? { ...rung, output: { ...rung.output, tag: 'MissingMotor' } } : rung
+    )),
+  }
+}
+
 function savedProject(id: string, name: string, savedAt: number, label = name): SavedProject {
   return {
     id,
@@ -125,6 +140,40 @@ describe('library backup format', () => {
     expect(parsed.ok).toBe(true)
     if (!parsed.ok) throw new Error('expected a valid backup')
     expect(parsed.projects).toEqual(expected)
+  })
+
+  it('restores a project with semantic issues and returns a non-blocking warning', () => {
+    const record = savedProject('semantic', '带问题备份', 1_000)
+    record.program = programWithSemanticIssues('带问题备份')
+
+    const parsed = parseLibraryBackup(serializeLibraryBackup(createLibraryBackup([record])))
+    expect(parsed.ok).toBe(true)
+    if (!parsed.ok) throw new Error('expected the semantic-issue project to restore')
+    expect(parsed.projects).toHaveLength(1)
+    expect(parsed.projects[0]?.program.tags.map((tag) => tag.address))
+      .toEqual(['%I0.0', '%i0.0', ''])
+    expect(parsed.projects[0]?.program.rungs[0]?.output.tag).toBe('MissingMotor')
+    expect(parsed.warnings).toHaveLength(1)
+    expect(parsed.warnings[0]).toMatchObject({
+      projectId: 'semantic',
+      projectName: '带问题备份',
+    })
+    expect(parsed.warnings[0]?.issues.map((issue) => issue.code).sort()).toEqual([
+      'duplicate-address',
+      'empty-address',
+      'undefined-reference',
+    ])
+  })
+
+  it('still rejects a structurally broken project even when its checksum is valid', () => {
+    const record = savedProject('structural', '结构损坏工程', 1_000)
+    ;(record.program as unknown as Record<string, unknown>).tags = null
+
+    const parsed = parseLibraryBackup(serializeLibraryBackup(createLibraryBackup([record])))
+    expect(parsed).toMatchObject({
+      ok: false,
+      error: expect.stringContaining('内容无法读取'),
+    })
   })
 
   it('rejects JSON that is not a library backup', () => {
