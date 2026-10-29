@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useLayoutEffect, useRef, useState } from 'react'
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { PROFILES } from '../engine/profiles'
 import type { ProfileId } from '../engine/types'
@@ -49,8 +49,8 @@ export interface WorkspaceTopBarProps {
   saveStatus?: 'idle' | 'saving' | 'saved' | 'error'
   onImportProject: () => void
   onExportProject: () => void
-  onExportImage: (mode: 'complete' | 'plain') => void
-  onExportSfc: () => void
+  onExportImage: (mode: 'complete' | 'plain', format: 'svg' | 'png') => void
+  onExportSfc: (format: 'svg' | 'png') => void
   onCopyShareLink: () => void
   onNewProject: () => void
   onGuide: () => void
@@ -132,11 +132,11 @@ export default function WorkspaceTopBar({
     themeMenuRef.current?.querySelectorAll<HTMLButtonElement>('[role="radio"]') ?? [],
   )
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!menuOpen) return
 
     // 打开后把焦点放进第一项，这样键盘用户不必再用 Tab 摸进菜单。
-    const focusTimer = window.setTimeout(() => menuItems()[0]?.focus(), 0)
+    menuItems()[0]?.focus()
 
     const handlePointerDown = (event: PointerEvent) => {
       if (menuRef.current && event.target instanceof Node && menuRef.current.contains(event.target)) return
@@ -158,16 +158,17 @@ export default function WorkspaceTopBar({
     document.addEventListener('pointerdown', handlePointerDown)
     document.addEventListener('keydown', handleKeyDown)
     return () => {
-      window.clearTimeout(focusTimer)
       document.removeEventListener('pointerdown', handlePointerDown)
       document.removeEventListener('keydown', handleKeyDown)
     }
   }, [menuOpen])
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!fileMenuOpen) return
 
-    const focusTimer = window.setTimeout(() => fileMenuItems()[0]?.focus(), 0)
+    // 必须在同一个按键事件结束前完成移交；setTimeout(0) 会让 Enter 的
+    // 按压方先观察到焦点仍停在触发按钮上。
+    fileMenuItems()[0]?.focus()
     const returnFocus = () => {
       if (fileMenuKind === 'file') compactFileButtonRef.current?.focus()
       else exportButtonRef.current?.focus()
@@ -191,7 +192,6 @@ export default function WorkspaceTopBar({
     document.addEventListener('pointerdown', handlePointerDown)
     document.addEventListener('keydown', handleKeyDown)
     return () => {
-      window.clearTimeout(focusTimer)
       document.removeEventListener('pointerdown', handlePointerDown)
       document.removeEventListener('keydown', handleKeyDown)
     }
@@ -250,13 +250,11 @@ export default function WorkspaceTopBar({
     }
   }, [themeMenuOpen])
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!themeMenuOpen) return
 
-    const focusTimer = window.setTimeout(() => {
-      const checked = themeMenuRef.current?.querySelector<HTMLButtonElement>('[role="radio"][aria-checked="true"]')
-      ;(checked ?? themeRadios()[0])?.focus()
-    }, 0)
+    const checked = themeMenuRef.current?.querySelector<HTMLButtonElement>('[role="radio"][aria-checked="true"]')
+    ;(checked ?? themeRadios()[0])?.focus()
     const handlePointerDown = (event: PointerEvent) => {
       if (themeWrapRef.current && event.target instanceof Node && themeWrapRef.current.contains(event.target)) return
       setThemeMenuOpen(false)
@@ -283,7 +281,6 @@ export default function WorkspaceTopBar({
     document.addEventListener('keydown', handleKeyDown)
     wrap?.addEventListener('focusout', handleFocusOut)
     return () => {
-      window.clearTimeout(focusTimer)
       document.removeEventListener('pointerdown', handlePointerDown)
       document.removeEventListener('keydown', handleKeyDown)
       wrap?.removeEventListener('focusout', handleFocusOut)
@@ -464,11 +461,11 @@ export default function WorkspaceTopBar({
                 setFileMenuKind('export')
                 setFileMenuOpen((open) => !open)
               }}
-              aria-label="导出工程或 PNG 图片"
+              aria-label="导出工程或梯形图图片"
               aria-expanded={fileMenuOpen && fileMenuKind === 'export'}
               aria-controls={fileMenuOpen && fileMenuKind === 'export' ? 'topbar-export-menu' : undefined}
               aria-haspopup="menu"
-              title="导出工程 JSON 或 PNG 图片"
+              title="导出工程 JSON，或用 SVG / PNG 保存梯形图"
             >
               <ExportIcon size={16} />
               <span>导出</span>
@@ -515,16 +512,32 @@ export default function WorkspaceTopBar({
                   <span>复制分享链接</span>
                 </button>
               </div>
-              <div className="wb-menu-group" role="group" aria-label="PNG 图片">
-                <button type="button" role="menuitem" onClick={() => chooseFileMenuAction(() => onExportImage('complete'))}>
+              <div className="wb-menu-group" role="group" aria-label="矢量图 SVG">
+                <span className="wb-menu-label">矢量图 SVG</span>
+                <button type="button" role="menuitem" onClick={() => chooseFileMenuAction(() => onExportImage('complete', 'svg'))}>
+                  <ImageIcon size={16} />
+                  <span>完整程序 SVG</span>
+                </button>
+                <button type="button" role="menuitem" onClick={() => chooseFileMenuAction(() => onExportImage('plain', 'svg'))}>
+                  <ImageIcon size={16} />
+                  <span>纯梯形图 SVG</span>
+                </button>
+                <button type="button" role="menuitem" onClick={() => chooseFileMenuAction(() => onExportSfc('svg'))}>
+                  <StepIcon size={16} />
+                  <span>顺序功能图 SVG</span>
+                </button>
+              </div>
+              <div className="wb-menu-group" role="group" aria-label="位图 PNG">
+                <span className="wb-menu-label">位图 PNG</span>
+                <button type="button" role="menuitem" onClick={() => chooseFileMenuAction(() => onExportImage('complete', 'png'))}>
                   <ImageIcon size={16} />
                   <span>完整程序 PNG</span>
                 </button>
-                <button type="button" role="menuitem" onClick={() => chooseFileMenuAction(() => onExportImage('plain'))}>
+                <button type="button" role="menuitem" onClick={() => chooseFileMenuAction(() => onExportImage('plain', 'png'))}>
                   <ImageIcon size={16} />
                   <span>纯梯形图 PNG</span>
                 </button>
-                <button type="button" role="menuitem" onClick={() => chooseFileMenuAction(onExportSfc)}>
+                <button type="button" role="menuitem" onClick={() => chooseFileMenuAction(() => onExportSfc('png'))}>
                   <StepIcon size={16} />
                   <span>顺序功能图 PNG</span>
                 </button>
@@ -567,17 +580,32 @@ export default function WorkspaceTopBar({
                   <span>复制分享链接</span>
                 </button>
               </div>
-              <div className="wb-menu-group" role="group" aria-label="PNG 图片">
-                <span className="wb-menu-label">PNG 图片</span>
-                <button type="button" role="menuitem" onClick={() => chooseFileMenuAction(() => onExportImage('complete'))}>
+              <div className="wb-menu-group" role="group" aria-label="矢量图 SVG">
+                <span className="wb-menu-label">矢量图 SVG</span>
+                <button type="button" role="menuitem" onClick={() => chooseFileMenuAction(() => onExportImage('complete', 'svg'))}>
+                  <ImageIcon size={16} />
+                  <span>完整程序 SVG</span>
+                </button>
+                <button type="button" role="menuitem" onClick={() => chooseFileMenuAction(() => onExportImage('plain', 'svg'))}>
+                  <ImageIcon size={16} />
+                  <span>纯梯形图 SVG</span>
+                </button>
+                <button type="button" role="menuitem" onClick={() => chooseFileMenuAction(() => onExportSfc('svg'))}>
+                  <StepIcon size={16} />
+                  <span>顺序功能图 SVG</span>
+                </button>
+              </div>
+              <div className="wb-menu-group" role="group" aria-label="位图 PNG">
+                <span className="wb-menu-label">位图 PNG</span>
+                <button type="button" role="menuitem" onClick={() => chooseFileMenuAction(() => onExportImage('complete', 'png'))}>
                   <ImageIcon size={16} />
                   <span>完整程序 PNG</span>
                 </button>
-                <button type="button" role="menuitem" onClick={() => chooseFileMenuAction(() => onExportImage('plain'))}>
+                <button type="button" role="menuitem" onClick={() => chooseFileMenuAction(() => onExportImage('plain', 'png'))}>
                   <ImageIcon size={16} />
                   <span>纯梯形图 PNG</span>
                 </button>
-                <button type="button" role="menuitem" onClick={() => chooseFileMenuAction(onExportSfc)}>
+                <button type="button" role="menuitem" onClick={() => chooseFileMenuAction(() => onExportSfc('png'))}>
                   <StepIcon size={16} />
                   <span>顺序功能图 PNG</span>
                 </button>

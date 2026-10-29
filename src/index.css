@@ -189,6 +189,10 @@ button:not(:disabled) {
   *::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
+    /* 过渡同样属于「动态效果」：只归零 animation 会让 hover/菜单/主题切换
+       继续播放 140–240ms 的位移与颜色渐变。 */
+    transition-duration: 0.01ms !important;
+    transition-delay: 0s !important;
     scroll-behavior: auto !important;
   }
 }

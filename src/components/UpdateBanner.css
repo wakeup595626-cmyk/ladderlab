@@ -1,0 +1,12 @@
+/* 更新提示条是临时浮层，桌面保持 30px 的紧凑高度不打扰编辑；
+   触摸设备上没有鼠标精度，两个按钮必须回到 44px 命中下限。 */
+.sw-update-banner__action {
+  min-height: 30px;
+}
+
+@media (pointer: coarse) {
+  .sw-update-banner__action {
+    min-height: 44px;
+    padding-inline: 16px;
+  }
+}

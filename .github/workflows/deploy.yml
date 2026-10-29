@@ -85,7 +85,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Download built site
-        uses: actions/download-artifact@v4
+        # 与 build 阶段 actions/upload-artifact@v7 对齐：跨大版本混用是官方明确不保证的组合。
+        uses: actions/download-artifact@v8
         with:
           name: site-dist
           path: dist

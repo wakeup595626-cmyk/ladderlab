@@ -48,8 +48,10 @@ interface Context {
   producers: Map<string, Rung[]>
 }
 
-const STEP_NAME = /^(step|s)[\s_-]*0*(\d{1,3})$/i
-const STEP_COMMENT = /^(?:第\s*0*(\d{1,3})\s*步|初始步)$/
+/** Step 前缀明确表示步骤，允许四位以上编号；S1 这种短写法仍只吃到三位，避免抢占输入点。 */
+const STEP_NAME = /^step[\s_-]*0*(\d{1,6})$/i
+const SHORT_STEP_NAME = /^s[\s_-]*0*(\d{1,3})$/i
+const STEP_COMMENT = /^(?:第\s*0*(\d{1,6})\s*步|初始步)$/
 
 function formatDuration(pt: number | undefined): string {
   if (!pt || pt <= 0) return ''
@@ -160,15 +162,17 @@ function collectStepMatches(program: Program): StepMatch[] {
     const comment = tag.comment.trim()
     const commentMatch = STEP_COMMENT.exec(comment)
     const nameMatch = STEP_NAME.exec(tag.name.trim())
-    if (!commentMatch && !nameMatch) continue
-    if (nameMatch && nameMatch[1].toLowerCase() === 's' && !commentMatch) {
+    const shortMatch = SHORT_STEP_NAME.exec(tag.name.trim())
+    const numberMatch = nameMatch ?? shortMatch
+    if (!commentMatch && !numberMatch) continue
+    if (shortMatch && !commentMatch) {
       // S1 / S2 也常被当成普通输入点，输入区不按步骤位处理。
       if (/^%?I/i.test(tag.address.trim())) continue
     }
     let number = 0
     let fromName = false
-    if (nameMatch) {
-      number = Number(nameMatch[2])
+    if (numberMatch) {
+      number = Number(numberMatch[1])
       fromName = true
     }
     if (commentMatch) {
@@ -181,7 +185,57 @@ function collectStepMatches(program: Program): StepMatch[] {
   return matches
 }
 
-function pickStepGroup(matches: StepMatch[]): StepMatch[] {
+interface StepGroupChoice {
+  steps: StepMatch[]
+  /** 选中的步骤位所在容器（按位编号的移位寄存器）；散装步骤位时为空。 */
+  container?: string
+  /** 证据不足、分不清哪一组才是主序列：调用方要退回通用兜底图，不许硬选。 */
+  ambiguous: boolean
+  /** 取舍理由，只写进 notes（notes 不参与导出画面）。 */
+  note?: string
+}
+
+function dedupeSteps(members: StepMatch[]): StepMatch[] {
+  const byNumber = new Map<number, StepMatch>()
+  for (const match of members) {
+    const existing = byNumber.get(match.number)
+    if (!existing || (!existing.fromName && match.fromName)) byNumber.set(match.number, match)
+  }
+  return [...byNumber.values()].sort((left, right) => left.number - right.number)
+}
+
+function stepNamesIn(nodes: LadderNode[], names: Set<string>): string[] {
+  const found = new Set<string>()
+  const walk = (node: LadderNode) => {
+    if (node.type === 'contact') {
+      if (names.has(node.tag)) found.add(node.tag)
+      return
+    }
+    for (const branch of node.branches) branch.forEach(walk)
+  }
+  nodes.forEach(walk)
+  return [...found]
+}
+
+/** 组内“某一位 → 另一位”的 SET 条数，用来判断哪一组才是真正的主序列。 */
+function internalStepLinks(group: StepMatch[], rungs: Rung[]): number {
+  const names = new Set(group.map((match) => match.tag.name))
+  let links = 0
+  for (const rung of rungs) {
+    if (rung.output.kind !== 'SET') continue
+    const target = rung.output.tag
+    if (!target || !names.has(target)) continue
+    if (stepNamesIn(rung.nodes, names).some((name) => name !== target)) links += 1
+  }
+  return links
+}
+
+/**
+ * 选主步骤组。旧实现只留“成员最多”的一组，其余步骤位被静默丢弃，
+ * 用户自定义工程会凭空少掉整段流程。现在按组内转移网络条数判断，
+ * 分不清就返回 ambiguous，让调用方退回“每个网络一步”的兜底图。
+ */
+function pickStepGroup(matches: StepMatch[], rungs: Rung[] = []): StepGroupChoice {
   const byContainer = new Map<string, StepMatch[]>()
   const plain: StepMatch[] = []
   for (const match of matches) {
@@ -194,16 +248,48 @@ function pickStepGroup(matches: StepMatch[]): StepMatch[] {
     group.push(match)
     byContainer.set(container, group)
   }
-  let best = plain
-  for (const group of byContainer.values()) {
-    if (group.length > best.length) best = group
+  const groups = [...byContainer.entries()].map(([container, members]) => ({
+    container,
+    members,
+    links: internalStepLinks(members, rungs),
+  }))
+  if (plain.length >= 2) {
+    groups.push({ container: '', members: plain, links: internalStepLinks(plain, rungs) })
   }
-  const byNumber = new Map<number, StepMatch>()
-  for (const match of best) {
-    const existing = byNumber.get(match.number)
-    if (!existing || (!existing.fromName && match.fromName)) byNumber.set(match.number, match)
+  if (groups.length === 0) return { steps: dedupeSteps(plain), ambiguous: false }
+
+  // 稳定排序：先看转移证据，再看成员数，最后保持变量声明顺序。
+  groups.sort((left, right) => right.links - left.links || right.members.length - left.members.length)
+  const primary = groups[0]
+  const rivals = groups.slice(1)
+  const steps = dedupeSteps(primary.members)
+  const container = primary.container || undefined
+
+  if (primary.links === 0 && rivals.length > 0) {
+    return {
+      steps,
+      container,
+      ambiguous: true,
+      note: '同时存在多组步骤位且没有任何组形成转移网络，已改为每个网络一步的通用图。',
+    }
   }
-  return [...byNumber.values()].sort((left, right) => left.number - right.number)
+  if (rivals.some((rival) => rival.links === primary.links && rival.links > 0)) {
+    return {
+      steps,
+      container,
+      ambiguous: true,
+      note: '两组步骤位各自都有转移网络、无法判断主序列，已改为每个网络一步的通用图。',
+    }
+  }
+  const demoted = rivals.filter((rival) => rival.members.length > 0)
+  return {
+    steps,
+    container,
+    ambiguous: false,
+    note: demoted.length > 0
+      ? `另有步骤位 ${demoted.map((rival) => rival.container || '散装').join('、')} 未形成主序列，按普通变量参与条件。`
+      : undefined,
+  }
 }
 
 function collectContactNames(nodes: LadderNode[], ctx: Context, onlyPositive = false): string[] {
@@ -376,6 +462,21 @@ function collectSourceOptions(
   const options: Array<{ source: string; guard: string }> = []
   const seriesRest = nodes.filter((node) => !(node.type === 'contact' && ctx.stepByTag.has(node.tag)))
   const seriesGuard = formatNodes(seriesRest, ctx, true)
+  const seriesSteps = nodes.filter(
+    (node): node is ContactNode => node.type === 'contact'
+      && node.kind === 'NO'
+      && ctx.stepByTag.has(node.tag)
+      && node.tag !== target.tag.name,
+  )
+  if (seriesSteps.length > 1) {
+    // 多个步骤触点串联 = 这些步“同时到位”才转移，是 AND 而不是并联。
+    // SFC 的一条转移只能挂在一个步后面，所以取最靠近线圈的一步做源，
+    // 其余步骤写进条件标签，绝不能拆成多条并联边伪造通路。
+    const source = seriesSteps[seriesSteps.length - 1]
+    const condition = formatNodes(nodes.filter((node) => node !== source), ctx, false)
+    options.push({ source: source.tag, guard: condition })
+    return options
+  }
   for (const node of nodes) {
     // 只有「上一步已激活」的常开触点才是转移来源；常闭触点只是联锁条件。
     if (node.type !== 'contact' || node.kind !== 'NO') continue
@@ -422,7 +523,7 @@ function isInitialStep(match: StepMatch): boolean {
     || match.tag.initial === true
 }
 
-function buildSrChart(ctx: Context): SfcChart {
+function buildSrChart(ctx: Context): SfcChart | null {
   const edges: SfcEdge[] = []
   const entryGuards: string[] = []
   const first = ctx.steps[0]
@@ -460,7 +561,41 @@ function buildSrChart(ctx: Context): SfcChart {
         continue
       }
     }
-    unresolved.push(`第 ${target.number} 步的进入条件没有找到上一步，导出时按步号顺序补齐。`)
+    // 找不到来源就不画这条进入边，也不许按步号顺序猜一条出来。
+    unresolved.push(`第 ${target.number} 步的进入条件没能对应到上一步，图上不画该步的进入转移。`)
+  }
+
+  // RESET 网络：只有复位条件不引用别的步骤位时，才是真正的“离开本步”分支
+  // （故障 / 停机 / 回初始步）。引用其它步骤的复位只是正常交接的收尾，
+  // 那条边已经由 SET 网络画出，再画一次就重复了。
+  const initialNode = ctx.steps.find((step) => step.number === 0) ?? first
+  const stepNameSet = new Set(ctx.steps.map((item) => item.tag.name))
+  const exits: Array<{ step: StepMatch; guard: string }> = []
+  for (const rung of ctx.rungs) {
+    const output = rung.output
+    if (output.kind !== 'RESET') continue
+    const step = ctx.stepByTag.get(output.tag)
+    if (!step) continue
+    // 条件里引用别的步骤位 = 正常交接的收尾，那条边已经由 SET 网络画过。
+    if (stepNamesIn(rung.nodes, stepNameSet).some((name) => name !== step.tag.name)) continue
+    const guard = formatNodes(rung.nodes, ctx, true) || cleanRungLabel(rung.label)
+    if (!guard) continue
+    exits.push({ step, guard })
+  }
+  // 同一个条件复位好几个步 = 全局清步（停机 / 复位），属于清场而不是某一步的转移分支，
+  // 画成边会在图上凭空长出好几条回初始步的线。
+  const guardCount = new Map<string, number>()
+  for (const exit of exits) guardCount.set(exit.guard, (guardCount.get(exit.guard) ?? 0) + 1)
+  // 同一步、同一条件已经有 SET 交接边时，这条 RESET 只是“离开本步”的收尾；
+  // 再画一条回初始步的线，就等于凭空多出一条退出通路。
+  const sameGuard = (text: string) => text.replace(/[\s·、,，]/g, '')
+  for (const exit of exits) {
+    if ((guardCount.get(exit.guard) ?? 0) > 1) continue
+    // 复位的是初始步就等于“回到空闲”；初始步框本身已是停机状态，不必再画一条边。
+    if (exit.step.tag.name === initialNode.tag.name) continue
+    const guardKey = sameGuard(exit.guard)
+    if (edges.some((edge) => edge.from === exit.step.tag.name && sameGuard(edge.label) === guardKey)) continue
+    edges.push({ from: exit.step.tag.name, to: initialNode.tag.name, label: exit.guard })
   }
 
   const steps: SfcStep[] = ctx.steps.map((match) => ({
@@ -491,14 +626,9 @@ function buildSrChart(ctx: Context): SfcChart {
   const initials = steps.filter((step) => step.initial)
   if (initials.length === 0) steps[0].initial = true
 
-  let normalized = mergeEdges(edges)
-  if (normalized.length === 0) {
-    normalized = steps.slice(0, -1).map((step, index) => ({
-      from: step.key,
-      to: steps[index + 1].key,
-      label: '按步号顺序（未找到显式步进网络，请核对）',
-    }))
-  }
+  const normalized = mergeEdges(edges)
+  // 一条边都建不出来时不许按步号顺序瞎连，交回上层降级成通用图。
+  if (normalized.length === 0) return null
 
   const notes = [
     '动作框按线圈条件自动归入对应步；闪烁、互锁与定时细节仍以梯形图为准。',
@@ -573,7 +703,8 @@ function buildBitChart(ctx: Context, container: string): SfcChart {
   )
   const isLastRung = (rung: Rung) => collectContactNames(rung.nodes, ctx).includes(last.tag.name)
     || hasCompare(rung.nodes, lastMask, container, ctx)
-  const middle = advance.filter((rung) => !isLastRung(rung)).map((rung) => stepPhrase(rung, ctx, 'advance'))
+  const advanceRungs = advance.filter((rung) => !isLastRung(rung))
+  const middle = advanceRungs.map((rung) => stepPhrase(rung, ctx, 'advance'))
   const loop = advance.filter(isLastRung).map((rung) => stepPhrase(rung, ctx, 'loop'))
   const stop = ctx.rungs.filter(
     (rung) => rung.output.kind === 'MOVE' && rung.output.tag === container && rung.output.value === 0,
@@ -596,9 +727,35 @@ function buildBitChart(ctx: Context, container: string): SfcChart {
   }))
 
   const edges: SfcEdge[] = []
-  const middleLabel = middle.filter(Boolean).join(' 或 ') || '移位脉冲（见梯形图）'
+  const middleLabel = [...new Set(middle.filter(Boolean))].join(' 或 ') || '移位脉冲（见梯形图）'
+  // 每条移位网络的推进条件可能各不相同：能对上“是哪一步在推进”的，就挂在那一步的出边上；
+  // 一条都对不上的（例如只看本扫描快照的比较网络）才当作全局推进条件。
+  const stepIndexByName = new Map(chartSteps.map((step, index) => [step.key, index]))
+  const labelByFrom = new Map<number, string[]>()
+  const globalAdvance: string[] = []
+  advanceRungs.forEach((rung, index) => {
+    const phrase = middle[index] || ''
+    const owners = [...new Set(collectContactNames(rung.nodes, ctx)
+      .map((name) => stepIndexByName.get(name))
+      .filter((value): value is number => value !== undefined))]
+    if (owners.length === 1) {
+      const list = labelByFrom.get(owners[0]) ?? []
+      if (phrase && !list.includes(phrase)) list.push(phrase)
+      if (list.length > 0) labelByFrom.set(owners[0], list)
+      return
+    }
+    if (phrase && !globalAdvance.includes(phrase)) globalAdvance.push(phrase)
+  })
+  const labelOfEdge = (index: number): string => {
+    const own = labelByFrom.get(index)
+    if (own && own.length > 0) return own.join(' 或 ')
+    if (globalAdvance.length > 0) return globalAdvance.join(' 或 ')
+    // 已经有别的步认领了推进条件，这一步却没证据：宁可写一句不带条件的中性说明，
+    // 也不能把别步的触发条件搬过来，让人误以为这条边也由那个信号触发。
+    return labelByFrom.size > 0 ? '移位推进（见梯形图）' : middleLabel
+  }
   for (let index = 0; index < chartSteps.length - 1; index += 1) {
-    edges.push({ from: chartSteps[index].key, to: chartSteps[index + 1].key, label: middleLabel })
+    edges.push({ from: chartSteps[index].key, to: chartSteps[index + 1].key, label: labelOfEdge(index) })
   }
   const loopLabel = loop.filter(Boolean).join(' 或 ') || middleLabel
   edges.push({ from: last.tag.name, to: chartSteps[0].key, label: loopLabel })
@@ -620,6 +777,24 @@ function buildBitChart(ctx: Context, container: string): SfcChart {
     })
   } else {
     chartSteps[0].initial = true
+  }
+
+  // 移位链之外还可能有单独置位某一步的网络（越级跳转、故障直落、手动点步），
+  // 这些转移同样由触点证据推出来源，必须留在图上，不能被线性链吞掉。
+  for (const rung of ctx.rungs) {
+    if (rung.output.kind !== 'SET') continue
+    const target = ctx.stepByTag.get(rung.output.tag)
+    if (!target || !stepIndexByName.has(target.tag.name)) continue
+    const guard = formatNodes(rung.nodes, ctx, true) || cleanRungLabel(rung.label)
+    const options = collectSourceOptions(rung.nodes, target, ctx)
+    if (options.length > 0) {
+      for (const option of options) {
+        edges.push({ from: option.source, to: target.tag.name, label: option.guard || guard })
+      }
+      continue
+    }
+    const inferred = inferSource(rung, target, ctx)
+    if (inferred) edges.push({ from: inferred, to: target.tag.name, label: guard })
   }
 
   const notes = [
@@ -929,7 +1104,8 @@ function buildStateChart(ctx: Context): SfcChart | null {
   edges.push({
     from: lastKey,
     to: loop ? loop.members.join('+') : '__initial',
-    label: guards.slice(0, 2).join(' 或 ') || '复位',
+    // 末步的每条复位网络都是真实存在的退出条件，截断只留前两条会凭空少一条转移。
+    label: guards.join(' 或 ') || '复位',
   })
 
   return {
@@ -1029,6 +1205,11 @@ function buildRunCycleChart(ctx: Context): SfcChart | null {
 
   const contacts = collectContactNodes(hold.nodes)
   const start = contacts.find((node) => node.kind === 'NO' && node.tag !== holdName && isInput(ctx.tags.get(node.tag)))
+  // 自保持网络里的输入常闭触点就是运行步的退出 / 互锁条件。定时器自身的
+  // 常闭触点不在此列，否则会和「到点」转移重复成两条同义边。
+  const stops = [...new Set(contacts
+    .filter((node) => node.kind === 'NC' && node.tag !== holdName && isInput(ctx.tags.get(node.tag)))
+    .map((node) => node.tag))]
   const doneTag = (counter?.output.qTag ? ctx.tags.get(counter.output.qTag) : undefined)
     ?? (timer?.output.qTag ? ctx.tags.get(timer.output.qTag) : undefined)
   const timerTag = timer?.output.qTag ? ctx.tags.get(timer.output.qTag) : undefined
@@ -1078,13 +1259,21 @@ function buildRunCycleChart(ctx: Context): SfcChart | null {
         to: '__done',
         label: timerTag ? shortName(timerTag, timerTag.name) : '到时',
       },
+      ...(stops.length > 0 ? [{
+        from: '__run',
+        to: '__initial',
+        label: stops.map((name) => shortName(ctx.tags.get(name), name)).join(' 或 '),
+      }] : []),
       {
         from: '__done',
         to: '__initial',
         label: resetTag ? shortName(resetTag, resetTag.name) : '复位',
       },
     ],
-    notes: ['按自保持线圈与定时 / 计数网络归纳；具体时序仍以梯形图为准。'],
+    notes: [
+      '按自保持线圈与定时 / 计数网络归纳；具体时序仍以梯形图为准。',
+      ...(stops.length > 0 ? ['运行步的停止 / 互锁条件取自自保持网络里的输入常闭触点。'] : []),
+    ],
     source: 'run-cycle',
   }
 }
@@ -1189,16 +1378,29 @@ function buildNetworkChart(ctx: Context): SfcChart | null {
   }
 }
 
+/** 移位模型只有在真的看到 ROL/SHL/MOVE 作用在该容器上时才算有证据。 */
+function hasShiftEvidence(ctx: Context, container: string): boolean {
+  return ctx.rungs.some((rung) => {
+    const kind = rung.output.kind
+    if (kind !== 'ROL' && kind !== 'SHL' && kind !== 'MOVE') return false
+    return rung.output.tag === container
+  })
+}
+
 export function buildSfc(program: Program): SfcChart | null {
-  const steps = pickStepGroup(collectStepMatches(program))
   const rungs = contentRungs(program)
+  const choice = pickStepGroup(collectStepMatches(program), rungs)
+  const steps = choice.steps
   const tags = new Map(program.tags.map((tag) => [tag.name, tag]))
   const timers = new Map<string, { name: string; pt?: number }>()
   const producers = new Map<string, Rung[]>()
   for (const rung of rungs) {
     const output = rung.output
     if (output.qTag) {
-      timers.set(output.qTag, { name: output.tag, pt: output.pt })
+      // 只有计时器的 Q 位才按「到时」表述；计数器 / 功能盒的 Q 位仍是普通布尔量。
+      if (output.kind === 'TON' || output.kind === 'TOF' || output.kind === 'TONR') {
+        timers.set(output.qTag, { name: output.tag, pt: output.pt })
+      }
       const list = producers.get(output.qTag) ?? []
       list.push(rung)
       producers.set(output.qTag, list)
@@ -1218,19 +1420,34 @@ export function buildSfc(program: Program): SfcChart | null {
     timers,
     producers,
   }
+  const sharedContainer = steps.length >= 2
+    && Boolean(steps[0].tag.bitOf)
+    && steps.every((step) => step.tag.bitOf === steps[0].tag.bitOf)
+    ? steps[0].tag.bitOf
+    : undefined
+  // 移位模型必须有真实证据；只凭“同容器里有 N 个步骤位”就套移位，
+  // 会把 SET 转移条件整条丢掉并伪造回跳。
+  const shiftEvidence = sharedContainer ? hasShiftEvidence(ctx, sharedContainer) : false
+  const finish = (chart: SfcChart | null): SfcChart | null => {
+    if (chart && choice.note && !chart.notes.includes(choice.note)) chart.notes.push(choice.note)
+    return chart
+  }
+  const generic = () => finish(buildStateChart(ctx))
+    ?? finish(buildPatternChart(ctx))
+    ?? finish(buildRunCycleChart(ctx))
+    ?? finish(buildNetworkChart(ctx))
+
   if (steps.length >= 2) {
-    const container = steps[0].tag.bitOf
-    if (container && steps.every((step) => step.tag.bitOf === container) && steps.length >= 3) {
-      return buildBitChart(ctx, container)
+    if (choice.ambiguous && !shiftEvidence) return finish(buildNetworkChart(ctx))
+    if (sharedContainer && shiftEvidence && steps.length >= 3) {
+      return finish(buildBitChart(ctx, sharedContainer))
     }
-    return buildSrChart(ctx)
+    // 没有移位证据就按 SET/RESET 网络逐条建边；建不出边继续降级，坚决不按步号瞎连。
+    return finish(buildSrChart(ctx)) ?? generic()
   }
   // 没有步骤位时，按置位状态、序列盒或定时计数网络归纳出一条状态链；
   // 都不匹配就按网络顺序逐步排列，保证任何自建工程都能导出自己的图。
-  return buildStateChart(ctx)
-    ?? buildPatternChart(ctx)
-    ?? buildRunCycleChart(ctx)
-    ?? buildNetworkChart(ctx)
+  return generic()
 }
 
 export const __testing = { collectStepMatches, pickStepGroup, formatNodes }

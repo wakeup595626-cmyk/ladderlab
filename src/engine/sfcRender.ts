@@ -1,4 +1,5 @@
 import type { SfcChart, SfcEdge, SfcStep } from './sfc'
+import { escapeXmlText } from '../lib/svgDocument'
 
 export interface SfcSvg {
   width: number
@@ -6,7 +7,9 @@ export interface SfcSvg {
   svg: string
 }
 
-const SANS = 'Segoe UI, Microsoft YaHei, PingFang SC, sans-serif'
+/* 别人在自己电脑上打开 SVG 时，页面里打包的 webfont 并不在文件里，
+   所以回退栈必须一路兜到系统自带的中文字体，否则中文会掉到 Times 变方块。 */
+const SANS = 'Segoe UI, Microsoft YaHei, PingFang SC, Noto Sans CJK SC, Source Han Sans SC, sans-serif'
 const WHITE = '#ffffff'
 const STEP_STROKE = '#1c4b74'
 const STEP_TEXT = '#14405f'
@@ -15,7 +18,11 @@ const ACTION_STROKE = '#a8cbe0'
 const ACTION_TEXT = '#23313c'
 const ACTION_DETAIL = '#3d637a'
 const WIRE = '#1c4b74'
-const BRANCH = '#bf6f0d'
+const BRANCH = WIRE
+const BRANCH_TEXT = '#3d4753'
+const LANE_GAP = 40
+const LANE_INSET = 26
+const BRANCH_LABEL_MAX = 168
 
 const PAGE_PAD = 40
 const STEP_W = 104
@@ -29,25 +36,47 @@ const ACTION_LINE = 19
 const ACTION_GAP = 7
 
 function escapeXml(value: string): string {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
+  return escapeXmlText(value)
 }
 
 function isWide(ch: string): boolean {
   return /[\u1100-\u115f\u2e80-\ua4cf\uac00-\ud7a3\uf900-\ufaff\ufe30-\ufe4f\uff00-\uff60\uffe0-\uffe6]/.test(ch)
 }
 
+/**
+ * 窄体 ASCII 一律按 0.56em 算会把 M、W、% 这类宽字符算小：实测 Segoe UI 13px
+ * 下 M=0.899em、W=0.935em，一旦条件里有信号名就会压进右侧动作框，右对齐的
+ * 回跳条件还会被左边界裁掉。这里按字符类别给保守宽度，宁可多留白也不裁字。
+ */
 function charWidth(ch: string): number {
-  return isWide(ch) ? 1 : 0.56
+  if (isWide(ch)) return 1
+  if (/[MW@%]/.test(ch)) return 0.95
+  if (/[A-Z]/.test(ch)) return 0.78
+  if (/[0-9]/.test(ch)) return 0.62
+  if (/[a-z]/.test(ch)) return 0.6
+  return 0.55
 }
 
-function textWidth(text: string, size: number): number {
+let metricsCanvas: HTMLCanvasElement | null | undefined
+
+/** 浏览器里用真实字体度量，测试 / 服务端没有 DOM 时退回上面的保守表。 */
+function measureText(text: string, size: number, weight = 500): number {
+  if (metricsCanvas === undefined) {
+    metricsCanvas = typeof document === 'undefined' ? null : document.createElement('canvas')
+  }
+  const context = metricsCanvas ? metricsCanvas.getContext('2d') : null
+  if (context) {
+    context.font = `${weight} ${size}px ${SANS}`
+    const width = context.measureText(text).width
+    if (Number.isFinite(width) && width > 0) return width
+  }
   let total = 0
   for (const ch of Array.from(text)) total += charWidth(ch) * size
   return total
+}
+
+function textWidth(text: string, size: number, weight = 500): number {
+  return measureText(text, size, weight)
 }
 
 const SIGNAL = /(?:%?(?:[IQM]\d+(?:\.\d+)?|DB\d+\.DB[XBWD]\d+(?:\.\d+)?|T\d+|C\d+))(?:=\s*-?\d+)?/i
@@ -102,37 +131,41 @@ export function compactSfcText(value: string): string {
 
 const BREAK_CHARS = new Set([' ', '·', '，', '、', '；', '/', '＋', '或', '且'])
 
-/** 按估算宽度折行：优先在空格、间隔号和「或 / 且」处断开。 */
+/** 按真实字体宽度折行（无 DOM 时退回保守估算），优先在空格、间隔号和「或 / 且」处断开。 */
 export function wrapText(text: string, maxWidth: number, size: number): string[] {
   const lines: string[] = []
   let current: string[] = []
-  let width = 0
   let lastBreak = -1
   const flush = (keepTail: boolean) => {
     if (!keepTail || lastBreak <= 0) {
       lines.push(current.join('').trimEnd())
       current = []
-      width = 0
       lastBreak = -1
       return
     }
     lines.push(current.slice(0, lastBreak + 1).join('').trimEnd())
     current = current.slice(lastBreak + 1)
-    width = textWidth(current.join(''), size)
     lastBreak = -1
     current.forEach((ch, index) => {
       if (BREAK_CHARS.has(ch)) lastBreak = index
     })
   }
   for (const ch of Array.from(text)) {
-    const widthOfChar = charWidth(ch) * size
-    if (width + widthOfChar > maxWidth && current.length > 0) flush(true)
+    const candidateWidth = textWidth(current.join('') + ch, size)
+    if (candidateWidth > maxWidth && current.length > 0) flush(true)
     current.push(ch)
-    width += widthOfChar
     if (BREAK_CHARS.has(ch)) lastBreak = current.length - 1
   }
   if (current.length > 0) lines.push(current.join('').trimEnd())
   return lines.length > 0 ? lines : ['']
+}
+
+/** 步骤号一般只有一两位；自定义工程的 Step1200 这类长编号要缩字号，否则会压进条件列。 */
+function stepNumberSize(number: string): number {
+  const length = Array.from(number).length
+  if (length <= 3) return 25
+  if (length <= 6) return 18
+  return 14
 }
 
 function textLinesAt(
@@ -190,32 +223,40 @@ interface Layout {
   labelX: number
   actionX: number
   labelMax: number
-  branchMax: number
   lastBottom: number
+  branchLines: string[][]
 }
 
 interface BranchRoute {
   lines: string[]
-  exitX: number
-  fromBottom: number
+  exitY: number
   endY: number
   laneX: number
-  dropY: number
+  targetIndex: number
 }
 
 export function renderSfcSvg(chart: SfcChart): SfcSvg {
   const steps = chart.steps
   const indexOf = new Map(steps.map((step, index) => [step.key, index]))
   const edges = chart.edges.filter((edge) => indexOf.has(edge.from) && indexOf.has(edge.to))
-  const branches = edges.filter((edge) => indexOf.get(edge.to)! !== indexOf.get(edge.from)! + 1)
-  const gutter = branches.length > 0 ? PAGE_PAD + branches.length * 46 + 4 : PAGE_PAD
+  const jumps = edges.filter((edge) => indexOf.get(edge.to)! !== indexOf.get(edge.from)! + 1)
+  // 回跳条件单独排在左侧一列，先量出最宽一行，再决定左边距和通道位置。
+  const branchLines = jumps.map((edge) => wrapText(compactSfcText(edge.label), BRANCH_LABEL_MAX, LABEL_SIZE))
+  const branchLabelWidth = branchLines.reduce(
+    (max, lines) => Math.max(max, ...lines.map((line) => textWidth(line, LABEL_SIZE))),
+    0,
+  )
+  const laneCount = jumps.length
+  const gutter = laneCount > 0
+    ? PAGE_PAD + Math.ceil(branchLabelWidth) + 54 + (laneCount - 1) * LANE_GAP
+    : PAGE_PAD
   const stepX = gutter
   const centerX = stepX + STEP_W / 2
-  const labelX = stepX + STEP_W + 28
-  const actionX = Math.max(labelX + 110, 290)
+  // 转换条件紧贴刻度右侧，动作框再往右留出固定空档。
+  const labelX = centerX + 26
+  const actionX = Math.max(labelX + 164, 290)
   const width = actionX + ACTION_W + PAGE_PAD
-  const labelMax = width - PAGE_PAD - labelX
-  const branchMax = Math.min(width - PAGE_PAD - actionX, 590)
+  const labelMax = actionX - labelX - 12
 
   // 第一遍：每行高度由动作行数决定，转换条件行数决定行间距。
   const rows: Row[] = []
@@ -239,8 +280,19 @@ export function renderSfcSvg(chart: SfcChart): SfcSvg {
     const gap = Math.max(ROW_GAP, 16 + labelLines.length * LABEL_LINE + 10)
     cursor += rowHeight + gap
   })
+  // 动作比步骤框高时，框会向上下同时溢出。首行必须整体下移，
+  // 否则长动作框和第一批文字会被 viewBox 的上边缘裁掉。
+  const topOverflow = rows.reduce((overflow, row) => Math.max(
+    overflow,
+    PAGE_PAD - (row.y + STEP_H / 2 - row.actionHeight / 2),
+  ), 0)
+  if (topOverflow > 0) {
+    rows.forEach((row) => { row.y += topOverflow })
+  }
   const lastRow = rows[rows.length - 1]
-  const lastBottom = lastRow.y + Math.max(STEP_H, lastRow.actionHeight)
+  const lastBottom = lastRow
+    ? lastRow.y + Math.max(STEP_H, lastRow.actionHeight)
+    : PAGE_PAD
 
   const parts: string[] = []
 
@@ -251,8 +303,8 @@ export function renderSfcSvg(chart: SfcChart): SfcSvg {
     labelX,
     actionX,
     labelMax,
-    branchMax,
     lastBottom,
+    branchLines,
   })
 }
 
@@ -262,7 +314,7 @@ function finishSvg(
   edges: SfcEdge[],
   layout: Layout,
 ): SfcSvg {
-  const { width, stepX, centerX, labelX, actionX, labelMax, branchMax, lastBottom } = layout
+  const { width, stepX, centerX, labelX, actionX, labelMax, lastBottom, branchLines } = layout
   const indexOf = new Map(rows.map((row) => [row.step.key, row.index]))
   const rowAt = new Map(rows.map((row) => [row.index, row]))
 
@@ -280,7 +332,7 @@ function finishSvg(
       )
     }
     parts.push(
-      `<text x="${centerX}" y="${mid + 9}" font-size="25" font-weight="700" fill="${STEP_TEXT}" text-anchor="middle">${escapeXml(row.step.number)}</text>`,
+      `<text x="${centerX}" y="${mid + 9}" font-size="${stepNumberSize(row.step.number)}" font-weight="700" fill="${STEP_TEXT}" text-anchor="middle">${escapeXml(row.step.number)}</text>`,
     )
     if (row.actions.length > 0) {
       const lineCount = row.actions.reduce((sum, entry) => sum + entry.title.length + entry.detail.length, 0)
@@ -331,55 +383,98 @@ function finishSvg(
     )
   }
 
-  // 回跳 / 停机分支：沿左侧总线绕行，橙色区分于正向转换
-  const branches: BranchRoute[] = []
-  for (const edge of edges) {
+  // 回跳 / 跳步：从步骤左侧引出，全程直角，条件文字排在左侧独立一列
+  const jumps = edges.filter((edge) => {
     const fromIndex = indexOf.get(edge.from)
     const toIndex = indexOf.get(edge.to)
-    if (fromIndex === undefined || toIndex === undefined) continue
-    if (toIndex === fromIndex + 1) continue
-    const fromRow = rowAt.get(fromIndex)
-    const toRow = rowAt.get(toIndex)
-    if (!fromRow || !toRow) continue
-    branches.push({
-      lines: wrapText(compactSfcText(edge.label), Math.max(200, branchMax), 13),
-      exitX: stepX + STEP_W / 2 - 20,
-      fromBottom: fromRow.y + Math.max(STEP_H, fromRow.actionHeight),
+    return fromIndex !== undefined && toIndex !== undefined && toIndex !== fromIndex + 1
+  })
+  const routes: BranchRoute[] = []
+  jumps.forEach((edge, index) => {
+    const fromRow = rowAt.get(indexOf.get(edge.from)!)
+    const toRow = rowAt.get(indexOf.get(edge.to)!)
+    if (!fromRow || !toRow) return
+    routes.push({
+      lines: branchLines[index] ?? [],
+      exitY: fromRow.y + STEP_H / 2,
       endY: toRow.y + STEP_H / 2,
       laneX: 0,
-      dropY: 0,
+      targetIndex: indexOf.get(edge.to)!,
     })
-  }
-
-  branches.sort((a, b) => a.endY - b.endY)
-  const branchBase = branches.reduce((top, branch) => Math.max(top, branch.fromBottom), lastBottom)
-  branches.forEach((branch, index) => {
-    branch.laneX = stepX - 26 - (branches.length - 1 - index) * 40
-    branch.dropY = branchBase + 26 + index * 24
   })
-  let branchBottom = lastBottom
-  for (const branch of branches) {
-    branchBottom = Math.max(branchBottom, branch.dropY + 6 + branch.lines.length * 18)
-  }
 
-  for (const branch of branches) {
+  // 多条转移落到同一步时，各用自己的入口高度，避免箭头叠在一起。
+  // 两个入口在步骤框内上下分开，条件文字仍贴着自己的水平导入线。
+  const byTarget = new Map<number, BranchRoute[]>()
+  for (const route of routes) {
+    const group = byTarget.get(route.targetIndex) ?? []
+    group.push(route)
+    byTarget.set(route.targetIndex, group)
+  }
+  const sharedArrowAt = new Map<number, number>()
+  for (const [targetIndex, group] of byTarget) {
+    if (group.length <= 1) continue
+    const target = rowAt.get(targetIndex)
+    if (!target) continue
+    group.sort((left, right) => left.exitY - right.exitY)
+    if (group.length <= 4) {
+      const span = Math.min(42, STEP_H - 18)
+      const stride = span / (group.length - 1)
+      group.forEach((route, index) => {
+        route.endY = target.y + STEP_H / 2 - span / 2 + stride * index
+      })
+    } else {
+      // 入口很多时逐个偏移会把步骤左边挤成一条糊线；共用一个箭头，
+      // 各分支仍保留自己的通道和条件文字。
+      sharedArrowAt.set(targetIndex, group[0].endY)
+      for (const route of group) route.endY = target.y + STEP_H / 2
+    }
+  }
+  const ordered = routes.slice().sort((a, b) => a.endY - b.endY || a.exitY - b.exitY)
+  ordered.forEach((route, index) => {
+    route.laneX = stepX - LANE_INSET - (ordered.length - 1 - index) * LANE_GAP
+  })
+  const placed: Array<{ y1: number; y2: number }> = []
+  const arrowDrawn = new Set<number>()
+  for (const route of ordered) {
+    const drawArrow = !sharedArrowAt.has(route.targetIndex) || !arrowDrawn.has(route.targetIndex)
     parts.push(
-      `<path d="M ${branch.exitX} ${branch.fromBottom} V ${branch.dropY} H ${branch.laneX} V ${branch.endY} H ${stepX - 9}"`
+      `<path d="M ${stepX} ${route.exitY} H ${route.laneX} V ${route.endY} H ${stepX - 9}"`
       + ` fill="none" stroke="${BRANCH}" stroke-width="1.8" stroke-linejoin="miter"/>`,
-      `<path d="M ${stepX - 9} ${branch.endY - 5} L ${stepX - 0.5} ${branch.endY} L ${stepX - 9} ${branch.endY + 5} Z" fill="${BRANCH}"/>`,
     )
-    parts.push(
-      `<text x="${branch.laneX + 12}" y="${branch.dropY + 18}" font-size="13" font-weight="450" fill="#7a4d0d">`
-      + `${escapeXml(branch.lines[0] ?? '')}</text>`,
-    )
-    branch.lines.slice(1).forEach((line, index) => {
+    if (drawArrow) {
       parts.push(
-        `<text x="${branch.laneX + 12}" y="${branch.dropY + 36 + index * 18}" font-size="13" font-weight="450" fill="#7a4d0d">${escapeXml(line)}</text>`,
+        `<path d="M ${stepX - 9} ${route.endY - 5} L ${stepX - 0.5} ${route.endY} L ${stepX - 9} ${route.endY + 5} Z" fill="${BRANCH}"/>`,
+      )
+      arrowDrawn.add(route.targetIndex)
+    }
+    const lines = route.lines.length > 0 ? route.lines : ['']
+    const offset = -((lines.length - 1) * LABEL_LINE) / 2
+    let shift = 0
+    // 每次至少越过一个已放置标签，因此最多需要 placed.length + 1 次。
+    // 固定 8 次会在同一目标超过 9 条回跳时把余下标签叠在同一条线上。
+    for (let guard = 0; guard <= placed.length; guard += 1) {
+      const y1 = route.endY + offset - LABEL_SIZE + shift
+      const y2 = y1 + lines.length * LABEL_LINE
+      const hit = placed.find((box) => y1 < box.y2 + 4 && y2 > box.y1 - 4)
+      if (!hit) break
+      shift += hit.y2 + 4 - y1
+    }
+    const finalY1 = route.endY + offset - LABEL_SIZE + shift
+    placed.push({ y1: finalY1, y2: finalY1 + lines.length * LABEL_LINE })
+    // 每个条件贴着自己那条竖线右对齐：两条回跳指向同一步时，学生不会把它们
+    // 误读成同一组条件。左边距已按最外层通道预留，不会越出画布。
+    const labelRight = route.laneX - 12
+    lines.forEach((line, lineIndex) => {
+      parts.push(
+        `<text x="${labelRight}" y="${route.endY + 4.5 + offset + lineIndex * LABEL_LINE + shift}"`
+        + ` font-size="${LABEL_SIZE}" font-weight="450" fill="${BRANCH_TEXT}" text-anchor="end">${escapeXml(line)}</text>`,
       )
     })
   }
 
-  const height = Math.ceil(branchBottom + PAGE_PAD)
+  const labelBottom = placed.reduce((bottom, box) => Math.max(bottom, box.y2), 0)
+  const height = Math.ceil(Math.max(lastBottom, labelBottom) + PAGE_PAD)
   const body = parts.join('')
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" font-family="${SANS}">`
     + `<rect x="0" y="0" width="${width}" height="${height}" fill="${WHITE}"/>`

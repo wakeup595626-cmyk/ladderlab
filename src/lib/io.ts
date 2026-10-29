@@ -265,8 +265,8 @@ export function serializeProgram(program: Program): string {
   return JSON.stringify(program, null, 2)
 }
 
-export function downloadText(filename: string, content: string) {
-  const blob = new Blob([content], { type: 'application/json;charset=utf-8' })
+export function downloadText(filename: string, content: string, mime = 'application/json;charset=utf-8') {
+  const blob = new Blob([content], { type: mime })
   const url = URL.createObjectURL(blob)
   const anchor = document.createElement('a')
   anchor.href = url

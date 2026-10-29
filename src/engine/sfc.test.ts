@@ -3,6 +3,7 @@ import { buildCourseLab } from './courseLabs'
 import { buildSfc } from './sfc'
 import { compactSfcText, renderSfcSvg, wrapText } from './sfcRender'
 import type { OutputKind, Program, Rung, TagDef } from './types'
+import type { SfcChart } from './sfc'
 
 function tag(name: string, address: string, comment: string): TagDef {
   return { id: name, name, address, kind: 'BOOL', initial: false, comment }
@@ -122,7 +123,8 @@ describe('顺序功能图归纳', () => {
     expect(chart.steps.map((step) => step.number)).toEqual(['0', '1', '2'])
     expect(chart.steps[1].actions.map((action) => action.text)).toEqual(['LED1', 'T1 计时 5s', 'C1 计 5 次'])
     expect(chart.steps[2].actions.map((action) => action.text)).toEqual(['LED1', '计数满五次'])
-    expect(chart.edges.map((edge) => edge.label)).toEqual(['启动按钮', '五秒到点', '计数复位'])
+    // 运行步除到时转移外，还要保留自保持网络里的停止按钮退出条件。
+    expect(chart.edges.map((edge) => edge.label)).toEqual(['启动按钮', '五秒到点', '停止按钮', '计数复位'])
   })
 
   it('实验四按上行与下行方向归纳', () => {
@@ -297,10 +299,22 @@ describe('顺序功能图渲染', () => {
     expect(rendered.svg).not.toContain('8 → 1')
     expect(rendered.svg).not.toContain('8 → 0')
     expect(rendered.svg).not.toContain('NaN')
-    expect(rendered.svg).toContain('<line x1="240" y1="188" x2="378" y2="188"')
-    expect(rendered.svg).toContain('<rect x="378" y="159" width="200" height="58"')
-    expect(rendered.svg).toContain('<path d="M 168 1016 V 1042 H 70 V 74 H 127"')
-    expect(rendered.svg).toContain('<path d="M 168 1016 V 1066 H 110 V 188 H 127"')
+    const actionBoxes = Array.from(rendered.svg.matchAll(
+      /<rect x="([\d.]+)" y="([\d.]+)" width="200" height="([\d.]+)"/g,
+    ))
+    expect(actionBoxes.length).toBeGreaterThan(0)
+    for (const match of actionBoxes) {
+      const [, x, y, height] = match.map(Number)
+      expect(rendered.svg).toContain(
+        `x2="${x}" y2="${y + height / 2}" stroke="#1c4b74" stroke-width="1.2"`,
+      )
+    }
+    const returnPaths = Array.from(rendered.svg.matchAll(
+      /<path d="(M [\d.]+ [\d.]+ H [\d.]+ V [\d.]+ H [\d.]+)" fill="none"[^>]*stroke-linejoin="miter"/g,
+    ))
+    expect(returnPaths).toHaveLength(2)
+    expect(rendered.svg).not.toContain('#bf6f0d')
+    expect(rendered.svg).not.toContain('#7a4d0d')
     expect(rendered.width).toBeGreaterThan(600)
     expect(rendered.height).toBeGreaterThan(700)
     expect(rendered.svg.match(/<text/g)?.length ?? 0)
@@ -322,5 +336,51 @@ describe('顺序功能图渲染', () => {
       .toBe('H·SD=1·M4.5 或 M5.0')
     expect(compactSfcText('H 完成 · 松开 SD · 单步 或 H 完成 · 松开 SD · 自动'))
       .toBe('H·SD=0')
+  })
+
+  it('两条回跳到同一步时，左侧条件自动错开不重叠', () => {
+    const chart: SfcChart = {
+      programName: '同目标回跳',
+      source: 'network',
+      notes: [],
+      steps: Array.from({ length: 5 }, (_, index) => ({
+        key: `S${index}`,
+        number: String(index),
+        title: `第 ${index} 步`,
+        initial: index === 0,
+        actions: index === 0 ? [] : [{ text: `动作 ${index}`, detail: `Q0.${index}=1` }],
+      })),
+      edges: [
+        { from: 'S0', to: 'S1', label: '启动' },
+        { from: 'S1', to: 'S2', label: '完成一' },
+        { from: 'S2', to: 'S3', label: '完成二' },
+        { from: 'S3', to: 'S4', label: '完成三' },
+        { from: 'S4', to: 'S1', label: '复位键（M0.1）' },
+        { from: 'S3', to: 'S1', label: '急停（M0.2）' },
+      ],
+    }
+    const rendered = renderSfcSvg(chart)
+    const labels = [...rendered.svg.matchAll(/<text x="(\d+)" y="([\d.]+)"[^>]*text-anchor="end">(M0\.[12])<\/text>/g)]
+    expect(labels).toHaveLength(2)
+    const ys = labels.map((match) => Number(match[2]))
+    expect(Math.abs(ys[0] - ys[1])).toBeGreaterThanOrEqual(13)
+    // 每条回跳的条件贴着自己那条竖线，两条线相差一个通道间距。
+    const xs = labels.map((match) => Number(match[1]))
+    expect(Math.abs(xs[0] - xs[1])).toBeGreaterThanOrEqual(30)
+    expect(Math.min(...xs)).toBeGreaterThan(0)
+    expect(rendered.svg).not.toContain('NaN')
+    expect(rendered.width).toBeGreaterThan(0)
+    expect(rendered.height).toBeGreaterThan(0)
+  })
+
+  it('尺寸只随内容变化，无负数坐标和空路径', () => {
+    const rendered = renderSfcSvg(buildSfc(lab('course-3'))!)
+    expect(rendered.svg).not.toMatch(/="-/)
+    expect(rendered.svg).not.toContain('NaN')
+    expect(rendered.svg).not.toContain('undefined')
+    const [, width, height] = /viewBox="0 0 ([\d.]+) ([\d.]+)"/.exec(rendered.svg)!
+    expect(Number(width)).toBe(rendered.width)
+    expect(Number(height)).toBe(rendered.height)
+    expect(rendered.height).toBeLessThan(1200)
   })
 })

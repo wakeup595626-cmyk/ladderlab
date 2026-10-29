@@ -1,6 +1,7 @@
 import type { Program } from '../engine/types'
 import { FIELD_LIMITS } from './limits'
 import { parseProgramText, serializeProgram } from './io'
+import { mergeLibraryBackup, validateBackupProjects } from './projectBackup'
 
 /**
  * 命名项目库采用“一个项目一个键”的存储结构：两个标签页同时保存不同项目时，
@@ -941,6 +942,126 @@ export async function deleteSavedProject(
         ok: true,
         projects: library.projects.filter((project) => project.id !== id),
         broken: library.broken,
+      }
+    })
+  } catch (error) {
+    return { ok: false, message: `无法访问本机项目库锁：${errorMessage(error)}` }
+  }
+}
+
+/** 回滚也可能因为存储不可用而失败；此时保留现场，由调用方如实告知用户。 */
+function restoreStorageSnapshot(snapshot: Map<string, string | null>): void {
+  for (const [key, value] of snapshot) {
+    try {
+      if (value === null) window.localStorage.removeItem(key)
+      else window.localStorage.setItem(key, value)
+    } catch {
+      // 这里不能再抛：否则调用方拿不到“写了一半”的真实结论。
+    }
+  }
+}
+
+function restoreErrorMessage(error: unknown): string {
+  if (isQuotaError(error)) {
+    return '浏览器本机存储空间不足，整包恢复没有完成。本次写入已尽量撤回；请先清理浏览器存储空间，或减少要恢复的工程数量后重试。'
+  }
+  return `无法把备份写入本机项目库：${errorMessage(error)}。本次写入已尽量撤回，请重新打开项目列表确认后再试。`
+}
+
+export type ImportSavedProjectBackupResult =
+  | {
+    ok: true
+    projects: SavedProject[]
+    broken: BrokenSavedProject[]
+    added: number
+    merged: number
+    renamed: number
+  }
+  | {
+    ok: false
+    message: string
+    /** 预览之后项目库已经变化；调用方应刷新预览，再让用户确认一次。 */
+    code?: 'stale-preview'
+    /** 只在 stale-preview 时返回，用来直接重建准确的合并预览。 */
+    projects?: SavedProject[]
+  }
+
+export interface SavedProjectRestoreExpectation {
+  id: string
+  /** 预览时看到的版本；null 表示这个 ID 当时还不在本机项目库中。 */
+  savedAt: number | null
+}
+
+/**
+ * 把整包备份写回本机项目库：按 ID 合并，同名不同 ID 的工程改名后并存，
+ * 绝不静默覆盖已有工程。只写备份涉及的 ID，其他标签页新增的项目原样保留；
+ * 恢复被删过的工程会顺手清掉墓碑，否则它仍会被当成已删除而隐藏。
+ */
+export async function importSavedProjectBackup(
+  incoming: SavedProject[],
+  expectedVersions?: ReadonlyArray<SavedProjectRestoreExpectation>,
+): Promise<ImportSavedProjectBackupResult> {
+  if (incoming.length === 0) {
+    // 空备份也是合法备份：不清空项目库，也不写任何键。
+    const library = readProjectLibrary()
+    return library.status === 'ok'
+      ? { ok: true, projects: library.projects, broken: library.broken, added: 0, merged: 0, renamed: 0 }
+      : { ok: false, message: library.message }
+  }
+
+  try {
+    return await withLibraryLock((): ImportSavedProjectBackupResult => {
+      let library: LibraryView
+      try {
+        library = loadLibraryForWrite()
+      } catch (error) {
+        // 损坏的项目库保持只读：先把原文导出，别用备份去覆盖它。
+        if (error instanceof LibraryCorruptionError) return { ok: false, message: error.message }
+        throw error
+      }
+
+      const validated = validateBackupProjects(incoming)
+      if (!validated.ok) return { ok: false, message: validated.error }
+
+      if (expectedVersions) {
+        const current = new Map(library.projects.map((project) => [project.id, project.savedAt] as const))
+        const changed = expectedVersions.some((expected) => (
+          (current.get(expected.id) ?? null) !== expected.savedAt
+        ))
+        if (changed) {
+          return {
+            ok: false,
+            code: 'stale-preview',
+            message: '项目库在预览之后已有更新。已刷新恢复预览，请重新确认要写入的内容。',
+            projects: library.projects,
+          }
+        }
+      }
+
+      const merge = mergeLibraryBackup(library.projects, validated.projects)
+      const snapshot = new Map<string, string | null>()
+      try {
+        for (const project of merge.incoming) {
+          const key = projectKey(project.id)
+          snapshot.set(key, window.localStorage.getItem(key))
+          const deletedKey = tombstoneKey(project.id)
+          snapshot.set(deletedKey, window.localStorage.getItem(deletedKey))
+        }
+        for (const project of merge.incoming) writeProjectRecord(project)
+        for (const project of merge.incoming) window.localStorage.removeItem(tombstoneKey(project.id))
+      } catch (error) {
+        restoreStorageSnapshot(snapshot)
+        return { ok: false, message: restoreErrorMessage(error) }
+      }
+
+      const next = readV2View(listStorageKeys())
+      return {
+        ok: true,
+        projects: next.projects,
+        broken: next.broken,
+        added: merge.added,
+        merged: merge.merged,
+        renamed: merge.renamed,
       }
     })
   } catch (error) {

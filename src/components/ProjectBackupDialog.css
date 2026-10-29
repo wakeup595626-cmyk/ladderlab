@@ -1,0 +1,183 @@
+.project-backup-body {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-card);
+  background: var(--raised);
+  transition: border-color var(--dur-quick) var(--ease-out), background var(--dur-quick) var(--ease-out);
+}
+
+.project-backup-body.is-dragging {
+  border-color: var(--accent);
+  background: var(--accent-wash);
+}
+
+.project-backup-action {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--control);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--dur-quick) var(--ease-out), background var(--dur-quick) var(--ease-out);
+}
+
+.project-backup-action:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent-wash) 48%, var(--surface));
+}
+
+.project-backup-action:focus-visible {
+  outline: 2px solid var(--accent-wash);
+  outline-offset: 2px;
+}
+
+.project-backup-action:disabled {
+  opacity: 0.48;
+  cursor: default;
+}
+
+.project-backup-icon {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  flex: 0 0 36px;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--raised);
+  color: var(--accent-ink);
+}
+
+.project-backup-copy {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.project-backup-copy strong {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.project-backup-copy small {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.project-backup-hint,
+.project-backup-more {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.project-backup-hint {
+  padding: 1px 2px 0;
+}
+
+.project-backup-warning,
+.project-backup-notice {
+  margin: 0;
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.project-backup-warning {
+  border-color: color-mix(in srgb, var(--negative) 28%, var(--border));
+  background: var(--negative-wash);
+  color: var(--negative);
+}
+
+.project-backup-notice {
+  border-color: color-mix(in srgb, var(--accent) 32%, var(--border));
+  background: var(--accent-wash);
+  color: var(--accent-ink);
+}
+
+.project-backup-list {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  list-style: none;
+}
+
+.project-backup-list li {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px;
+}
+
+.project-backup-list li + li {
+  border-top: 1px solid var(--rule);
+}
+
+.project-backup-name {
+  overflow: hidden;
+  min-width: 0;
+  color: var(--text);
+  font-size: 11.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-backup-tag {
+  flex: 0 0 auto;
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--raised);
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.project-backup-tag.is-merged {
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--border));
+  background: var(--accent-wash);
+  color: var(--accent-ink);
+}
+
+.project-backup-more {
+  padding-inline: 2px;
+}
+
+@media (max-width: 600px) {
+  .project-backup-body {
+    gap: 8px;
+    padding: 10px;
+  }
+
+  .project-backup-action {
+    gap: 10px;
+    padding: 10px;
+  }
+
+  .project-backup-icon {
+    width: 32px;
+    height: 32px;
+    flex-basis: 32px;
+  }
+}

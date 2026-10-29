@@ -1758,7 +1758,14 @@ body[data-drag-kind] {
   }
 
   .wb-brand-name {
-    display: none;
+    /* 手机上品牌文字不占位，但不能 display:none：那会让读屏软件连页面
+       h1 一起丢掉。改用视觉隐藏，标题仍在无障碍树里。 */
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
   }
 
   .wb-history-actions {
@@ -1926,7 +1933,15 @@ body[data-drag-kind] {
   /* 窄屏优先保住「撤销 / 重做 / 运行」这些真正要点的控件：
      品牌图标让位给工程名，避免工程名被挤成半截字。 */
   .wb-shell .wb-brand {
-    display: none;
+    /* 同上：品牌区不占位，但 h1 保留在无障碍树里。 */
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    border: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
   }
 
   .wb-shell .wb-topbar {
@@ -4704,7 +4719,15 @@ body[data-drag-kind] {
   }
 
   .wb-shell .wb-brand {
-    display: none;
+    /* 品牌区在手机上让位，但 h1 要留在无障碍树里（读屏的页面标题）。 */
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    border: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
   }
 
   .wb-project-name {
@@ -5324,6 +5347,36 @@ body[data-drag-kind] {
     grid-row: 2;
     grid-column: 4;
     align-self: end;
+  }
+}
+
+/* ============================================ touch floor, last word =====
+   前面几段 @media (max-width: …) 会把工程名输入框和教练条按钮压回 40px，
+   而 44px 的触摸下限写在它们之前，被同级选择器覆盖掉了。这里放在文件末尾，
+   保证 coarse pointer 设备上这几处仍是 44px；鼠标设备完全不受影响。 */
+@media (pointer: coarse) {
+  .wb-project-name input,
+  .wb-coach-dismiss {
+    height: 44px;
+    min-height: 44px;
+  }
+
+  .wb-coach-dismiss {
+    width: 44px;
+    min-width: 44px;
+  }
+}
+
+/* Coarse-pointer 44px hit area without changing the 40x36 visual button. */
+@media (pointer: coarse) and (max-width: 900px) {
+  .wb-theme-button,
+  .wb-theme-button:hover,
+  .wb-theme-button[aria-expanded='true'] {
+    min-width: 44px;
+    min-height: 44px;
+    padding: 4px 2px;
+    margin: -4px -2px;
+    background-clip: content-box;
   }
 }
 

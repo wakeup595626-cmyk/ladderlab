@@ -1,5 +1,6 @@
 import type { SfcChart } from '../engine/sfc'
 import { renderSfcSvg } from '../engine/sfcRender'
+import { assertSvgDocument, declareSvgDocument } from './svgDocument'
 
 const EXPORT_SCALE = 2
 const MAX_CANVAS_SIDE = 30000
@@ -16,6 +17,13 @@ function loadSvgImage(xml: string) {
   })
   image.src = url
   return { image, url, loaded }
+}
+
+/** 顺序功能图本身就是纯 SVG，导出时补一行 XML 声明即可直接用。 */
+export function serializeSfcSvg(chart: SfcChart): string {
+  const svg = renderSfcSvg(chart).svg
+  assertSvgDocument(svg)
+  return declareSvgDocument(svg)
 }
 
 /** 把顺序功能图渲染成 2 倍像素、纯白背景的 PNG，方便直接插入实验报告。 */

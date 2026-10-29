@@ -2,20 +2,40 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Program, Selection } from '../engine/types'
 import { createRuntime } from '../engine/simulate'
 import { contentRungs } from '../engine/rungInvariant'
+import { assertSvgDocument, declareSvgDocument, escapeXmlText } from '../lib/svgDocument'
 import LadderCanvas from './LadderCanvas'
 import './ProgramImageExporter.css'
 
 export type ProgramImageMode = 'complete' | 'plain'
 
+/** png 用于微信、Word 这类只认位图的场合；svg 是矢量原稿，任意缩放都不糊。 */
+export type ProgramImageFormat = 'png' | 'svg'
+
+export interface ProgramImageResult {
+  format: ProgramImageFormat
+  data: string
+}
+
 interface ProgramImageExporterProps {
   program: Program
   mode: ProgramImageMode
-  onComplete: (dataUrl: string) => void
+  format?: ProgramImageFormat
+  onComplete: (result: ProgramImageResult) => void
   onError: (message: string) => void
 }
 
 interface PreparedRung {
   canvas: HTMLCanvasElement
+  width: number
+  height: number
+  label: string
+  title: string
+}
+
+interface VectorRung {
+  node: SVGSVGElement
+  bounds: { x: number; y: number; width: number; height: number }
+  inherited: string
   width: number
   height: number
   label: string
@@ -31,7 +51,9 @@ const WHITE = '#ffffff'
 const INK = '#17191c'
 const MUTED = '#6b7178'
 const RULE = '#d7dade'
-const SANS = '"Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif'
+const SANS = '"IBM Plex Sans", "Segoe UI", "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", sans-serif'
+/* 写进 XML 属性时用单引号，避免把双引号转义成一堆 &quot;。 */
+const SANS_ATTR = SANS.replace(/"/g, "'")
 
 const SVG_STYLE_PROPERTIES = [
   'fill',
@@ -66,8 +88,11 @@ const INTERACTION_ONLY_SELECTOR = [
   '.ll-slot-plus',
   '.ll-node-grip',
   '.ll-selection-box',
+  '.ll-branch-frame',
+  '.ll-parallel-select',
   '.ll-wire-handles',
   '.ll-merge-chip',
+  '.ll-energy',
 ].join(',')
 
 const WIRE_SELECTOR = [
@@ -98,6 +123,27 @@ function fitText(
     characters.pop()
     const candidate = characters.join('').trimEnd() + '…'
     if (context.measureText(candidate).width <= maxWidth) return candidate
+  }
+  return '…'
+}
+
+/** 半角字符按 0.58 个字号估宽，全角按 1 个字号估宽。 */
+function isNarrowGlyph(character: string) {
+  const code = character.codePointAt(0) ?? 0x100
+  return code <= 0xff
+}
+
+/** 极少数没有 Canvas 测量能力的宿主里，仍要保证长标题不会压到右侧页码。 */
+function fitTextApprox(value: string, maxWidth: number, size: number) {
+  const roughWidth = (text: string) => Array.from(text).reduce((total, character) => (
+    total + (isNarrowGlyph(character) ? size * 0.58 : size)
+  ), 0)
+  if (roughWidth(value) <= maxWidth) return value
+  const characters = Array.from(value)
+  while (characters.length > 1) {
+    characters.pop()
+    const candidate = characters.join('').trimEnd() + '…'
+    if (roughWidth(candidate) <= maxWidth) return candidate
   }
   return '…'
 }
@@ -152,23 +198,59 @@ function createExportCanvas(width: number, height: number) {
   return { canvas, context }
 }
 
-/** 把计算后的 SVG 样式全部写到克隆节点上，避免文件离开页面后丢失 CSS。 */
+/** 浏览器对 SVG 各个属性都有默认值；写在文件里只会让体积翻倍。 */
+const SVG_DEFAULT_VALUES: Record<string, string> = {
+  stroke: 'none',
+  'stroke-width': '1px',
+  'stroke-linecap': 'butt',
+  'stroke-linejoin': 'miter',
+  'stroke-dasharray': 'none',
+  'stroke-opacity': '1',
+  'fill-opacity': '1',
+  opacity: '1',
+  visibility: 'visible',
+  display: 'inline',
+  'font-style': 'normal',
+  'letter-spacing': 'normal',
+}
+
+/** 把计算后的样式逐节点写成 style 属性：PowerPoint、Word、Illustrator 都只认
+ *  这种内联写法，外挂 <style> 规则会被忽略，线一丢整张图就空了。 */
 function inlineSvgStyles(source: SVGSVGElement, clone: SVGSVGElement) {
   const sourceNodes = [source, ...source.querySelectorAll<SVGElement>('*')]
   const cloneNodes = [clone, ...clone.querySelectorAll<SVGElement>('*')]
+  const rootComputed = window.getComputedStyle(source)
+  const inheritedFamily = rootComputed.getPropertyValue('font-family')
+  const inheritedSize = rootComputed.getPropertyValue('font-size')
+  const inheritedWeight = rootComputed.getPropertyValue('font-weight')
+
   sourceNodes.forEach((node, index) => {
     const copy = cloneNodes[index]
     if (!copy) return
     const computed = window.getComputedStyle(node)
+    const declarations: string[] = []
     for (const property of SVG_STYLE_PROPERTIES) {
-      const value = computed.getPropertyValue(property)
-      if (value) copy.style.setProperty(property, value)
+      let value = computed.getPropertyValue(property)
+      if (!value) continue
+      // 字体族由外层 <g> 统一继承；这里只保留真正改过字体的节点，
+      // 例如等宽地址。否则每个文本节点都重复一遍长字体栈，文件会白白膨胀。
+      if (
+        (property === 'font-family' && value === inheritedFamily)
+        || (property === 'font-size' && value === inheritedSize)
+        || (property === 'font-weight' && value === inheritedWeight)
+      ) continue
+      if (index === 0 && property === 'fill') {
+        value = 'none'
+      } else if (node.matches(WIRE_SELECTOR)) {
+        if (property === 'fill') value = 'none'
+        else if (property === 'stroke') value = INK
+      }
+      if (node instanceof SVGTextElement && property === 'fill') value = INK
+      if (value === SVG_DEFAULT_VALUES[property]) continue
+      declarations.push(property + ':' + value)
     }
-    if (node.matches(WIRE_SELECTOR)) {
-      copy.style.setProperty('fill', 'none')
-      copy.style.setProperty('stroke', INK)
-    }
-    if (node instanceof SVGTextElement) copy.style.setProperty('fill', INK)
+    if (declarations.length === 0) return
+    copy.setAttribute('style', declarations.join(';'))
   })
 
   // 导出始终展示静态电路，不沿用当前仿真通电效果或交互选中状态。
@@ -181,6 +263,27 @@ function inlineSvgStyles(source: SVGSVGElement, clone: SVGSVGElement) {
       'is-drop-target',
     ))
   clone.querySelectorAll(INTERACTION_ONLY_SELECTOR).forEach((node) => node.remove())
+
+  // 图片是静态交付物，不应把网页按钮语义、测试标记或旧类名带出去。
+  clone.querySelectorAll('*').forEach((node) => {
+    for (const attribute of Array.from(node.attributes)) {
+      if (
+        attribute.name === 'role'
+        || attribute.name === 'tabindex'
+        || attribute.name === 'class'
+        || attribute.name === 'focusable'
+        || attribute.name.startsWith('aria-')
+        || attribute.name.startsWith('data-')
+      ) node.removeAttribute(attribute.name)
+    }
+    if (node.tagName.toLowerCase() === 'title') node.remove()
+  })
+  for (const attribute of ['class', 'tabindex', 'focusable']) clone.removeAttribute(attribute)
+  for (const attribute of Array.from(clone.attributes)) {
+    if (attribute.name.startsWith('aria-') || attribute.name.startsWith('data-')) {
+      clone.removeAttribute(attribute.name)
+    }
+  }
 }
 
 function serializeSvg(source: SVGSVGElement) {
@@ -415,9 +518,273 @@ function buildCompleteImage(program: Program, rungs: PreparedRung[]) {
   return canvas
 }
 
+function round2(value: number) {
+  return Math.round(value * 100) / 100
+}
+
+/** 读取程序段真实的绘制范围，再换算回 SVG 用户坐标；留 10 单位容差给线宽。 */
+function vectorBounds(svg: SVGSVGElement) {
+  const box = svg.getBoundingClientRect()
+  const view = svg.viewBox.baseVal
+  if (!(box.width > 0) || !(view.width > 0)) return null
+  const scale = view.width / box.width
+  let left = Number.POSITIVE_INFINITY
+  let top = Number.POSITIVE_INFINITY
+  let right = Number.NEGATIVE_INFINITY
+  let bottom = Number.NEGATIVE_INFINITY
+
+  for (const child of Array.from(svg.children)) {
+    if (child.matches(INTERACTION_ONLY_SELECTOR)) continue
+    const rect = child.getBoundingClientRect()
+    if (rect.width === 0 && rect.height === 0) continue
+    const x = view.x + (rect.left - box.left) * scale
+    const y = view.y + (rect.top - box.top) * scale
+    left = Math.min(left, x)
+    top = Math.min(top, y)
+    right = Math.max(right, x + rect.width * scale)
+    bottom = Math.max(bottom, y + rect.height * scale)
+  }
+
+  if (!Number.isFinite(left) || right <= left || bottom <= top) return null
+  const margin = 10
+  const x = Math.max(view.x, left - margin)
+  const y = Math.max(view.y, top - margin)
+  const width = Math.min(view.x + view.width, right + margin) - x
+  const height = Math.min(view.y + view.height, bottom + margin) - y
+  if (!(width > 0) || !(height > 0)) return null
+  return { x, y, width, height }
+}
+/** 把一条程序段展平成一个 <g>：不嵌 <svg>，样式和坐标全部固化，
+ *  PowerPoint、Word、Illustrator 打开都不会把它当成黑盒丢掉。 */
+function vectorRung(
+  svg: SVGSVGElement,
+  label: string,
+  title: string,
+): VectorRung | null {
+  const bounds = vectorBounds(svg)
+  if (!bounds) return null
+
+  const clone = svg.cloneNode(true) as SVGSVGElement
+  // 网页上的 min-width、居中这类排版属性带进文件会把图撑歪。
+  clone.removeAttribute('style')
+  inlineSvgStyles(svg, clone)
+  clone.removeAttribute('role')
+  clone.removeAttribute('aria-label')
+  clone.removeAttribute('aria-describedby')
+  clone.removeAttribute('width')
+  clone.removeAttribute('height')
+  clone.removeAttribute('viewBox')
+
+  // 字体、字号原本挂在根节点上，展平后必须显式带到 <g> 里。
+  const root = window.getComputedStyle(svg)
+  const inherited = ['font-family', 'font-size', 'font-weight']
+    .map((property) => {
+      const value = root.getPropertyValue(property)
+      return value ? property + ':' + value : ''
+    })
+    .filter((declaration) => declaration.length > 0)
+    .join(';')
+
+  return {
+    node: clone,
+    bounds,
+    inherited,
+    width: bounds.width,
+    height: bounds.height,
+    label,
+    title,
+  }
+}
+
+function placeVectorRung(rung: VectorRung, x: number, y: number) {
+  const children = Array.from(rung.node.childNodes)
+    .map((child) => new XMLSerializer().serializeToString(child))
+    .join('')
+  const transform = 'translate(' + round2(x - rung.bounds.x)
+    + ' ' + round2(y - rung.bounds.y) + ')'
+  return '<g transform="' + transform + '"'
+    + (rung.inherited ? ' style="' + escapeXmlText(rung.inherited) + '"' : '')
+    + '>' + children + '</g>'
+}
+
+function vectorLine(x1: number, y1: number, x2: number, y2: number) {
+  return '<line x1="' + round2(x1) + '" y1="' + round2(y1)
+    + '" x2="' + round2(x2) + '" y2="' + round2(y2)
+    + '" stroke="' + RULE + '" stroke-width="1" />'
+}
+
+interface VectorTextStyle {
+  size: number
+  weight: number
+  fill: string
+  anchor?: 'middle' | 'end'
+  tracking?: number
+}
+
+function vectorText(x: number, y: number, value: string, style: VectorTextStyle) {
+  // CSS 允许 650 这种中间值，Office / Illustrator 只认整百档，取最近的整百档
+  // 才能让网页上看的样子和插进 PPT 里一样。
+  const weight = Math.round(style.weight / 100) * 100
+  return '<text x="' + round2(x) + '" y="' + round2(y)
+    + '" font-family="' + SANS_ATTR + '" font-size="' + style.size
+    + '" font-weight="' + weight + '" fill="' + style.fill + '"'
+    + ' xml:space="preserve"'
+    + (style.anchor ? ' text-anchor="' + style.anchor + '"' : '')
+    + (style.tracking ? ' letter-spacing="' + style.tracking + '"' : '')
+    + '>' + escapeXmlText(value) + '</text>'
+}
+
+function vectorDocument(width: number, height: number, title: string, body: string) {
+  const w = Math.ceil(width)
+  const h = Math.ceil(height)
+  const markup = [
+    '<svg xmlns="http://www.w3.org/2000/svg" width="' + w + '" height="' + h
+      + '" viewBox="0 0 ' + w + ' ' + h + '" role="img" shape-rendering="geometricPrecision">',
+    '<title>' + escapeXmlText(title) + '</title>',
+    '<rect x="0" y="0" width="' + w + '" height="' + h + '" fill="' + WHITE + '" />',
+    body,
+    '</svg>',
+  ].join('')
+  assertSvgDocument(markup)
+  return declareSvgDocument(markup)
+}
+
+function measureContext() {
+  return document.createElement('canvas').getContext('2d')
+}
+
+function buildPlainVector(program: Program, rungs: VectorRung[]) {
+  const padding = 40
+  const gap = 30
+  const contentWidth = Math.max(...rungs.map((rung) => rung.width))
+  const width = Math.ceil(contentWidth + padding * 2)
+  const height = Math.ceil(
+    padding * 2
+    + rungs.reduce((total, rung) => total + rung.height, 0)
+    + gap * Math.max(0, rungs.length - 1),
+  )
+  const body: string[] = []
+  let y = padding
+  for (const rung of rungs) {
+    body.push(placeVectorRung(rung, padding, y))
+    y += rung.height + gap
+  }
+  return vectorDocument(width, height, program.name + ' 梯形图', body.join(''))
+}
+
+function buildCompleteVector(program: Program, rungs: VectorRung[]) {
+  const pagePad = 56
+  const cardPad = 34
+  const cardHeader = 48
+  const cardBottom = 26
+  const headerHeight = 120
+  const gap = 22
+  const contentWidth = Math.max(...rungs.map((rung) => rung.width))
+  const cardWidth = Math.max(900, Math.ceil(contentWidth + cardPad * 2))
+  const width = Math.ceil(cardWidth + pagePad * 2)
+  const height = Math.ceil(
+    pagePad
+    + headerHeight
+    + rungs.reduce(
+      (total, rung) => total + cardHeader + 22 + rung.height + cardBottom,
+      0,
+    )
+    + gap * Math.max(0, rungs.length - 1)
+    + pagePad,
+  )
+
+  const context = measureContext()
+  const body: string[] = []
+  body.push(vectorText(pagePad, pagePad + 8, 'LADDERLAB  /  程序导出', {
+    size: 11, weight: 600, fill: MUTED, tracking: 0.6,
+  }))
+
+  let heading = program.name
+  if (context) {
+    setFont(context, 650, 28)
+    setFont(context, 650, 16)
+    const mainLabelWidth = context.measureText('Main [OB1]').width
+    setFont(context, 500, 11)
+    const profileLabelWidth = context.measureText(program.profile.toUpperCase() + '  指令档案').width
+    const headingLimit = Math.max(120, cardWidth - Math.max(mainLabelWidth, profileLabelWidth) - 56)
+    setFont(context, 650, 28)
+    heading = fitText(context, program.name, headingLimit)
+  } else {
+    heading = fitTextApprox(program.name, Math.max(120, cardWidth - 220), 28)
+  }
+  body.push(vectorText(pagePad, pagePad + 45, heading, { size: 28, weight: 650, fill: INK }))
+  body.push(vectorText(width - pagePad, pagePad + 14, 'Main [OB1]', {
+    size: 16, weight: 650, fill: INK, anchor: 'end',
+  }))
+  body.push(vectorText(
+    width - pagePad,
+    pagePad + 36,
+    program.profile.toUpperCase() + ' 指令档案',
+    { size: 11, weight: 500, fill: MUTED, anchor: 'end' },
+  ))
+  body.push(vectorLine(pagePad, pagePad + 76, width - pagePad, pagePad + 76))
+
+  let y = pagePad + headerHeight
+  rungs.forEach((rung, index) => {
+    const cardHeight = cardHeader + 22 + rung.height + cardBottom
+    const counter = String(index + 1).padStart(2, '0') + ' / ' + String(rungs.length).padStart(2, '0')
+    const counterWidth = context ? (() => {
+      setFont(context, 500, 10)
+      return context.measureText(counter).width
+    })() : 64
+    const contentRight = pagePad + cardWidth - cardPad - counterWidth - 16
+    let label = rung.label
+    let labelWidth = 0
+    if (context) {
+      setFont(context, 650, 13)
+      label = fitText(context, rung.label, Math.max(60, contentRight - pagePad - cardPad))
+      labelWidth = context.measureText(label).width
+    } else {
+      label = fitTextApprox(rung.label, Math.max(60, contentRight - pagePad - cardPad), 13)
+      labelWidth = Array.from(label).reduce((total, character) => (
+        total + (isNarrowGlyph(character) ? 13 * 0.58 : 13)
+      ), 0)
+    }
+    body.push('<rect x="' + pagePad + '" y="' + round2(y) + '" width="' + cardWidth
+      + '" height="' + round2(cardHeight) + '" fill="' + WHITE
+      + '" stroke="' + RULE + '" stroke-width="1" />')
+    body.push(vectorLine(pagePad, y + cardHeader, pagePad + cardWidth, y + cardHeader))
+    body.push(vectorText(pagePad + cardPad, y + 29, label, {
+      size: 13, weight: 650, fill: INK,
+    }))
+
+    if (rung.title) {
+      let title = rung.title
+      const titleLeft = pagePad + cardPad + labelWidth + 14
+      const titleLimit = Math.max(40, contentRight - titleLeft)
+      if (context) {
+        setFont(context, 450, 12)
+        title = fitText(context, rung.title, titleLimit)
+      } else {
+        title = fitTextApprox(rung.title, titleLimit, 12)
+      }
+      body.push(vectorText(titleLeft, y + 29, title, {
+        size: 12, weight: 450, fill: MUTED,
+      }))
+    }
+
+    body.push(vectorText(
+      pagePad + cardWidth - cardPad,
+      y + 29,
+      counter,
+      { size: 10, weight: 500, fill: MUTED, anchor: 'end' },
+    ))
+    body.push(placeVectorRung(rung, pagePad + cardPad, y + cardHeader + 22))
+    y += cardHeight + gap
+  })
+
+  return vectorDocument(width, height, program.name + ' 完整程序', body.join(''))
+}
+
 export default function ProgramImageExporter({
   program,
   mode,
+  format = 'png',
   onComplete,
   onError,
 }: ProgramImageExporterProps) {
@@ -459,12 +826,32 @@ export default function ProgramImageExporter({
           await new Promise<void>((resolve) => window.setTimeout(resolve, 80))
         }
 
-        const prepared: PreparedRung[] = []
+
         const currentDiagrams = Array.from(stage.querySelectorAll<SVGSVGElement>('.ll-diagram'))
+
+        if (format === 'svg') {
+          const vectorRungs: VectorRung[] = []
+          for (const [index, svg] of currentDiagrams.entries()) {
+            const rung = exportProgram.rungs[index]
+            if (!rung) break
+            const result = vectorRung(svg, '程序段 ' + (index + 1), rung.label)
+            if (result) vectorRungs.push(result)
+          }
+          if (vectorRungs.length !== exportProgram.rungs.length) {
+            throw new Error('有程序段没有绘制内容，无法生成 SVG')
+          }
+          const markup = mode === 'plain'
+            ? buildPlainVector(program, vectorRungs)
+            : buildCompleteVector(program, vectorRungs)
+          if (!cancelled) onComplete({ format: 'svg', data: markup })
+          return
+        }
+
+        const prepared: PreparedRung[] = []
         for (const [index, svg] of currentDiagrams.entries()) {
           const rung = exportProgram.rungs[index]
           if (!rung) break
-          const result = await prepareRung(svg, `程序段 ${index + 1}`, rung.label)
+          const result = await prepareRung(svg, '程序段 ' + (index + 1), rung.label)
           if (result) prepared.push(result)
         }
         if (prepared.length !== exportProgram.rungs.length) {
@@ -474,10 +861,11 @@ export default function ProgramImageExporter({
         const canvas = mode === 'plain'
           ? buildPlainImage(prepared)
           : buildCompleteImage(program, prepared)
-        if (!cancelled) onComplete(canvas.toDataURL('image/png'))
+        if (!cancelled) onComplete({ format: 'png', data: canvas.toDataURL('image/png') })
       } catch (reason) {
         if (!cancelled) {
-          onError(reason instanceof Error ? reason.message : 'PNG 生成失败')
+          const fallback = format === 'svg' ? 'SVG 生成失败' : 'PNG 生成失败'
+          onError(reason instanceof Error ? reason.message : fallback)
         }
       }
     }

@@ -8,7 +8,7 @@
   },
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "tsc -b && vite build && node scripts/finalize-build.mjs",
     "typecheck": "tsc -b",
     "test": "vitest run",
     "lint": "oxlint",
@@ -28,6 +28,11 @@
     "qa:tagsync": "node scripts/qa-tag-sync.mjs",
     "qa:save": "node scripts/qa-save-button.mjs",
     "qa:share": "node scripts/qa-share-link.mjs",
+    "qa:a11y": "node scripts/qa-a11y.mjs",
+    "qa:export": "node scripts/qa-export-svg.mjs",
+    "qa:perf": "node scripts/qa-perf-large.mjs",
+    "pretest:e2e": "npm run build",
+    "test:e2e": "playwright test --config=tests/e2e/playwright.config.ts",
     "preview": "vite preview --strictPort"
   },
   "dependencies": {
@@ -35,6 +40,7 @@
     "react-dom": "^19.3.1"
   },
   "devDependencies": {
+    "@playwright/test": "^1.64.1",
     "@types/node": "^26.6.5",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",

@@ -354,6 +354,11 @@
   box-shadow: 0 12px 26px rgba(21, 24, 22, 0.14);
 }
 
+/* A closed <details> must not leave its panel as a laid-out touch target. */
+.ll-rung-menu:not([open]) > .ll-rung-menu-panel {
+  display: none;
+}
+
 .ll-rung-menu-panel button {
   border: 1px solid transparent;
   border-radius: var(--radius-control);

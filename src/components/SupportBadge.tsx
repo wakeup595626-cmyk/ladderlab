@@ -437,8 +437,9 @@ export default function SupportBadge() {
   }
 
   return (
-    <div
+    <aside
       className="support-badge"
+      aria-label="支持作者"
       ref={rootRef}
       data-open={open ? 'true' : undefined}
       data-dragging={dragging ? 'true' : undefined}
@@ -568,6 +569,6 @@ export default function SupportBadge() {
           </div>
         </section>
       )}
-    </div>
+    </aside>
   )
 }

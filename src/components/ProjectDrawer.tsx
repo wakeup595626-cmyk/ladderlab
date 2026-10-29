@@ -9,6 +9,7 @@ import { useModalFocus } from '../lib/useModalFocus'
 import {
   BookIcon,
   CloseIcon,
+  ExportIcon,
   FolderIcon,
   InfoIcon,
   LadderIcon,
@@ -28,6 +29,7 @@ interface ProjectDrawerProps {
   onClose: () => void
   onOpenTags: () => void
   onOpenLibrary: () => void
+  onOpenBackup?: () => void
   onOpenSavedProject: (project: SavedProject) => void
   onDeleteSavedProject: (project: SavedProject) => void
   onRepairBrokenProject: (record: BrokenSavedProject) => void
@@ -49,6 +51,7 @@ export default function ProjectDrawer({
   onClose,
   onOpenTags,
   onOpenLibrary,
+  onOpenBackup,
   onOpenSavedProject,
   onDeleteSavedProject,
   onRepairBrokenProject,
@@ -118,6 +121,13 @@ export default function ProjectDrawer({
               <span className="wb-tree-label">实验库</span>
               <span className="wb-tree-count" aria-hidden="true">{COURSE_LABS.length}</span>
             </button>
+            {onOpenBackup && (
+              <button type="button" className="wb-tree-item" onClick={onOpenBackup}>
+                <ExportIcon size={18} />
+                <span className="wb-tree-label">整包备份</span>
+                <span className="wb-tree-count" aria-hidden="true">JSON</span>
+              </button>
+            )}
           </div>
         </div>
 
