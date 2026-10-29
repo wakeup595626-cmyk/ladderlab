@@ -3,7 +3,7 @@ import { COURSE_LABS } from '../engine/courseLabs'
 import { getProfile } from '../engine/profiles'
 import { contentRungs } from '../engine/rungInvariant'
 import type { Program } from '../engine/types'
-import type { SavedProject } from '../lib/projectLibrary'
+import type { BrokenSavedProject, SavedProject } from '../lib/projectLibrary'
 import { formatProjectTime } from '../lib/projectSummary'
 import { useModalFocus } from '../lib/useModalFocus'
 import {
@@ -21,6 +21,7 @@ interface ProjectDrawerProps {
   program: Program
   activeRungId: string | null
   savedProjects: SavedProject[]
+  brokenProjects: BrokenSavedProject[]
   activeSavedProjectId: string | null
   activeSavedProjectVersion: number | null
   projectLibraryError: string | null
@@ -29,6 +30,9 @@ interface ProjectDrawerProps {
   onOpenLibrary: () => void
   onOpenSavedProject: (project: SavedProject) => void
   onDeleteSavedProject: (project: SavedProject) => void
+  onRepairBrokenProject: (record: BrokenSavedProject) => void
+  onExportBrokenProject: (record: BrokenSavedProject) => void
+  onArchiveBrokenProject: (record: BrokenSavedProject) => void
   onGuide: () => void
   onAbout: () => void
 }
@@ -38,6 +42,7 @@ export default function ProjectDrawer({
   program,
   activeRungId,
   savedProjects,
+  brokenProjects,
   activeSavedProjectId,
   activeSavedProjectVersion,
   projectLibraryError,
@@ -46,12 +51,18 @@ export default function ProjectDrawer({
   onOpenLibrary,
   onOpenSavedProject,
   onDeleteSavedProject,
+  onRepairBrokenProject,
+  onExportBrokenProject,
+  onArchiveBrokenProject,
   onGuide,
   onAbout,
 }: ProjectDrawerProps) {
   const closeRef = useRef<HTMLButtonElement>(null)
   const activeProfile = getProfile(program.profile)
   const drawerRef = useModalFocus<HTMLDivElement>(open, onClose, closeRef)
+  const brokenProjectRecords = brokenProjects.filter((record) => record.kind === 'project')
+  const brokenTombstoneRecords = brokenProjects.filter((record) => record.kind === 'tombstone')
+  const brokenRecordCount = brokenProjectRecords.length + brokenTombstoneRecords.length
 
   if (!open) return null
 
@@ -113,12 +124,16 @@ export default function ProjectDrawer({
         <section className="wb-drawer-section wb-saved-section" aria-labelledby="saved-projects-title">
           <div className="wb-drawer-section-head">
             <h3 id="saved-projects-title">本机项目</h3>
-            <span>{savedProjects.length > 0 ? savedProjects.length + ' 个' : '未保存'}</span>
+            <span>
+              {savedProjects.length + brokenRecordCount > 0
+                ? `${savedProjects.length} 个${brokenRecordCount > 0 ? ` · ${brokenRecordCount} 条异常` : ''}`
+                : '未保存'}
+            </span>
           </div>
 
           {projectLibraryError ? (
             <p className="wb-project-library-error" role="alert">{projectLibraryError}</p>
-          ) : savedProjects.length === 0 ? (
+          ) : savedProjects.length === 0 && brokenRecordCount === 0 ? (
             <div className="wb-project-empty">
               <FolderIcon size={20} />
               <p>还没有命名项目</p>
@@ -163,6 +178,46 @@ export default function ProjectDrawer({
                   </li>
                 )
               })}
+              {brokenProjectRecords.map((record) => (
+                <li key={record.key} className="wb-saved-project is-broken">
+                  <div className="wb-broken-project">
+                    <span className="wb-saved-project-name">
+                      {record.name}
+                      <span className="wb-saved-project-badge is-broken">无法读取</span>
+                    </span>
+                    <span className="wb-saved-project-meta">{record.message}</span>
+                    <span className="wb-broken-actions">
+                      {record.repair && (
+                        <button type="button" onClick={() => onRepairBrokenProject(record)}>
+                          修复
+                        </button>
+                      )}
+                      <button type="button" onClick={() => onExportBrokenProject(record)}>
+                        导出原始数据
+                      </button>
+                      <button type="button" className="is-danger" onClick={() => onArchiveBrokenProject(record)}>
+                        移除
+                      </button>
+                    </span>
+                  </div>
+                </li>
+              ))}
+              {brokenTombstoneRecords.map((record) => (
+                <li key={record.key} className="wb-saved-project is-broken">
+                  <div className="wb-broken-project">
+                    <span className="wb-saved-project-name">
+                      删除记录损坏
+                      <span className="wb-saved-project-badge is-broken">无法确认</span>
+                    </span>
+                    <span className="wb-saved-project-meta">{record.message}</span>
+                    <span className="wb-broken-actions">
+                      <button type="button" onClick={() => onExportBrokenProject(record)}>
+                        导出原始数据
+                      </button>
+                    </span>
+                  </div>
+                </li>
+              ))}
             </ul>
           )}
 

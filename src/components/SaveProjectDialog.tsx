@@ -91,10 +91,6 @@ function SaveProjectDialogContent({
 
   const submit = async () => {
     if (savingRef.current) return
-    if (libraryError) {
-      setError(libraryError)
-      return
-    }
     if (!trimmedName) {
       setError('请给工程起一个名称，之后再保存。')
       inputRef.current?.focus()
@@ -176,7 +172,7 @@ function SaveProjectDialogContent({
               }}
               autoComplete="off"
               spellCheck={false}
-              disabled={saving || Boolean(libraryError)}
+              disabled={saving}
               aria-invalid={error ? true : undefined}
               aria-describedby={error ? 'save-project-error' : 'save-project-hint'}
             />
@@ -195,12 +191,12 @@ function SaveProjectDialogContent({
           </p>
 
           {libraryError && (
-            <p className="project-import-error" role="alert">
-              {libraryError} 请先从右上角「导出」下载当前工程 JSON。
+            <p className="save-project-warning" role="status">
+              {libraryError} 可先点下方「导出工程 JSON」留底。
             </p>
           )}
 
-          {error && !libraryError && (
+          {error && (
             <p className="project-import-error" id="save-project-error" role="alert">{error}</p>
           )}
 
@@ -213,25 +209,24 @@ function SaveProjectDialogContent({
             >
               取消
             </button>
-            {libraryError ? (
+            {libraryError && (
               <button
                 type="button"
-                className="project-import-confirm save-project-confirm"
+                className="project-import-back"
                 onClick={onExportProject}
               >
                 <ExportIcon size={15} />
                 导出工程 JSON
               </button>
-            ) : (
-              <button
-                type="submit"
-                className="project-import-confirm save-project-confirm"
-                disabled={saving}
-              >
-                <SaveIcon size={15} />
-                {saving ? '正在保存…' : activeProject ? '保存更改' : '保存到项目库'}
-              </button>
             )}
+            <button
+              type="submit"
+              className="project-import-confirm save-project-confirm"
+              disabled={saving}
+            >
+              <SaveIcon size={15} />
+              {saving ? '正在保存…' : activeProject ? '保存更改' : '保存到项目库'}
+            </button>
           </div>
         </form>
       </section>

@@ -1202,6 +1202,63 @@ body[data-drag-kind] {
   color: color-mix(in srgb, var(--warning) 62%, var(--text));
 }
 
+.wb-saved-project.is-broken {
+  border-color: color-mix(in srgb, var(--negative) 38%, var(--border));
+  background: color-mix(in srgb, var(--negative) 5%, var(--surface));
+}
+
+.wb-saved-project-badge.is-broken {
+  border-color: color-mix(in srgb, var(--negative) 45%, var(--border));
+  color: var(--negative);
+}
+
+.wb-broken-project {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 9px 10px;
+}
+
+.wb-broken-project .wb-saved-project-meta {
+  color: color-mix(in srgb, var(--negative) 55%, var(--muted));
+  overflow-wrap: anywhere;
+}
+
+.wb-broken-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 2px;
+}
+
+.wb-broken-actions button {
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 10.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.wb-broken-actions button:hover {
+  border-color: var(--control);
+  background: var(--raised);
+}
+
+.wb-broken-actions button.is-danger {
+  color: var(--negative);
+}
+
+.wb-broken-actions button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
 .wb-saved-project-delete {
   display: grid;
   width: 34px;

@@ -35,7 +35,7 @@ function saved(programValue: Program, savedAt: number, id = 'project-1'): SavedP
 }
 
 function success(project: SavedProject): SaveNamedProjectResult {
-  return { ok: true, project, projects: [project] }
+  return { ok: true, project, projects: [project], broken: [] }
 }
 
 function deferred<T>() {

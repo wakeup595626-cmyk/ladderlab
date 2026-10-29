@@ -1,6 +1,7 @@
 import type { Program } from '../engine/types'
 import { contentRungs } from '../engine/rungInvariant'
 import type {
+  BrokenSavedProject,
   SaveNamedProjectInput,
   SaveNamedProjectResult,
   SavedProject,
@@ -20,12 +21,14 @@ export type SaveLatestNamedProjectResult =
     attempts: number
     project: SavedProject
     projects: SavedProject[]
+    broken: BrokenSavedProject[]
   }
   | {
     status: 'context-changed'
     attempts: number
     project?: SavedProject
     projects?: SavedProject[]
+    broken: BrokenSavedProject[]
   }
   | {
     status: 'failed'
@@ -33,12 +36,14 @@ export type SaveLatestNamedProjectResult =
     failure: SaveFailure
     project?: SavedProject
     projects?: SavedProject[]
+    broken: BrokenSavedProject[]
   }
   | {
     status: 'unsettled'
     attempts: number
     project: SavedProject
     projects: SavedProject[]
+    broken: BrokenSavedProject[]
   }
 
 export interface SaveLatestNamedProjectOptions {
@@ -108,6 +113,7 @@ export async function saveLatestNamedProject({
         attempts,
         project: lastSuccess?.project,
         projects: lastSuccess?.projects,
+        broken: lastSuccess?.broken ?? [],
       }
     }
 
@@ -130,6 +136,7 @@ export async function saveLatestNamedProject({
         attempts,
         project: lastSuccess?.project,
         projects: lastSuccess?.projects,
+        broken: lastSuccess?.broken ?? [],
       }
     }
     if (!result.ok) {
@@ -139,6 +146,7 @@ export async function saveLatestNamedProject({
         failure: result,
         project: lastSuccess?.project,
         projects: lastSuccess?.projects,
+        broken: lastSuccess?.broken ?? [],
       }
     }
 
@@ -154,6 +162,7 @@ export async function saveLatestNamedProject({
         attempts,
         project: result.project,
         projects: result.projects,
+        broken: result.broken,
       }
     }
     // 保存期间用户改了工程名：下一轮按新名字补写，避免完成时被旧名称覆盖。
@@ -169,6 +178,7 @@ export async function saveLatestNamedProject({
         reason: 'storage',
         message: '保存没有完成，请稍后重试。',
       },
+      broken: [],
     }
   }
   return {
@@ -176,5 +186,6 @@ export async function saveLatestNamedProject({
     attempts,
     project: lastSuccess.project,
     projects: lastSuccess.projects,
+    broken: lastSuccess.broken,
   }
 }

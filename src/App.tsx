@@ -70,12 +70,15 @@ import {
 } from './lib/shareLink'
 import { saveLatestNamedProject } from './lib/latestProjectSave'
 import {
+  archiveBrokenProjectRecord,
   deleteSavedProject as removeSavedProjectFromLibrary,
   isProjectLibraryStorageKey,
   readActiveSavedProjectId,
   readProjectLibrary,
+  repairSavedProjectRecord,
   saveNamedProject,
   writeActiveSavedProjectId,
+  type BrokenSavedProject,
   type SaveNamedProjectResult,
   type SavedProject,
 } from './lib/projectLibrary'
@@ -599,6 +602,10 @@ export default function App() {
   const [savedProjects, setSavedProjects] = useState<SavedProject[]>(() =>
     startupLibrary.status === 'ok' ? startupLibrary.projects : [],
   )
+  // 读不出来的历史记录单独列出，绝不因为它们让整个项目库变成只读。
+  const [brokenProjects, setBrokenProjects] = useState<BrokenSavedProject[]>(() =>
+    startupLibrary.status === 'ok' ? startupLibrary.broken : [],
+  )
   const [projectLibraryError, setProjectLibraryError] = useState<string | null>(() =>
     startupLibrary.status === 'corrupt' ? startupLibrary.message : null,
   )
@@ -670,6 +677,13 @@ export default function App() {
     }
   }, [])
 
+  /** 项目列表和“读不出来的记录”永远一起更新，避免两者出现不同步的中间态。 */
+  const applyLibrarySnapshot = useCallback((projects: SavedProject[], broken: BrokenSavedProject[]) => {
+    setSavedProjects(projects)
+    setBrokenProjects(broken)
+    setProjectLibraryError(null)
+  }, [])
+
   useEffect(() => () => {
     if (manualSaveStatusTimerRef.current !== null) {
       window.clearTimeout(manualSaveStatusTimerRef.current)
@@ -709,8 +723,7 @@ export default function App() {
     const syncLibrary = () => {
       const result = readProjectLibrary()
       if (result.status === 'ok') {
-        setSavedProjects(result.projects)
-        setProjectLibraryError(null)
+        applyLibrarySnapshot(result.projects, result.broken)
         const current = activeSavedProjectRef.current
         if (current && !result.projects.some((project) => project.id === current.id)) {
           activeSavedProjectRef.current = null
@@ -727,7 +740,7 @@ export default function App() {
     }
     window.addEventListener('storage', onStorage)
     return () => window.removeEventListener('storage', onStorage)
-  }, [])
+  }, [applyLibrarySnapshot])
 
   const notify = useCallback((
     message: string,
@@ -980,7 +993,7 @@ export default function App() {
 
   const handleSaveNamedProject = useCallback(async (name: string): Promise<SaveNamedProjectResult> => {
     const outcome = await persistLatestNamedProject(name)
-    if (outcome.projects) setSavedProjects(outcome.projects)
+    if (outcome.projects) applyLibrarySnapshot(outcome.projects, outcome.broken)
     if (outcome.status === 'saved') {
       finishNamedSave(outcome.project, true)
       showManualSaveStatus('saved', 1600)
@@ -988,12 +1001,13 @@ export default function App() {
         ok: true,
         project: outcome.project,
         projects: outcome.projects,
+        broken: outcome.broken,
       }
     }
     if (outcome.status === 'context-changed') {
       if (outcome.project && outcome.projects) {
         notify(`已保存「${outcome.project.name}」，当前编辑区已切换到其他项目，因此未改动当前内容`)
-        return { ok: true, project: outcome.project, projects: outcome.projects }
+        return { ok: true, project: outcome.project, projects: outcome.projects, broken: outcome.broken }
       }
       const failure: SaveNamedProjectResult = {
         ok: false,
@@ -1020,12 +1034,12 @@ export default function App() {
     if (failure.reason === 'corrupt-library') setProjectLibraryError(failure.message)
     if (failure.reason === 'save-conflict') {
       const latest = readProjectLibrary()
-      if (latest.status === 'ok') setSavedProjects(latest.projects)
+      if (latest.status === 'ok') applyLibrarySnapshot(latest.projects, latest.broken)
     }
     if (failure.reason === 'missing-project') {
       setActiveProject(null)
       const latest = readProjectLibrary()
-      if (latest.status === 'ok') setSavedProjects(latest.projects)
+      if (latest.status === 'ok') applyLibrarySnapshot(latest.projects, latest.broken)
     }
     const message = outcome.project
       ? `${failure.message} 最新编辑已留在本机草稿，但尚未写入项目库。`
@@ -1033,6 +1047,7 @@ export default function App() {
     setSaveDialogError(message)
     return { ...failure, message }
   }, [
+    applyLibrarySnapshot,
     finishNamedSave,
     notify,
     persistLatestNamedProject,
@@ -1057,7 +1072,7 @@ export default function App() {
     showManualSaveStatus('saving')
     try {
       const outcome = await persistLatestNamedProject(latestProgramRef.current.name)
-      if (outcome.projects) setSavedProjects(outcome.projects)
+      if (outcome.projects) applyLibrarySnapshot(outcome.projects, outcome.broken)
       if (outcome.status === 'saved') {
         finishNamedSave(outcome.project, false)
         showManualSaveStatus('saved', 1600)
@@ -1089,12 +1104,12 @@ export default function App() {
       if (failure.reason === 'corrupt-library') setProjectLibraryError(failure.message)
       if (failure.reason === 'save-conflict') {
         const latest = readProjectLibrary()
-        if (latest.status === 'ok') setSavedProjects(latest.projects)
+        if (latest.status === 'ok') applyLibrarySnapshot(latest.projects, latest.broken)
       }
       if (failure.reason === 'missing-project') {
         setActiveProject(null)
         const latest = readProjectLibrary()
-        if (latest.status === 'ok') setSavedProjects(latest.projects)
+        if (latest.status === 'ok') applyLibrarySnapshot(latest.projects, latest.broken)
       }
       const message = outcome.project
         ? `${failure.message} 最新编辑已留在本机草稿，但尚未写入项目库。`
@@ -1115,6 +1130,7 @@ export default function App() {
     }
   }, [
     activeSavedProjectId,
+    applyLibrarySnapshot,
     finishNamedSave,
     notify,
     persistLatestNamedProject,
@@ -2649,13 +2665,52 @@ export default function App() {
     const result = await removeSavedProjectFromLibrary(saved.id, saved.savedAt)
     if (!result.ok) {
       const latest = readProjectLibrary()
-      if (latest.status === 'ok') setSavedProjects(latest.projects)
+      if (latest.status === 'ok') applyLibrarySnapshot(latest.projects, latest.broken)
       notify(result.message, { tone: 'error' })
       return
     }
-    setSavedProjects(result.projects)
+    applyLibrarySnapshot(result.projects, result.broken)
     if (saved.id === activeSavedProjectId) setActiveProject(null)
     notify(`已从本机项目库删除「${saved.name}」`)
+  }
+
+  const handleRepairBrokenProject = async (record: BrokenSavedProject) => {
+    const accepted = await confirm({
+      title: `修复「${record.name}」？`,
+      description: '只给重复的元件标识重新编号，接线和输出不变；修复后边沿触点各自记录自己的状态。原始数据会先备份。',
+      confirmLabel: '修复',
+    })
+    if (!accepted) return
+    const result = await repairSavedProjectRecord(record.key)
+    if (!result.ok) {
+      notify(result.message, { tone: 'error' })
+      return
+    }
+    applyLibrarySnapshot(result.projects, result.broken)
+    notify(`已修复「${result.project.name}」，重新编号 ${result.fixes} 处重复标识`)
+  }
+
+  const handleExportBrokenProject = (record: BrokenSavedProject) => {
+    const stamp = new Date().toISOString().replace(/[-:]/g, '').slice(0, 13)
+    downloadText(`梯形实验室-损坏记录-${safeFileName(record.name)}-${stamp}.txt`, record.raw)
+    notify('已导出这条记录的原始数据')
+  }
+
+  const handleArchiveBrokenProject = async (record: BrokenSavedProject) => {
+    const accepted = await confirm({
+      title: `移除损坏记录「${record.name}」？`,
+      description: '原始数据会先复制到项目库备份键，再从列表里收走，不会直接丢弃。',
+      confirmLabel: '移除',
+      danger: true,
+    })
+    if (!accepted) return
+    const result = await archiveBrokenProjectRecord(record.key)
+    if (!result.ok) {
+      notify(result.message, { tone: 'error' })
+      return
+    }
+    setBrokenProjects(result.broken)
+    notify(`已移除损坏记录「${record.name}」，原始数据已备份`)
   }
 
   const newProject = async () => {
@@ -3585,12 +3640,16 @@ export default function App() {
         program={program}
         activeRungId={activeRungId}
         savedProjects={savedProjects}
+        brokenProjects={brokenProjects}
         activeSavedProjectId={activeSavedProjectId}
         activeSavedProjectVersion={activeSavedProjectVersion}
         projectLibraryError={projectLibraryError}
         onClose={() => setMobilePanel('none')}
         onOpenSavedProject={(saved) => void openSavedProject(saved)}
         onDeleteSavedProject={(saved) => void handleDeleteSavedProject(saved)}
+        onRepairBrokenProject={(record) => void handleRepairBrokenProject(record)}
+        onExportBrokenProject={handleExportBrokenProject}
+        onArchiveBrokenProject={(record) => void handleArchiveBrokenProject(record)}
         onOpenTags={() => {
           setMobilePanel('none')
           openInspector('tags')
