@@ -3,6 +3,7 @@ import { buildCourseLab } from '../engine/courseLabs'
 import { buildSfc, type SfcChart } from '../engine/sfc'
 import { renderSfcSvg } from '../engine/sfcRender'
 import { rasterizeSfcPng, serializeSfcSvg } from './sfcExport'
+import { MAX_CANVAS_SIDE, planCanvasSize } from './canvasLimits'
 import { assertSvgDocument } from './svgDocument'
 
 const PNG_DATA_URL = 'data:image/png;base64,TEFEREVSTEFC'
@@ -16,8 +17,8 @@ function courseChart(): SfcChart {
   return chart
 }
 
-function hugeChart(): SfcChart {
-  const steps = Array.from({ length: 170 }, (_, index) => ({
+function longChart(count: number): SfcChart {
+  const steps = Array.from({ length: count }, (_, index) => ({
     key: `step-${index}`,
     number: String(index + 1),
     title: `步骤 ${index + 1}`,
@@ -148,8 +149,29 @@ describe('rasterizeSfcPng', () => {
     const { createObjectURL } = spyObjectUrl()
     const { createElement } = stubCanvas()
 
-    await expect(rasterizeSfcPng(hugeChart())).rejects.toThrow('顺序功能图过大')
+    await expect(rasterizeSfcPng(longChart(1200))).rejects.toThrow('顺序功能图过大')
     expect(createObjectURL).not.toHaveBeenCalled()
     expect(createElement).not.toHaveBeenCalled()
+  })
+
+  it('步骤很多时自动降低倍率，仍然按画布上限内的尺寸导出', async () => {
+    const chart = longChart(170)
+    const rendered = renderSfcSvg(chart)
+    const plan = planCanvasSize(rendered.width, rendered.height)
+    expect(plan).not.toBeNull()
+    expect(plan!.scale).toBeLessThan(2)
+
+    const images = stubImage()
+    const { canvas } = stubCanvas()
+    spyObjectUrl()
+
+    const pending = rasterizeSfcPng(chart)
+    images[0].onload?.()
+    await expect(pending).resolves.toBe(PNG_DATA_URL)
+
+    expect(canvas.width).toBe(plan!.pixelWidth)
+    expect(canvas.height).toBe(plan!.pixelHeight)
+    expect(canvas.height).toBeLessThanOrEqual(MAX_CANVAS_SIDE)
+    expect(canvas.width).toBeLessThanOrEqual(MAX_CANVAS_SIDE)
   })
 })

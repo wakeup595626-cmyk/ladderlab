@@ -1,10 +1,8 @@
 import type { SfcChart } from '../engine/sfc'
 import { renderSfcSvg } from '../engine/sfcRender'
+import { planCanvasSize } from './canvasLimits'
 import { assertSvgDocument, declareSvgDocument } from './svgDocument'
 
-const EXPORT_SCALE = 2
-const MAX_CANVAS_SIDE = 30000
-const MAX_CANVAS_PIXELS = 140_000_000
 const WHITE = '#ffffff'
 
 function loadSvgImage(xml: string) {
@@ -26,18 +24,14 @@ export function serializeSfcSvg(chart: SfcChart): string {
   return declareSvgDocument(svg)
 }
 
-/** 把顺序功能图渲染成 2 倍像素、纯白背景的 PNG，方便直接插入实验报告。 */
+/** 把顺序功能图渲染成纯白背景的 PNG（默认 2 倍，超长时自动降倍率）。 */
 export async function rasterizeSfcPng(chart: SfcChart): Promise<string> {
   const rendered = renderSfcSvg(chart)
-  const pixelWidth = Math.ceil(rendered.width * EXPORT_SCALE)
-  const pixelHeight = Math.ceil(rendered.height * EXPORT_SCALE)
-  if (
-    pixelWidth > MAX_CANVAS_SIDE
-    || pixelHeight > MAX_CANVAS_SIDE
-    || pixelWidth * pixelHeight > MAX_CANVAS_PIXELS
-  ) {
+  const plan = planCanvasSize(rendered.width, rendered.height)
+  if (!plan) {
     throw new Error('顺序功能图过大，超过浏览器画布上限；请减少步骤位或缩短步骤说明后重试')
   }
+  const { pixelWidth, pixelHeight } = plan
 
   const { image, url, loaded } = loadSvgImage(rendered.svg)
   try {
