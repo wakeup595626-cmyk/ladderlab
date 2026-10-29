@@ -453,18 +453,25 @@ describe('同条件停止回边合并为总线', () => {
     expect(lanes[1]).toBeGreaterThan(lanes[0])
 
     const sources = sourceLines(paths, stepX)
-    expect(sources.filter((source) => source.laneX === lanes[0])).toHaveLength(6)
+    // 跨度短的 6 条同类回边合成总线，按「短跨度靠里」排在内侧；
+    // 单独的第 7 条跨度更长，排到外侧那条 lane 上。
+    const busLane = sources[0].laneX
+    expect(lanes).toContain(busLane)
+    const singleLane = lanes.find((lane) => lane !== busLane)
+    expect(singleLane).toBeDefined()
+    expect(sources.filter((source) => source.laneX === busLane)).toHaveLength(6)
     const singles = paths.filter((path) => (
       path.commands.length === 4
       && path.commands.map(({ command }) => command).join('') === 'MHVH'
-      && verticalXs(path)[0] === lanes[1]
+      && verticalXs(path)[0] === singleLane
     ))
     expect(singles).toHaveLength(1)
-    expect(singles[0].points[1].x).toBe(lanes[1])
-    // 条件右对齐在竖线左侧 12px；两条标签必须分别贴着各自的总线。
-    expect(stopText[0].x + 12).toBe(lanes[0])
-    expect(resetText[0].x + 12).toBe(lanes[1])
-    expect(stopText[0].x).not.toBe(resetText[0].x)
+    expect(singles[0].points[1].x).toBe(singleLane)
+    // 标签统一放进左侧标签槽：全部右对齐同一列，右缘距最外层 lane 12px。
+    // 每条 lane 的归属由各自的竖直段保证，靠 x 坐标一对一指派已经不成立了。
+    const outermostLane = Math.min(...lanes)
+    expect(stopText[0].x).toBe(resetText[0].x)
+    expect(stopText[0].x + 12).toBe(outermostLane)
   })
 })
 
