@@ -1574,14 +1574,16 @@ function renderOutput(
               + ' Q ' + (symbolX + 20) + ' ' + centerY + ' '
               + (symbolX + 10) + ' ' + (centerY + 17)}
           />
-          <text
-            className="ll-coil-mark"
-            x={symbolX}
-            y={centerY + 5}
-            textAnchor="middle"
-          >
-            {output.kind === 'SET' ? 'S' : output.kind === 'RESET' ? 'R' : ''}
-          </text>
+          {(output.kind === 'SET' || output.kind === 'RESET') && (
+            <text
+              className="ll-coil-mark"
+              x={symbolX}
+              y={centerY + 5}
+              textAnchor="middle"
+            >
+              {output.kind === 'SET' ? 'S' : 'R'}
+            </text>
+          )}
           {address && (
             <text className="ll-output-address" x={symbolX} y="14" textAnchor="middle">
               {shorten(address, m.addressChars)}

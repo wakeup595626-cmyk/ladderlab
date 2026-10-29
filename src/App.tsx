@@ -2,6 +2,8 @@ import {
   type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
+  lazy,
+  Suspense,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -33,12 +35,20 @@ import ProjectDrawer from './components/ProjectDrawer'
 import ProjectImportDialog from './components/ProjectImportDialog'
 import NewProjectDialog from './components/NewProjectDialog'
 import SaveProjectDialog from './components/SaveProjectDialog'
-import ProgramImageExporter, { type ProgramImageMode } from './components/ProgramImageExporter'
+import ProjectBackupDialog from './components/ProjectBackupDialog'
+import type {
+  ProgramImageFormat,
+  ProgramImageMode,
+} from './components/ProgramImageExporter'
 import QuickEditor from './components/QuickEditor'
 import StatusBar from './components/StatusBar'
 import SupportBadge from './components/SupportBadge'
+import UpdateBanner from './components/UpdateBanner'
 import WorkspaceTopBar from './components/WorkspaceTopBar'
 import { instructionLabel, type InstructionFamily } from './components/instructionCatalog'
+
+/* 导出器只在真正导出时才需要，按需加载可以让首屏少解析一块渲染逻辑。 */
+const ProgramImageExporter = lazy(() => import('./components/ProgramImageExporter'))
 import { compile } from './engine/compile'
 import { normalizeReference } from './engine/references'
 import { blankProgram, buildSample } from './engine/samples'
@@ -73,6 +83,7 @@ import { saveLatestNamedProject } from './lib/latestProjectSave'
 import {
   archiveBrokenProjectRecord,
   deleteSavedProject as removeSavedProjectFromLibrary,
+  importSavedProjectBackup,
   isProjectLibraryStorageKey,
   readActiveSavedProjectId,
   readProjectLibrary,
@@ -83,7 +94,7 @@ import {
   type SaveNamedProjectResult,
   type SavedProject,
 } from './lib/projectLibrary'
-import { rasterizeSfcPng } from './lib/sfcExport'
+import { rasterizeSfcPng, serializeSfcSvg } from './lib/sfcExport'
 import {
   clampInspectorWidth,
   INSPECTOR_DEFAULT_WIDTH,
@@ -588,10 +599,12 @@ export default function App() {
   const [guideOpen, setGuideOpen] = useState(false)
   const [aboutOpen, setAboutOpen] = useState(false)
   const [importOpen, setImportOpen] = useState(false)
+  const [backupOpen, setBackupOpen] = useState(false)
   const [imageExportRequest, setImageExportRequest] = useState<{
     id: number
     program: Program
     mode: ProgramImageMode
+    format: ProgramImageFormat
   } | null>(null)
   const [coachDismissed, setCoachDismissed] = useState(() => {
     try {
@@ -794,17 +807,6 @@ export default function App() {
       dismissToast()
     }, duration)
   }, [dismissToast, stopToastTimer])
-
-  useEffect(() => {
-    const showUpdate = () => {
-      notify('新版本已就绪', {
-        sticky: true,
-        action: { label: '立即刷新', run: () => window.location.reload() },
-      })
-    }
-    window.addEventListener('ladderlab:update-ready', showUpdate)
-    return () => window.removeEventListener('ladderlab:update-ready', showUpdate)
-  }, [notify])
 
   /** 停止或报错时把「仿真已开始」那条提示一起收掉，避免界面互相打脸。 */
   const clearRunToast = useCallback(() => {
@@ -2815,26 +2817,51 @@ export default function App() {
       })
   }
 
-  const startImageExport = (mode: ProgramImageMode) => {
+  const startImageExport = (mode: ProgramImageMode, format: ProgramImageFormat) => {
     setImageExportRequest({
       id: Date.now(),
       program,
       mode,
+      format,
     })
-    notify(mode === 'complete' ? '正在生成完整程序 PNG…' : '正在生成纯梯形图 PNG…')
+    const name = mode === 'complete' ? '完整程序' : '纯梯形图'
+    notify('正在生成' + name + ' ' + format.toUpperCase() + '…')
   }
 
   // 分享链接（#p=…）由 AI 或同学生成，内容全在地址里，服务器不参与。
   // 一定先问一句再导入：直接顶掉学生没保存的草稿是最伤人的失败方式。
   const applyImportedRef = useRef(applyImportedProject)
+  const activeShareHashRef = useRef<string | null>(null)
+  const queuedShareHashRef = useRef<string | null>(null)
+  const consumeShareHashRef = useRef<(rawHash: string) => void>(() => undefined)
   useEffect(() => {
     applyImportedRef.current = applyImportedProject
   })
   const consumeShareHash = useCallback((rawHash: string) => {
     if (!isShareProgramHash(rawHash)) return
-    // 先抹掉片段：刷新不会再弹一次，地址栏也不会被上千字符撑着。
-    // 这一步本身就是去重——StrictMode 重复执行时第二次读到的已经是空片段。
-    window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`)
+    // 载荷要一直留在地址栏，直到用户确认或主动取消。这样确认前刷新、
+    // 复制地址或解码失败都不会把唯一的一份分享内容弄丢。
+    if (activeShareHashRef.current === rawHash) return
+    if (activeShareHashRef.current) {
+      // 确认框打开时又点进另一条分享链接：不并发弹两个框，等当前决定完成后处理。
+      queuedShareHashRef.current = rawHash
+      return
+    }
+    activeShareHashRef.current = rawHash
+
+    const clearHash = () => {
+      if (window.location.hash === rawHash) {
+        window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`)
+      }
+    }
+    const finish = () => {
+      if (activeShareHashRef.current === rawHash) activeShareHashRef.current = null
+      const queued = queuedShareHashRef.current
+      queuedShareHashRef.current = null
+      if (queued && queued !== rawHash && window.location.hash === queued) {
+        queueMicrotask(() => consumeShareHashRef.current(queued))
+      }
+    }
     void (async () => {
       let incoming: Program
       try {
@@ -2843,6 +2870,8 @@ export default function App() {
         notify(reason instanceof Error ? reason.message : '分享链接读不出来，可能在复制时被截断了。', {
           tone: 'error',
         })
+        // 保留 hash，修正链接后刷新还能继续试；不在失败路径上清掉证据。
+        finish()
         return
       }
       const report = compile(incoming)
@@ -2855,10 +2884,21 @@ export default function App() {
         confirmLabel: '导入',
         cancelLabel: '先不导入',
       })
-      if (!accepted) return
+      if (!accepted) {
+        // 主动拒绝是明确决定：清掉载荷，避免每次刷新都再次追问。
+        clearHash()
+        finish()
+        return
+      }
       applyImportedRef.current(incoming)
+      // applyImportedProject 是同步提交；到这里才说明工程确实已经导入。
+      clearHash()
+      finish()
     })()
   }, [confirm, notify])
+  useEffect(() => {
+    consumeShareHashRef.current = consumeShareHash
+  }, [consumeShareHash])
 
   // 直接打开链接，和「页面开着时再点开链接」都要能用，所以同时盯住 hashchange。
   useEffect(() => {
@@ -2868,7 +2908,7 @@ export default function App() {
     return () => window.removeEventListener('hashchange', onHashChange)
   }, [consumeShareHash])
   // 顺序功能图由步骤位、步进网络和线圈条件现场归纳，不写入工程文件。
-  const startSfcExport = async () => {
+  const startSfcExport = async (format: ProgramImageFormat) => {
     const chart = buildSfc(program)
     if (!chart) {
       notify(
@@ -2877,17 +2917,20 @@ export default function App() {
       )
       return
     }
-    notify('正在生成顺序功能图 PNG…')
+    notify('正在生成顺序功能图 ' + format.toUpperCase() + '…')
+    const base = safeFileName(program.name) + '-顺序功能图-' + downloadTimestamp()
     try {
+      if (format === 'svg') {
+        downloadText(base + '.svg', serializeSfcSvg(chart), 'image/svg+xml;charset=utf-8')
+        notify('已导出顺序功能图 SVG（' + chart.steps.length + ' 步）')
+        return
+      }
       const dataUrl = await rasterizeSfcPng(chart)
-      downloadDataUrl(
-        `${safeFileName(program.name)}-顺序功能图-${downloadTimestamp()}.png`,
-        dataUrl,
-      )
-      notify(`已导出顺序功能图 PNG（${chart.steps.length} 步）`)
+      downloadDataUrl(base + '.png', dataUrl)
+      notify('已导出顺序功能图 PNG（' + chart.steps.length + ' 步）')
     } catch (reason) {
       notify(
-        reason instanceof Error ? reason.message : '顺序功能图 PNG 生成失败',
+        reason instanceof Error ? reason.message : '顺序功能图生成失败',
         { tone: 'error' },
       )
     }
@@ -3231,6 +3274,7 @@ export default function App() {
       onPointerDown={clearSelectionOnBlankPointerDown}
     >
       <a className="skip-link" href="#wb-main">跳到梯形图</a>
+      <UpdateBanner />
       <WorkspaceTopBar
         projectName={program.name}
         profile={program.profile}
@@ -3255,7 +3299,7 @@ export default function App() {
         onImportProject={() => setImportOpen(true)}
         onExportProject={exportProject}
         onExportImage={startImageExport}
-        onExportSfc={() => void startSfcExport()}
+        onExportSfc={(format) => void startSfcExport(format)}
         onCopyShareLink={() => void copyShareLink()}
         onGuide={() => setGuideOpen(true)}
         onAbout={() => setAboutOpen(true)}
@@ -3674,6 +3718,10 @@ export default function App() {
           setMobilePanel('none')
           setLibraryOpen(true)
         }}
+        onOpenBackup={() => {
+          setMobilePanel('none')
+          setBackupOpen(true)
+        }}
         onGuide={() => {
           setMobilePanel('none')
           setGuideOpen(true)
@@ -3797,6 +3845,18 @@ export default function App() {
         onCreate={createNewProject}
       />
 
+      <ProjectBackupDialog
+        open={backupOpen}
+        projects={savedProjects}
+        brokenCount={brokenProjects.length}
+        onClose={() => setBackupOpen(false)}
+        onRestore={importSavedProjectBackup}
+        onRestored={(projects, broken) => {
+          applyLibrarySnapshot(projects, broken)
+          notify('整包恢复完成')
+        }}
+      />
+
       <SaveProjectDialog
         open={saveDialogOpen}
         program={program}
@@ -3826,24 +3886,30 @@ export default function App() {
       <AboutDialog open={aboutOpen} onClose={() => setAboutOpen(false)} />
 
       {imageExportRequest && (
-        <ProgramImageExporter
-          key={imageExportRequest.id}
-          program={imageExportRequest.program}
-          mode={imageExportRequest.mode}
-          onComplete={(dataUrl) => {
-            const suffix = imageExportRequest.mode === 'complete' ? '完整程序' : '纯梯形图'
-            downloadDataUrl(
-              `${safeFileName(imageExportRequest.program.name)}-${suffix}-${downloadTimestamp()}.png`,
-              dataUrl,
-            )
-            setImageExportRequest(null)
-            notify(`已导出${suffix} PNG`)
-          }}
-          onError={(message) => {
-            setImageExportRequest(null)
-            notify(message, { tone: 'error' })
-          }}
-        />
+        <Suspense fallback={null}>
+          <ProgramImageExporter
+            key={imageExportRequest.id}
+            program={imageExportRequest.program}
+            mode={imageExportRequest.mode}
+            format={imageExportRequest.format}
+            onComplete={(result) => {
+              const suffix = imageExportRequest.mode === 'complete' ? '完整程序' : '纯梯形图'
+              const base = safeFileName(imageExportRequest.program.name)
+                + '-' + suffix + '-' + downloadTimestamp()
+              if (result.format === 'svg') {
+                downloadText(base + '.svg', result.data, 'image/svg+xml;charset=utf-8')
+              } else {
+                downloadDataUrl(base + '.png', result.data)
+              }
+              setImageExportRequest(null)
+              notify('已导出' + suffix + ' ' + result.format.toUpperCase())
+            }}
+            onError={(message) => {
+              setImageExportRequest(null)
+              notify(message, { tone: 'error' })
+            }}
+          />
+        </Suspense>
       )}
 
       {confirmDialog}

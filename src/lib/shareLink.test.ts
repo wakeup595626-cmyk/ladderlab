@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { Program } from '../engine/types'
-import { parseProgramText, serializeProgram } from './io'
+import { MAX_IMPORT_BYTES, parseProgramText, serializeProgram } from './io'
 import {
   buildShareUrl,
   decodeProgramShare,
@@ -53,6 +53,9 @@ describe('分享链接', () => {
 
   it('拒绝空片段和损坏的链接', async () => {
     expect(isShareProgramHash('#p=')).toBe(false)
+    // 非空但损坏的载荷仍要进入解码流程；页面才能保留地址并给出可理解的错误，
+    // 而不是把它当成普通锚点悄悄忽略。
+    expect(isShareProgramHash('#p=1.not-base64!!')).toBe(true)
     await expect(decodeProgramShare('#p=1.not-base64!!')).rejects.toThrow()
     await expect(decodeProgramShare('#other')).rejects.toThrow('不是 LadderLab 的分享链接')
   })
@@ -81,5 +84,89 @@ describe('分享链接', () => {
     const hash = await encodeProgramShare(sample)
     expect(buildShareUrl({ origin: 'https://example.com', pathname: '/ladderlab/' }, hash))
       .toBe(`https://example.com/ladderlab/${hash}`)
+  })
+})
+
+const MAX_COMPRESSED_BYTES = MAX_IMPORT_BYTES + 64 * 1024
+const MAX_SHARE_BODY_CHARS = Math.ceil(MAX_COMPRESSED_BYTES / 3) * 4
+
+function base64UrlOf(bytes: Uint8Array): string {
+  let binary = ''
+  const chunk = 0x8000
+  for (let offset = 0; offset < bytes.length; offset += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + chunk))
+  }
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+}
+
+describe('分享链接的体积上限', () => {
+  it('明文载荷超过 5 MB 时拒绝，并指向文件导入', async () => {
+    // 6,990,508 个 base64 字符解出 5,242,881 字节，刚好越过 5 MB 一个字节。
+    const body = 'A'.repeat(Math.ceil((MAX_IMPORT_BYTES + 1) / 3) * 4)
+    expect(body.length).toBeLessThan(MAX_SHARE_BODY_CHARS)
+    await expect(decodeProgramShare(`#p=0.${body}`)).rejects.toThrow('超过 5 MB 上限')
+  })
+
+  it('恰好 5 MB 的明文载荷不会被体积上限误伤', async () => {
+    // 6,990,507 个 base64 字符正好解出 5,242,880 字节，应当进入后续的工程解析并因内容不合法失败。
+    const body = 'A'.repeat(Math.floor(MAX_IMPORT_BYTES / 3) * 4 + 3)
+    await expect(decodeProgramShare(`#p=0.${body}`)).rejects.toThrow('分享链接里的工程无法导入')
+  })
+
+  it('链接正文超出可承载长度时在 base64 解码前拒绝', async () => {
+    const body = 'A'.repeat(MAX_SHARE_BODY_CHARS + 4)
+    const decodeSpy = vi.spyOn(globalThis, 'atob')
+    try {
+      await expect(decodeProgramShare(`#p=1.${body}`)).rejects.toThrow('超过 5 MB 上限')
+      expect(decodeSpy).not.toHaveBeenCalled()
+    } finally {
+      decodeSpy.mockRestore()
+    }
+  })
+
+  it('压缩载荷解压后超限时立刻取消上游，不会把整份数据读完', async () => {
+    const megabyte = new Uint8Array(1024 * 1024)
+    let pulled = 0
+    let cancelled = false
+    class FakeDecompressionStream {
+      readable: ReadableStream<Uint8Array>
+      writable: WritableStream<Uint8Array>
+      constructor() {
+        this.writable = new WritableStream<Uint8Array>({ write() {} })
+        this.readable = new ReadableStream<Uint8Array>({
+          pull: (controller) => {
+            pulled += 1
+            if (pulled > 64) {
+              controller.close()
+              return
+            }
+            controller.enqueue(megabyte)
+          },
+          cancel: () => {
+            cancelled = true
+          },
+        })
+      }
+    }
+    vi.stubGlobal('DecompressionStream', FakeDecompressionStream)
+    try {
+      const body = base64UrlOf(new Uint8Array([0x78, 0x9c, 0x03, 0x00, 0x00, 0x00, 0x00, 0x01]))
+      await expect(decodeProgramShare(`#p=1.${body}`)).rejects.toThrow('超过 5 MB 上限')
+    } finally {
+      vi.unstubAllGlobals()
+    }
+    expect(cancelled).toBe(true)
+    // 5 MB 上限：读满 5 块后，第 6 块越界即中止，剩下的块不再拉取。
+    expect(pulled).toBe(6)
+  })
+
+  it('真实 deflate 压缩包解压后超限时同样被拦下', async () => {
+    const huge = new Uint8Array(MAX_IMPORT_BYTES * 8)
+    const compressed = new Uint8Array(
+      await new Response(new Blob([huge]).stream().pipeThrough(new CompressionStream('deflate-raw')))
+        .arrayBuffer(),
+    )
+    expect(compressed.byteLength).toBeLessThan(MAX_SHARE_BODY_CHARS / 4)
+    await expect(decodeProgramShare(`#p=1.${base64UrlOf(compressed)}`)).rejects.toThrow('超过 5 MB 上限')
   })
 })

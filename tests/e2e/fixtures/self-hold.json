@@ -1,0 +1,72 @@
+{
+  "schema": 1,
+  "name": "E2E 分享自保持",
+  "profile": "v21",
+  "tags": [
+    {
+      "id": "tag-start",
+      "name": "Start",
+      "address": "%I0.0",
+      "kind": "BOOL",
+      "initial": false,
+      "comment": "启动按钮"
+    },
+    {
+      "id": "tag-stop",
+      "name": "Stop",
+      "address": "%I0.1",
+      "kind": "BOOL",
+      "initial": false,
+      "comment": "停止按钮"
+    },
+    {
+      "id": "tag-motor",
+      "name": "Motor",
+      "address": "%Q0.0",
+      "kind": "BOOL",
+      "initial": false,
+      "comment": "电机"
+    }
+  ],
+  "rungs": [
+    {
+      "id": "rung-hold",
+      "label": "启动按钮或电机自保持，停止按钮断开",
+      "nodes": [
+        {
+          "type": "parallel",
+          "id": "parallel-hold",
+          "branches": [
+            [
+              {
+                "type": "contact",
+                "id": "contact-start",
+                "kind": "NO",
+                "tag": "Start"
+              }
+            ],
+            [
+              {
+                "type": "contact",
+                "id": "contact-motor",
+                "kind": "NO",
+                "tag": "Motor"
+              }
+            ]
+          ]
+        },
+        {
+          "type": "contact",
+          "id": "contact-stop",
+          "kind": "NC",
+          "tag": "Stop"
+        }
+      ],
+      "output": {
+        "id": "output-motor",
+        "kind": "COIL",
+        "tag": "Motor"
+      }
+    }
+  ]
+}

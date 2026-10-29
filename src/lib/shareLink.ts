@@ -1,5 +1,5 @@
 import type { Program } from '../engine/types'
-import { parseProgramText, serializeProgram } from './io'
+import { MAX_IMPORT_BYTES, parseProgramText, serializeProgram } from './io'
 
 /**
  * 分享链接：把整份工程压进 URL 片段，AI 生成工程后给学生一个可以直接点开的地址。
@@ -17,6 +17,17 @@ const FORMAT_PLAIN = '0'
  * 界面应提示改用文件导入。
  */
 export const SHARE_LINK_SOFT_LIMIT = 12000
+/** deflate-raw 在不可压缩内容上可能略大于原始数据，给压缩载荷留一点余量。 */
+const MAX_COMPRESSED_BYTES = MAX_IMPORT_BYTES + 64 * 1024
+/** base64url 去掉填充符后，字符串长度不会超过这个值。 */
+const MAX_SHARE_BODY_CHARS = Math.ceil(MAX_COMPRESSED_BYTES / 3) * 4
+
+class SharePayloadTooLargeError extends Error {
+  constructor() {
+    super('sharing payload is too large')
+    this.name = 'SharePayloadTooLargeError'
+  }
+}
 
 export function isShareProgramHash(hash: string): boolean {
   return hash.startsWith(HASH_PREFIX) && hash.length > HASH_PREFIX.length + 2
@@ -57,9 +68,42 @@ async function deflate(bytes: Uint8Array): Promise<Uint8Array> {
   return new Uint8Array(await new Response(stream).arrayBuffer())
 }
 
+async function readAtMost(stream: ReadableStream<Uint8Array>, limit: number): Promise<Uint8Array> {
+  const reader = stream.getReader()
+  const chunks: Uint8Array[] = []
+  let total = 0
+  try {
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      if (!value?.byteLength) continue
+      total += value.byteLength
+      if (total > limit) {
+        try {
+          await reader.cancel()
+        } catch {
+          // 超限本身才是要报告的错误，取消流失败不应覆盖它。
+        }
+        throw new SharePayloadTooLargeError()
+      }
+      chunks.push(value)
+    }
+  } finally {
+    reader.releaseLock()
+  }
+
+  const output = new Uint8Array(total)
+  let offset = 0
+  for (const chunk of chunks) {
+    output.set(chunk, offset)
+    offset += chunk.byteLength
+  }
+  return output
+}
+
 async function inflate(bytes: Uint8Array): Promise<Uint8Array> {
   const stream = new Blob([bytes as BlobPart]).stream().pipeThrough(new DecompressionStream('deflate-raw'))
-  return new Uint8Array(await new Response(stream).arrayBuffer())
+  return readAtMost(stream, MAX_IMPORT_BYTES)
 }
 
 /** 后台标签页或旧浏览器没有 CompressionStream 时退回明文，链接会长一些但照样能用。 */
@@ -82,6 +126,9 @@ export async function decodeProgramShare(hash: string): Promise<Program> {
   if (split <= 0) throw new Error('分享链接格式不完整，可能在复制时被截断了。')
   const format = payload.slice(0, split)
   const body = payload.slice(split + 1)
+  if (body.length > MAX_SHARE_BODY_CHARS) {
+    throw new Error(`分享链接里的工程超过 ${MAX_IMPORT_BYTES / (1024 * 1024)} MB 上限，请改用文件导入。`)
+  }
 
   let bytes: Uint8Array
   try {
@@ -95,10 +142,16 @@ export async function decodeProgramShare(hash: string): Promise<Program> {
     if (!hasCompressionStream()) throw new Error('这个浏览器不支持解压分享链接，请改用文件导入。')
     try {
       text = new TextDecoder().decode(await inflate(bytes))
-    } catch {
+    } catch (reason) {
+      if (reason instanceof SharePayloadTooLargeError) {
+        throw new Error(`分享链接里的工程超过 ${MAX_IMPORT_BYTES / (1024 * 1024)} MB 上限，请改用文件导入。`)
+      }
       throw new Error('分享链接解压失败，可能在复制时被截断了。')
     }
   } else if (format === FORMAT_PLAIN) {
+    if (bytes.byteLength > MAX_IMPORT_BYTES) {
+      throw new Error(`分享链接里的工程超过 ${MAX_IMPORT_BYTES / (1024 * 1024)} MB 上限，请改用文件导入。`)
+    }
     text = new TextDecoder().decode(bytes)
   } else {
     throw new Error('不认识的分享链接格式。')
