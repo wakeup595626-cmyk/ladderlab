@@ -21,6 +21,7 @@ import {
   deleteNode,
   deleteTag,
   getNodeAtPath,
+  tagsInProgramOrder,
   tagUsage,
   updateContact,
   updateOutput,
@@ -239,6 +240,8 @@ function TagsPanel({
   onSetInt: (name: string, value: number) => void
 }) {
   const [tagQuery, setTagQuery] = useState('')
+  // issue #12：变量表可以按“第一次出现的程序段顺序”读，默认仍用自己的登记顺序。
+  const [orderByProgram, setOrderByProgram] = useState(false)
   const instances = contentRungs(program)
     .map((rung) => rung.output)
     .filter((output) => {
@@ -246,10 +249,11 @@ function TagsPanel({
       return runtime.timers[name] || runtime.counters[name]
     })
   const normalizedQuery = tagQuery.trim().toLocaleLowerCase()
+  const orderedTags = orderByProgram ? tagsInProgramOrder(program) : program.tags
   const visibleTags = normalizedQuery
-    ? program.tags.filter((tag) => [tag.name, tag.address, tag.comment, tag.kind]
+    ? orderedTags.filter((tag) => [tag.name, tag.address, tag.comment, tag.kind]
       .some((value) => value.toLocaleLowerCase().includes(normalizedQuery)))
-    : program.tags
+    : orderedTags
 
   return (
     <div className="tags-panel">
@@ -258,6 +262,15 @@ function TagsPanel({
           <h2>变量表 <span className="tag-count">{program.tags.length}</span></h2>
         </div>
         <div className="button-row compact-row">
+          <button
+            type="button"
+            className="secondary-button"
+            aria-pressed={orderByProgram}
+            title="按变量第一次出现的程序段顺序排列，没有被用到的变量排在最后"
+            onClick={() => setOrderByProgram((current) => !current)}
+          >
+            按程序段排序
+          </button>
           <button type="button" className="secondary-button" onClick={() => onProgram(addTag(program, 'BOOL'))}>
             + BOOL
           </button>

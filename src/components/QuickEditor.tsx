@@ -86,7 +86,7 @@ function ensureNamedTag(program: Program, name: string, kind: 'BOOL' | 'INT'): P
   if (!trimmed || trimmed.includes('.') || program.tags.some((tag) => tag.name === trimmed)) return program
   const next = addTag(program, kind)
   const added = next.tags.at(-1)
-  return added ? updateTag(next, added.id, { name: trimmed }) : program
+  return added ? updateTag(next, added.id, { name: trimmed }, { keepAuto: true }) : program
 }
 
 function tagForReference(program: Program, reference: string): TagDef | undefined {
