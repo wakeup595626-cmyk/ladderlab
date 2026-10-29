@@ -547,7 +547,7 @@ describe('renderSfcSvg 异常输入', () => {
     }
   })
 
-  it('长步骤编号自动缩小字号，不会压进条件列', () => {
+  it('长步骤编号自动缩小字号，不会压进步骤框', () => {
     const rendered = renderSfcSvg(chartOf(
       [plainStep('a', '123456', '保持输出'), plainStep('b', '12', '停止输出')],
       [{ from: 'a', to: 'b', label: 'S1' }],
@@ -556,10 +556,16 @@ describe('renderSfcSvg 异常输入', () => {
     for (const match of rendered.svg.matchAll(/<text\s([^>]*)>([^<]*)<\/text>/g)) {
       sizes.set(match[2], Number(/font-size="([\d.]+)"/.exec(match[1])?.[1]))
     }
-    expect(sizes.get('123456')).toBe(18)
+    // 步骤框会随最长的编号增宽；编号在框内放不下时才继续缩字号。
+    const stepBox = Array.from(rendered.svg.matchAll(/<rect\s([^>]*)>/g), (match) => match[1])
+      .find((raw) => raw.includes('stroke="#1c4b74" stroke-width="1.8"'))
+    expect(stepBox).toBeDefined()
+    const boxWidth = Number(/\bwidth="([\d.]+)"/.exec(stepBox!)?.[1])
+    expect(boxWidth).toBeGreaterThanOrEqual(104)
+    expect(sizes.get('123456')).toBe(25)
     expect(sizes.get('12')).toBe(25)
-    // 数字按 0.62em 估宽：6 位、18px 仍明显窄于 104px 的步骤框。
-    expect(6 * 0.62 * (sizes.get('123456') ?? 0)).toBeLessThanOrEqual(104 - 8)
+    // 数字按 0.62em 估宽：6 位、25px 必须落在实际步骤框的内边距里。
+    expect(6 * 0.62 * (sizes.get('123456') ?? 0)).toBeLessThanOrEqual(boxWidth - 8)
     expect(xmlProblems(rendered.svg)).toEqual([])
   })
 })
