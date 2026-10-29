@@ -93,6 +93,7 @@ export default function WorkspaceTopBar({
   const [fileMenuKind, setFileMenuKind] = useState<'export' | 'file'>('export')
   const [themeMenuOpen, setThemeMenuOpen] = useState(false)
   const [themeMenuStyle, setThemeMenuStyle] = useState<CSSProperties | null>(null)
+  const [fileMenuStyle, setFileMenuStyle] = useState<CSSProperties | null>(null)
   const menuRef = useRef<HTMLDivElement>(null)
   const menuButtonRef = useRef<HTMLButtonElement>(null)
   const fileMenuRef = useRef<HTMLDivElement>(null)
@@ -191,6 +192,34 @@ export default function WorkspaceTopBar({
       window.clearTimeout(focusTimer)
       document.removeEventListener('pointerdown', handlePointerDown)
       document.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [fileMenuKind, fileMenuOpen])
+
+  // 文件菜单从触发按钮的左边缘向下展开，不能钉在窗口最右侧。
+  useLayoutEffect(() => {
+    if (!fileMenuOpen) return
+    const place = () => {
+      const trigger = fileMenuKind === 'file' ? compactFileButtonRef.current : exportButtonRef.current
+      const rect = trigger?.getBoundingClientRect()
+      if (!rect) return
+      const top = Math.round(rect.bottom + 8)
+      const width = fileMenuRef.current?.offsetWidth ?? 0
+      const aligned = Math.round(rect.left)
+      const left = Math.max(12, Math.min(aligned, Math.round(window.innerWidth - 12 - width)))
+      setFileMenuStyle({
+        top,
+        left,
+        right: 'auto',
+        bottom: 'auto',
+        maxHeight: Math.max(240, Math.round(window.innerHeight - top - 12)),
+      })
+    }
+    place()
+    window.addEventListener('resize', place)
+    window.addEventListener('scroll', place, true)
+    return () => {
+      window.removeEventListener('resize', place)
+      window.removeEventListener('scroll', place, true)
     }
   }, [fileMenuKind, fileMenuOpen])
 
@@ -472,6 +501,7 @@ export default function WorkspaceTopBar({
               role="menu"
               aria-label="导出"
               onKeyDown={handleFileMenuKeyDown}
+              style={fileMenuStyle ?? undefined}
             >
               <div className="wb-menu-group" role="group" aria-label="工程文件与分享">
                 <button type="button" role="menuitem" onClick={() => chooseFileMenuAction(onExportProject)}>
@@ -503,6 +533,7 @@ export default function WorkspaceTopBar({
               role="menu"
               aria-label="文件操作"
               onKeyDown={handleFileMenuKeyDown}
+              style={fileMenuStyle ?? undefined}
             >
               <div className="wb-menu-group" role="group" aria-label="工程">
                 <span className="wb-menu-label">工程</span>
