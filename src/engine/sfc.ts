@@ -28,7 +28,7 @@ export interface SfcChart {
   steps: SfcStep[]
   edges: SfcEdge[]
   notes: string[]
-  source: 'sr-steps' | 'bit-steps'
+  source: 'sr-steps' | 'bit-steps' | 'state-tags' | 'pattern' | 'run-cycle'
   container?: string
 }
 
@@ -56,6 +56,81 @@ function formatDuration(pt: number | undefined): string {
   if (pt % 1000 === 0) return `${pt / 1000}s`
   if (pt > 1000) return `${(pt / 1000).toFixed(1)}s`
   return `${pt}ms`
+}
+
+const INPUT_ADDRESS = /^%?I/i
+
+function isInput(tag: TagDef | undefined): boolean {
+  return Boolean(tag && INPUT_ADDRESS.test(tag.address.trim()))
+}
+
+/** 说明文字偏长时退回变量名，图上只留能一眼读懂的短标签。 */
+function shortName(tag: TagDef | undefined, fallback: string): string {
+  if (!tag) return fallback
+  const comment = shortComment(tag)
+  if (comment && comment !== tag.name && comment.length <= 6) return comment
+  return tag.name || fallback
+}
+
+/** 同一前缀的编号压成区间：「P1」「P2」「P3」「P4」→「P1–P4」。 */
+function numberedRange(labels: string[]): string {
+  const parts = labels.map((label) => /^(.*?)[\s_-]*(\d+)$/.exec(label.trim()))
+  const head = parts[0]?.[1]?.trim() ?? ''
+  if (!head || parts.length < 2) return ''
+  if (!parts.every((part) => part && part[1].trim() === head)) return ''
+  const numbers = parts.map((part) => Number(part![2])).sort((left, right) => left - right)
+  if (new Set(numbers).size !== numbers.length) return ''
+  if (!numbers.every((value, index) => index === 0 || value === numbers[index - 1] + 1)) return ''
+  return `${head}${numbers[0]}–${head}${numbers[numbers.length - 1]}`
+}
+
+/** 末尾字母压成区间：「数码管段 A」「数码管段 B」→「数码管段 A–B」。 */
+function letterRange(labels: string[]): string {
+  const parts = labels.map((label) => /^(.*?)\s([A-Za-z])$/.exec(label.trim()))
+  const head = parts[0]?.[1]?.trim() ?? ''
+  if (!head || parts.length < 2) return ''
+  if (!parts.every((part) => part && part[1].trim() === head)) return ''
+  const codes = parts.map((part) => part![2].toUpperCase().charCodeAt(0)).sort((left, right) => left - right)
+  if (!codes.every((code, index) => index === 0 || code === codes[index - 1] + 1)) return ''
+  return `${head} ${String.fromCharCode(codes[0])}–${String.fromCharCode(codes[codes.length - 1])}`
+}
+
+/** 地址连续时压成区间：「Q1.0」「Q1.1」「Q1.2」→「Q1.0–Q1.2」。 */
+function addressRange(addresses: string[]): string {
+  if (addresses.length < 3) return addresses.join('、')
+  const parts = addresses.map((address) => /^(.*\.)?(\d+)$/.exec(address))
+  if (!parts.every((part) => part)) return addresses.join('、')
+  const head = parts[0]![1] ?? ''
+  if (!parts.every((part) => (part![1] ?? '') === head)) return addresses.join('、')
+  const numbers = parts.map((part) => Number(part![2]))
+  if (!numbers.every((value, index) => index === 0 || value === numbers[index - 1] + 1)) {
+    return addresses.join('、')
+  }
+  return `${addresses[0]}–${addresses[addresses.length - 1]}`
+}
+
+/** 取一组说明文字的共同尾巴：「1 号抢答灯」…→「抢答灯」。 */
+function sharedTail(labels: string[]): string {
+  const cleaned = labels.map((label) => label.trim()).filter(Boolean)
+  if (cleaned.length < 2) return ''
+  const reversed = cleaned.map((label) => Array.from(label).reverse())
+  let length = 0
+  while (reversed.every((chars) => chars[length] !== undefined && chars[length] === reversed[0][length])) {
+    length += 1
+  }
+  const tail = reversed[0].slice(0, length).reverse().join('')
+    .replace(/^[\s\d０-９第号层楼\-_·]+/, '')
+    .trim()
+  return tail.length >= 2 ? tail : ''
+}
+
+/** 取一组说明文字的共同前缀加编号：「喷泉 1」「喷泉 3」→「喷泉 1·3」。 */
+function numberedList(labels: string[]): string {
+  const parts = labels.map((label) => /^(.*?)[\s_-]*(\d+)\s*$/.exec(label.trim()))
+  const head = parts[0]?.[1]?.trim() ?? ''
+  if (!head) return ''
+  if (!parts.every((part) => part && part[1].trim() === head)) return ''
+  return `${head} ${parts.map((part) => part![2]).join('·')}`
 }
 
 function shortAddress(address: string): string {
@@ -230,9 +305,11 @@ function collectActions(ctx: Context, skipTags: Set<string>): Map<string, SfcAct
     const steps = collectContactNames(rung.nodes, ctx, true)
     if (steps.length === 0) continue
     const tag = ctx.tags.get(output.tag)
-    const text = (tag ? shortComment(tag) : '') || output.tag
+    const base = (tag ? shortComment(tag) : '') || output.tag
     const detail = actionDetail(output, ctx)
     for (const step of steps) {
+      // 同样的灯位在「常亮」与「闪烁」两步里要区分开，否则两步动作看起来一模一样。
+      const text = flashesFor(rung.nodes, step, ctx) ? `${base}闪` : base
       const list = map.get(step) ?? []
       if (!list.some((action) => action.text === text && action.detail === detail)) {
         list.push({ text, detail })
@@ -241,6 +318,40 @@ function collectActions(ctx: Context, skipTags: Set<string>): Map<string, SfcAct
     }
   }
   return map
+}
+
+/** 由短周期定时器驱动、或注释写明闪光/闪烁的位，按闪烁信号处理。 */
+function flasherTags(ctx: Context): Set<string> {
+  const names = new Set<string>()
+  for (const rung of ctx.rungs) {
+    const output = rung.output
+    if (!output.qTag) continue
+    const short = output.pt !== undefined && output.pt <= 1000
+    const tag = ctx.tags.get(output.qTag)
+    if (short || (tag && /闪光|闪烁/.test(tag.comment))) names.add(output.qTag)
+  }
+  for (const tag of ctx.program.tags) {
+    if (/闪光|闪烁/.test(tag.comment) || (tag.name && /flash/i.test(tag.name))) names.add(tag.name)
+  }
+  return names
+}
+
+/** 这个步骤的这条支路是否串了闪烁信号。 */
+function flashesFor(nodes: LadderNode[], step: string, ctx: Context): boolean {
+  const flashers = flasherTags(ctx)
+  if (flashers.size === 0) return false
+  const isFlash = (node: LadderNode) => node.type === 'contact' && flashers.has(node.tag)
+  const direct = nodes.some((node) => isFlash(node))
+  if (direct) return true
+  for (const node of nodes) {
+    if (node.type !== 'parallel') continue
+    for (const branch of node.branches) {
+      const names = collectContactNodes(branch).map((contact) => contact.tag)
+      if (!names.includes(step)) continue
+      if (branch.some((item) => isFlash(item))) return true
+    }
+  }
+  return false
 }
 
 function inferSource(rung: Rung, target: StepMatch, ctx: Context): string | undefined {
@@ -527,9 +638,459 @@ function buildBitChart(ctx: Context, container: string): SfcChart {
   }
 }
 
+interface LatchInfo {
+  tag: TagDef
+  setRungs: Rung[]
+  resetRungs: Rung[]
+}
+
+/** 用变量注释（而不是地址）拼转移条件，图上文字更短。 */
+function formatGuard(nodes: LadderNode[], ctx: Context, skip: Set<string>): string {
+  const parts: string[] = []
+  const render = (node: LadderNode): string => {
+    if (node.type === 'parallel') {
+      const branches = node.branches
+        .map((branch) => formatGuard(branch, ctx, skip))
+        .filter(Boolean)
+      if (branches.length === 0) return ''
+      return branches.length === 1 ? branches[0] : branches.join(' 或 ')
+    }
+    if (skip.has(node.tag)) return ''
+    const name = shortName(ctx.tags.get(node.tag), node.tag)
+    if (node.kind === 'NC') return name.length <= 6 ? `无${name}` : `${name}=0`
+    if (node.kind === 'P') return `${name}↑`
+    if (node.kind === 'N') return `${name}↓`
+    if (node.kind === 'CMP') return `${name}${node.compare?.op ?? '=='}${node.compare?.value ?? 0}`
+    return name
+  }
+  for (const node of nodes) {
+    const text = render(node)
+    if (text) parts.push(text)
+  }
+  return parts.join(' 且 ')
+}
+
+/** 同时被置位与复位的记忆位，就是顺序功能图里的状态。 */
+function collectLatches(ctx: Context): Map<string, LatchInfo> {
+  const sets = new Map<string, Rung[]>()
+  const resets = new Map<string, Rung[]>()
+  for (const rung of ctx.rungs) {
+    if (rung.output.kind === 'SET') {
+      const list = sets.get(rung.output.tag) ?? []
+      list.push(rung)
+      sets.set(rung.output.tag, list)
+    } else if (rung.output.kind === 'RESET') {
+      const list = resets.get(rung.output.tag) ?? []
+      list.push(rung)
+      resets.set(rung.output.tag, list)
+    }
+  }
+  const latches = new Map<string, LatchInfo>()
+  for (const [name, setRungs] of sets) {
+    const resetRungs = resets.get(name)
+    if (!resetRungs || resetRungs.length === 0) continue
+    const tag = ctx.tags.get(name)
+    if (!tag || tag.kind !== 'BOOL' || tag.bitOf) continue
+    if (ctx.stepByTag.has(name)) continue
+    latches.set(name, { tag, setRungs, resetRungs })
+  }
+  return latches
+}
+
+/** 互相用常闭触点封锁的置位状态归为一组，例如四路抢答灯。 */
+function mutexGroups(latches: Map<string, LatchInfo>): string[][] {
+  const names = [...latches.keys()]
+  const parent = new Map(names.map((name) => [name, name]))
+  const find = (name: string): string => {
+    let current = name
+    while (parent.get(current) !== current) current = parent.get(current) ?? current
+    parent.set(name, current)
+    return current
+  }
+  const locks = new Map(names.map((name) => [
+    name,
+    new Set(collectContactNodes(latches.get(name)!.setRungs[0].nodes)
+      .filter((node) => node.kind === 'NC')
+      .map((node) => node.tag)),
+  ]))
+  for (let left = 0; left < names.length; left += 1) {
+    for (let right = left + 1; right < names.length; right += 1) {
+      const a = names[left]
+      const b = names[right]
+      if (!locks.get(a)!.has(b) && !locks.get(b)!.has(a)) continue
+      const rootA = find(a)
+      const rootB = find(b)
+      if (rootA !== rootB) parent.set(rootA, rootB)
+    }
+  }
+  const groups = new Map<string, string[]>()
+  for (const name of names) {
+    const root = find(name)
+    const list = groups.get(root) ?? []
+    list.push(name)
+    groups.set(root, list)
+  }
+  return [...groups.values()].filter((group) => group.length >= 2)
+}
+
+interface EntryParts {
+  triggers: string[]
+  conditions: string[]
+}
+
+/** 一个置位状态是靠什么进入的：边沿触发点，以及共同的前置条件。 */
+function entryParts(info: LatchInfo, members: Set<string>): EntryParts {
+  const contacts = collectContactNodes(info.setRungs[0].nodes)
+  const triggers = new Set<string>()
+  for (const node of contacts) {
+    if (node.kind === 'P' || node.kind === 'N') triggers.add(node.tag)
+  }
+  const conditions = new Set<string>()
+  for (const node of contacts) {
+    if (node.kind !== 'NO') continue
+    if (members.has(node.tag) || triggers.has(node.tag)) continue
+    conditions.add(node.tag)
+  }
+  return { triggers: [...triggers], conditions: [...conditions] }
+}
+
+function entryLabelOf(triggers: string[], conditions: string[], ctx: Context, rung: Rung): string {
+  if (triggers.length > 0) {
+    const labels = triggers.map((name) => shortName(ctx.tags.get(name), name))
+    const range = numberedRange(labels)
+    return `${range || sharedTail(labels) || labels.join(' 或 ')}↑`
+  }
+  if (conditions.length > 0) {
+    const labels = conditions.map((name) => shortName(ctx.tags.get(name), name))
+    return numberedRange(labels) || labels.join(' 且 ')
+  }
+  return cleanRungLabel(rung.label) || '条件满足'
+}
+
+interface StateNode {
+  members: string[]
+  order: number
+  entryLabel: string
+}
+
+function stateActions(node: StateNode, ctx: Context): SfcAction[] {
+  const members = node.members
+    .map((name) => ctx.tags.get(name))
+    .filter((tag): tag is TagDef => Boolean(tag))
+  if (members.length === 0) return []
+
+  const actions: SfcAction[] = []
+  if (members.length === 1) {
+    const tag = members[0]
+    actions.push({ text: shortName(tag, tag.name), detail: `${shortAddress(tag.address)}=1` })
+  } else {
+    const labels = members.map((tag) => shortComment(tag) || tag.name)
+    const addresses = members.map((tag) => shortAddress(tag.address))
+    actions.push({
+      text: sharedTail(labels) || numberRange(labels) || labels.join('·'),
+      detail: addressRange(addresses),
+    })
+  }
+
+  // 只由本步状态驱动的线圈（例如数码管段）挂在同一个动作框里。
+  const memberNames = new Set(node.members)
+  const driven: TagDef[] = []
+  for (const rung of ctx.rungs) {
+    if (rung.output.kind !== 'COIL') continue
+    const contacts = collectContactNodes(rung.nodes)
+    if (contacts.length === 0) continue
+    if (!contacts.every((contact) => contact.kind === 'NO' && memberNames.has(contact.tag))) continue
+    const tag = ctx.tags.get(rung.output.tag)
+    if (tag && !driven.some((item) => item.name === tag.name)) driven.push(tag)
+  }
+  if (driven.length === 1) {
+    const tag = driven[0]
+    const address = `${shortAddress(tag.address)}=1`
+    const primary = actions[0]
+    if (primary?.detail) primary.detail = `${primary.detail}、${address}`
+    else actions.push({ text: shortName(tag, tag.name), detail: address })
+  } else if (driven.length > 1) {
+    const labels = driven.map((tag) => shortComment(tag) || tag.name)
+    actions.push({
+      text: letterRange(labels) || numberedList(labels) || labels.join('·'),
+      detail: addressRange(driven.map((tag) => shortAddress(tag.address))),
+    })
+  }
+  return actions
+}
+
+/** 「P1」「P2」这类编号取区间，其余情况按点号列表显示。 */
+function numberRange(labels: string[]): string {
+  return numberedRange(labels) || numberedList(labels)
+}
+
+function buildStateChart(ctx: Context): SfcChart | null {
+  const latches = collectLatches(ctx)
+  if (latches.size < 2) return null
+  const groups = mutexGroups(latches)
+  if (groups.length === 0) return null
+  const order = new Map(ctx.rungs.map((rung, index) => [rung.id, index]))
+
+  const main: StateNode[] = []
+  const conditions = new Set<string>()
+  for (const group of groups) {
+    const groupSet = new Set(group)
+    const bySignature = new Map<string, string[]>()
+    for (const name of group) {
+      const parts = entryParts(latches.get(name)!, groupSet)
+      const signature = [...parts.conditions].sort().join('|')
+      const list = bySignature.get(signature) ?? []
+      list.push(name)
+      bySignature.set(signature, list)
+    }
+    for (const members of bySignature.values()) {
+      const memberSet = new Set(members)
+      const triggers = new Set<string>()
+      let shared: string[] | null = null
+      for (const name of members) {
+        const parts = entryParts(latches.get(name)!, memberSet)
+        parts.triggers.forEach((item) => triggers.add(item))
+        shared = shared === null ? parts.conditions : shared.filter((item) => parts.conditions.includes(item))
+      }
+      shared?.forEach((item) => conditions.add(item))
+      main.push({
+        members,
+        order: Math.min(...members.map((name) => order.get(latches.get(name)!.setRungs[0].id) ?? 0)),
+        entryLabel: entryLabelOf(
+          [...triggers],
+          shared ?? [],
+          ctx,
+          latches.get(members[0])!.setRungs[0],
+        ),
+      })
+    }
+  }
+  main.sort((left, right) => left.order - right.order)
+
+  // 「允许抢答」这类由按钮直接置位的前置状态，单独作为一步放在前面。
+  const pre: StateNode[] = []
+  for (const name of conditions) {
+    const info = latches.get(name)
+    if (!info) continue
+    const only = info.setRungs[0].nodes
+    if (only.length !== 1 || only[0].type !== 'contact' || only[0].kind !== 'NO') continue
+    if (!isInput(ctx.tags.get(only[0].tag))) continue
+    pre.push({
+      members: [name],
+      order: order.get(info.setRungs[0].id) ?? 0,
+      entryLabel: shortName(ctx.tags.get(only[0].tag), only[0].tag),
+    })
+  }
+  pre.sort((left, right) => left.order - right.order)
+
+  const ordered = [...pre, ...main]
+  if (ordered.length < 2) return null
+
+  const steps: SfcStep[] = [{
+    key: '__initial',
+    number: '0',
+    title: '初始步',
+    initial: true,
+    actions: [{ text: '全部输出关闭', detail: '' }],
+  }]
+  const edges: SfcEdge[] = []
+  let previous = '__initial'
+  ordered.forEach((node, index) => {
+    const key = node.members.join('+')
+    steps.push({
+      key,
+      number: String(index + 1),
+      title: node.members.join(' / '),
+      initial: false,
+      actions: stateActions(node, ctx),
+    })
+    edges.push({ from: previous, to: key, label: node.entryLabel })
+    previous = key
+  })
+
+  const last = ordered[ordered.length - 1]
+  const lastKey = last.members.join('+')
+  const lastSet = new Set(last.members)
+  const guards: string[] = []
+  const releaseTags = new Set<string>()
+  for (const name of last.members) {
+    for (const rung of latches.get(name)?.resetRungs ?? []) {
+      const label = formatGuard(rung.nodes, ctx, lastSet)
+      if (label && !guards.includes(label)) guards.push(label)
+      for (const contact of collectContactNodes(rung.nodes)) {
+        if (contact.kind === 'NO') releaseTags.add(contact.tag)
+      }
+    }
+  }
+  const loop = ordered.find((node) => node !== last && node.members.some((name) => (
+    latches.get(name)?.setRungs.some((rung) => collectContactNodes(rung.nodes)
+      .some((contact) => contact.kind === 'NO' && releaseTags.has(contact.tag)))
+  )))
+  edges.push({
+    from: lastKey,
+    to: loop ? loop.members.join('+') : '__initial',
+    label: guards.slice(0, 2).join(' 或 ') || '复位',
+  })
+
+  return {
+    programName: ctx.program.name,
+    steps,
+    edges: mergeEdges(edges),
+    notes: ['按置位 / 复位网络归纳的状态链；互锁、延时与显示细节仍以梯形图为准。'],
+    source: 'state-tags',
+  }
+}
+
+/** 序列盒（PATTERN）按拍展开：一拍一步，动作就是这一拍点亮的灯位。 */
+function buildPatternChart(ctx: Context): SfcChart | null {
+  for (const rung of ctx.rungs) {
+    const output = rung.output
+    const pattern = output.pattern
+    if (output.kind !== 'PATTERN' || !pattern || pattern.length < 2) continue
+    const bits = ctx.program.tags
+      .filter((tag) => tag.bitOf === output.tag)
+      .sort((left, right) => left.address.localeCompare(right.address))
+    if (bits.length === 0) continue
+    const driven = new Map<string, TagDef>()
+    for (const coil of ctx.rungs) {
+      if (coil.output.kind !== 'COIL') continue
+      const contacts = collectContactNodes(coil.nodes)
+      if (contacts.length !== 1 || contacts[0].kind !== 'NO') continue
+      if (!bits.some((bit) => bit.name === contacts[0].tag)) continue
+      const tag = ctx.tags.get(coil.output.tag)
+      if (tag) driven.set(contacts[0].tag, tag)
+    }
+    if (driven.size === 0) continue
+
+    const timerName = output.pulseTag?.split('.')[0]
+    const timer = ctx.rungs.find((item) => item.output.tag === timerName && item.output.pt)
+    const label = formatDuration(timer?.output.pt) || '节拍'
+    const gate = collectContactNodes(rung.nodes)
+      .find((node) => node.kind === 'NO' && isInput(ctx.tags.get(node.tag)))
+
+    const steps: SfcStep[] = []
+    const edges: SfcEdge[] = []
+    if (gate) {
+      steps.push({
+        key: '__initial',
+        number: '0',
+        title: '初始步',
+        initial: true,
+        actions: [{ text: '全部灯熄灭', detail: '' }],
+      })
+      edges.push({
+        from: '__initial',
+        to: 'beat-1',
+        label: shortName(ctx.tags.get(gate.tag), gate.tag),
+      })
+    }
+    pattern.forEach((value, index) => {
+      const lit = bits.filter((_bit, bitIndex) => (value >> bitIndex) & 1)
+      const names = lit.map((bit) => driven.get(bit.name) ?? bit)
+      const text = names.length === 0
+        ? '全部熄灭'
+        : numberedList(names.map((tag) => shortComment(tag) || tag.name))
+          || names.map((tag) => shortName(tag, tag.name)).join('·')
+      steps.push({
+        key: `beat-${index + 1}`,
+        number: String(index + 1),
+        title: `第 ${index + 1} 拍`,
+        initial: !gate && index === 0,
+        actions: [{ text, detail: '' }],
+      })
+      if (index > 0) edges.push({ from: `beat-${index}`, to: `beat-${index + 1}`, label })
+    })
+    edges.push({ from: `beat-${pattern.length}`, to: 'beat-1', label })
+
+    return {
+      programName: ctx.program.name,
+      steps,
+      edges: mergeEdges(edges),
+      notes: ['按序列盒的灯字序列逐拍展开，停止与续拍仍以梯形图为准。'],
+      source: 'pattern',
+    }
+  }
+  return null
+}
+
+/** 自保持线圈 + 定时 / 计数：初始 → 运行 → 完成 → 复位。 */
+function buildRunCycleChart(ctx: Context): SfcChart | null {
+  const hold = ctx.rungs.find((rung) => rung.output.kind === 'COIL'
+    && collectContactNodes(rung.nodes).some((node) => node.kind === 'NO' && node.tag === rung.output.tag))
+  if (!hold) return null
+  const holdName = hold.output.tag
+  const holdTag = ctx.tags.get(holdName)
+  const timer = ctx.rungs.find((rung) => (rung.output.kind === 'TON'
+    || rung.output.kind === 'TOF'
+    || rung.output.kind === 'TONR')
+    && collectContactNodes(rung.nodes).some((node) => node.kind === 'NO' && node.tag === holdName))
+  const counter = ctx.rungs.find((rung) => rung.output.kind === 'CTU')
+  if (!holdTag || (!timer && !counter)) return null
+
+  const contacts = collectContactNodes(hold.nodes)
+  const start = contacts.find((node) => node.kind === 'NO' && node.tag !== holdName && isInput(ctx.tags.get(node.tag)))
+  const doneTag = (counter?.output.qTag ? ctx.tags.get(counter.output.qTag) : undefined)
+    ?? (timer?.output.qTag ? ctx.tags.get(timer.output.qTag) : undefined)
+  const timerTag = timer?.output.qTag ? ctx.tags.get(timer.output.qTag) : undefined
+  const resetTag = counter?.output.resetTag ? ctx.tags.get(counter.output.resetTag) : undefined
+  const holdAddress = shortAddress(holdTag.address)
+
+  const run: SfcAction[] = [
+    { text: shortName(holdTag, holdName), detail: holdAddress ? `${holdAddress}=1` : '' },
+  ]
+  if (timer?.output.pt) {
+    run.push({ text: `${timer.output.tag} 计时 ${formatDuration(timer.output.pt)}`, detail: '' })
+  }
+  if (counter?.output.pv) {
+    run.push({ text: `${counter.output.tag} 计 ${counter.output.pv} 次`, detail: '' })
+  }
+  const done: SfcAction[] = [
+    { text: shortName(holdTag, holdName), detail: holdAddress ? `${holdAddress}=0` : '' },
+  ]
+  if (doneTag) {
+    done.push({
+      text: shortName(doneTag, doneTag.name),
+      detail: doneTag.address ? `${shortAddress(doneTag.address)}=1` : '',
+    })
+  }
+
+  return {
+    programName: ctx.program.name,
+    steps: [
+      {
+        key: '__initial',
+        number: '0',
+        title: '初始步',
+        initial: true,
+        actions: [{ text: '全部输出关闭', detail: '' }],
+      },
+      { key: '__run', number: '1', title: '运行', initial: false, actions: run },
+      { key: '__done', number: '2', title: '完成', initial: false, actions: done },
+    ],
+    edges: [
+      {
+        from: '__initial',
+        to: '__run',
+        label: start ? shortName(ctx.tags.get(start.tag), start.tag) : '启动',
+      },
+      {
+        from: '__run',
+        to: '__done',
+        label: timerTag ? shortName(timerTag, timerTag.name) : '到时',
+      },
+      {
+        from: '__done',
+        to: '__initial',
+        label: resetTag ? shortName(resetTag, resetTag.name) : '复位',
+      },
+    ],
+    notes: ['按自保持线圈与定时 / 计数网络归纳；具体时序仍以梯形图为准。'],
+    source: 'run-cycle',
+  }
+}
+
 export function buildSfc(program: Program): SfcChart | null {
   const steps = pickStepGroup(collectStepMatches(program))
-  if (steps.length < 2) return null
   const rungs = contentRungs(program)
   const tags = new Map(program.tags.map((tag) => [tag.name, tag]))
   const timers = new Map<string, { name: string; pt?: number }>()
@@ -557,11 +1118,15 @@ export function buildSfc(program: Program): SfcChart | null {
     timers,
     producers,
   }
-  const container = steps[0].tag.bitOf
-  if (container && steps.every((step) => step.tag.bitOf === container) && steps.length >= 3) {
-    return buildBitChart(ctx, container)
+  if (steps.length >= 2) {
+    const container = steps[0].tag.bitOf
+    if (container && steps.every((step) => step.tag.bitOf === container) && steps.length >= 3) {
+      return buildBitChart(ctx, container)
+    }
+    return buildSrChart(ctx)
   }
-  return buildSrChart(ctx)
+  // 没有步骤位时，按置位状态、序列盒或定时计数网络归纳出一条状态链。
+  return buildStateChart(ctx) ?? buildPatternChart(ctx) ?? buildRunCycleChart(ctx)
 }
 
 export const __testing = { collectStepMatches, pickStepGroup, formatNodes }

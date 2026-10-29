@@ -196,10 +196,11 @@ interface Layout {
 
 interface BranchRoute {
   lines: string[]
-  startY: number
+  exitX: number
+  fromBottom: number
   endY: number
   laneX: number
-  labelY: number
+  dropY: number
 }
 
 export function renderSfcSvg(chart: SfcChart): SfcSvg {
@@ -342,39 +343,43 @@ function finishSvg(
     if (!fromRow || !toRow) continue
     branches.push({
       lines: wrapText(compactSfcText(edge.label), Math.max(200, branchMax), 13),
-      startY: fromRow.y + STEP_H / 2,
+      exitX: stepX + STEP_W / 2 - 20,
+      fromBottom: fromRow.y + Math.max(STEP_H, fromRow.actionHeight),
       endY: toRow.y + STEP_H / 2,
       laneX: 0,
-      labelY: 0,
+      dropY: 0,
     })
   }
 
-  let labelCursor = lastBottom + 34
+  branches.sort((a, b) => a.endY - b.endY)
+  const branchBase = branches.reduce((top, branch) => Math.max(top, branch.fromBottom), lastBottom)
   branches.forEach((branch, index) => {
-    branch.laneX = stepX - 26 - index * 40
-    branch.labelY = labelCursor
-    labelCursor += branch.lines.length * 18 + 12
+    branch.laneX = stepX - 26 - (branches.length - 1 - index) * 40
+    branch.dropY = branchBase + 26 + index * 24
   })
-  const branchBottom = branches.length > 0 ? labelCursor : lastBottom
+  let branchBottom = lastBottom
+  for (const branch of branches) {
+    branchBottom = Math.max(branchBottom, branch.dropY + 6 + branch.lines.length * 18)
+  }
 
   for (const branch of branches) {
     parts.push(
-      `<path d="M ${stepX} ${branch.startY} H ${branch.laneX} V ${branch.endY} H ${stepX - 9}"`
+      `<path d="M ${branch.exitX} ${branch.fromBottom} V ${branch.dropY} H ${branch.laneX} V ${branch.endY} H ${stepX - 9}"`
       + ` fill="none" stroke="${BRANCH}" stroke-width="1.8" stroke-linejoin="miter"/>`,
       `<path d="M ${stepX - 9} ${branch.endY - 5} L ${stepX - 0.5} ${branch.endY} L ${stepX - 9} ${branch.endY + 5} Z" fill="${BRANCH}"/>`,
     )
     parts.push(
-      `<text x="${branch.laneX + 12}" y="${branch.labelY}" font-size="13" font-weight="450" fill="#7a4d0d">`
+      `<text x="${branch.laneX + 12}" y="${branch.dropY + 18}" font-size="13" font-weight="450" fill="#7a4d0d">`
       + `${escapeXml(branch.lines[0] ?? '')}</text>`,
     )
     branch.lines.slice(1).forEach((line, index) => {
       parts.push(
-        `<text x="${branch.laneX + 12}" y="${branch.labelY + 18 + index * 18}" font-size="13" font-weight="450" fill="#7a4d0d">${escapeXml(line)}</text>`,
+        `<text x="${branch.laneX + 12}" y="${branch.dropY + 36 + index * 18}" font-size="13" font-weight="450" fill="#7a4d0d">${escapeXml(line)}</text>`,
       )
     })
   }
 
-  const height = Math.ceil(branches.length > 0 ? branchBottom + 12 : lastBottom + PAGE_PAD)
+  const height = Math.ceil(branchBottom + PAGE_PAD)
   const body = parts.join('')
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" font-family="${SANS}">`
     + `<rect x="0" y="0" width="${width}" height="${height}" fill="${WHITE}"/>`

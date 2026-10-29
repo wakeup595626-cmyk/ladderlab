@@ -58,12 +58,63 @@ function lab(id: string): Program {
 }
 
 describe('顺序功能图归纳', () => {
-  it.each(['course-1', 'course-2', 'course-4', 'course-5'])(
-    '%s 没有步骤位时返回 null',
-    (id) => {
-      expect(buildSfc(lab(id))).toBeNull()
-    },
-  )
+  const expectedSource: Record<string, string> = {
+    'course-1': 'state-tags',
+    'course-2': 'run-cycle',
+    'course-3': 'sr-steps',
+    'course-4': 'state-tags',
+    'course-5': 'pattern',
+    'course-6': 'bit-steps',
+  }
+
+  it.each(Object.keys(expectedSource))('%s 都能导出自己的顺序功能图', (id) => {
+    const chart = buildSfc(lab(id))
+    expect(chart).not.toBeNull()
+    expect(chart!.source).toBe(expectedSource[id])
+    expect(chart!.steps.length).toBeGreaterThanOrEqual(2)
+    expect(chart!.edges.length).toBeGreaterThanOrEqual(2)
+  })
+
+  it('六个实验的步骤与动作互不相同，不会共用同一张图', () => {
+    const signatures = Object.keys(expectedSource).map((id) => {
+      const chart = buildSfc(lab(id))!
+      return chart.steps
+        .map((step) => `${step.number}|${step.actions.map((action) => `${action.text}|${action.detail ?? ''}`).join(';')}`)
+        .join(' / ')
+    })
+    expect(new Set(signatures).size).toBe(signatures.length)
+  })
+
+  it('实验一按允许抢答与抢答锁存归纳', () => {
+    const chart = buildSfc(lab('course-1'))!
+    expect(chart.steps.map((step) => step.number)).toEqual(['0', '1', '2'])
+    expect(chart.steps[1].actions).toEqual([{ text: '允许抢答', detail: 'M0.0=1' }])
+    expect(chart.steps[2].actions.map((action) => action.text)).toEqual(['抢答灯', '数码管段 A–C'])
+  })
+
+  it('实验二按运行、计时计数、完成三步归纳', () => {
+    const chart = buildSfc(lab('course-2'))!
+    expect(chart.steps.map((step) => step.number)).toEqual(['0', '1', '2'])
+    expect(chart.steps[1].actions.map((action) => action.text)).toEqual(['LED1', 'T1 计时 5s', 'C1 计 5 次'])
+    expect(chart.steps[2].actions.map((action) => action.text)).toEqual(['LED1', '计数满五次'])
+    expect(chart.edges.map((edge) => edge.label)).toEqual(['启动按钮', '五秒到点', '计数复位'])
+  })
+
+  it('实验四按上行与下行方向归纳', () => {
+    const chart = buildSfc(lab('course-4'))!
+    expect(chart.steps.map((step) => step.number)).toEqual(['0', '1', '2'])
+    expect(chart.steps[1].actions[0]).toEqual({ text: '上行方向', detail: 'M1.0=1、Q0.3=1' })
+    expect(chart.steps[2].actions[0]).toEqual({ text: '下行方向', detail: 'M1.1=1、Q0.4=1' })
+    expect(chart.edges.map((edge) => edge.label)).toEqual(['上行需求', '下行需求', '复位键 或 无下行需求'])
+  })
+
+  it('实验五按每一拍一步排出十八拍喷泉', () => {
+    const chart = buildSfc(lab('course-5'))!
+    expect(chart.steps).toHaveLength(19)
+    expect(chart.steps[1].actions[0].text).toBe('喷泉 1')
+    expect(chart.steps[18].actions[0].text).toBe('喷泉 1·2·3·4·5·6·7·8')
+    expect(new Set(chart.edges.map((edge) => edge.label)).size).toBe(2)
+  })
 
   it('实验三按定时器串出六步循环和初始步', () => {
     const chart = buildSfc(lab('course-3'))
@@ -162,8 +213,8 @@ describe('顺序功能图渲染', () => {
     expect(rendered.svg).not.toContain('NaN')
     expect(rendered.svg).toContain('<line x1="240" y1="188" x2="378" y2="188"')
     expect(rendered.svg).toContain('<rect x="378" y="159" width="200" height="58"')
-    expect(rendered.svg).toContain('<path d="M 136 986 H 110 V 188 H 127"')
-    expect(rendered.svg).toContain('<path d="M 136 986 H 70 V 74 H 127"')
+    expect(rendered.svg).toContain('<path d="M 168 1016 V 1042 H 70 V 74 H 127"')
+    expect(rendered.svg).toContain('<path d="M 168 1016 V 1066 H 110 V 188 H 127"')
     expect(rendered.width).toBeGreaterThan(600)
     expect(rendered.height).toBeGreaterThan(700)
     expect(rendered.svg.match(/<text/g)?.length ?? 0)

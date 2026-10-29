@@ -2856,7 +2856,7 @@ export default function App() {
     const chart = buildSfc(program)
     if (!chart) {
       notify(
-        '当前工程没有可识别的步骤位：变量名需形如 Step1…StepN（或注释写“第 N 步”），且至少两步。先按步骤位整理程序再导出顺序功能图',
+        '这个工程里找不到可归纳的步序：需要 Step1…StepN 这样的步骤位，或至少两个可识别的状态、节拍步骤',
         { tone: 'error' },
       )
       return
