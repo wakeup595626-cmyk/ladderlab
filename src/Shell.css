@@ -4119,7 +4119,10 @@ body[data-drag-kind] {
   top: calc(56px + 8px);
   right: 12px;
   z-index: 90;
-  width: min(304px, calc(100vw - 24px));
+  /* 宽度跟着最长的菜单项走，短标签不会把浮层撑成一大片。 */
+  width: max-content;
+  min-width: 188px;
+  max-width: min(272px, calc(100vw - 24px));
   max-height: calc(100dvh - 72px);
   overflow-y: auto;
   overscroll-behavior: contain;
@@ -4131,11 +4134,12 @@ body[data-drag-kind] {
   box-shadow: var(--shadow-overlay);
 }
 
+/* 每项一行：图标 + 标签，行高与顶栏其它下拉菜单一致。 */
 .wb-file-menu .wb-menu-group > button {
-  min-height: 48px;
-  align-items: center;
-  gap: 10px;
-  padding: 7px 10px;
+  min-height: 36px;
+  gap: 9px;
+  padding: 0 10px;
+  white-space: nowrap;
 }
 
 .wb-file-menu .wb-menu-group > button > svg {
@@ -4143,37 +4147,11 @@ body[data-drag-kind] {
   color: var(--accent);
 }
 
-/* 带说明的两行菜单项：图标顶格对齐标题，别浮在两行中间。 */
-.wb-file-menu .wb-menu-group > button:has(.wb-menu-item-copy small) {
-  align-items: flex-start;
-  padding-top: 9px;
-  padding-bottom: 9px;
-}
-
-.wb-file-menu .wb-menu-group > button:has(.wb-menu-item-copy small) > svg {
-  margin-top: 1px;
-}
-
-.wb-menu-item-copy {
-  display: grid;
-  min-width: 0;
-  gap: 2px;
-  line-height: 1.25;
-}
-
-.wb-menu-item-copy strong {
-  color: var(--text);
-  font-size: 12.5px;
-  font-weight: 600;
-}
-
-/* 菜单里每项的第二行说明：告诉学生这东西导出来是干嘛用的。 */
-.wb-menu-item-copy small {
-  color: var(--faint);
-  font-size: 11px;
-  font-weight: 400;
-  line-height: 1.35;
-  white-space: normal;
+/* 手指操作的屏幕保留 44px 点击高度。 */
+@media (pointer: coarse) {
+  .wb-file-menu .wb-menu-group > button {
+    min-height: 44px;
+  }
 }
 
 .wb-shell .wb-topbar:has(.wb-more-menu),
