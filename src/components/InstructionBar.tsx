@@ -302,7 +302,7 @@ export default function InstructionBar({
                   data-drag-handle
                   disabled={!allowed}
                   title={allowed
-                    ? entry.detail + '。' + placement
+                    ? entry.detail.replace(/。$/, '') + '。' + placement
                     : `${entry.label}在当前 ${activeProfile.shortName} 指令集中不可用`}
                   aria-label={allowed ? entry.label + '，' + placement : entry.label + ' 当前不可用'}
                   onClick={(event) => {
@@ -325,22 +325,18 @@ export default function InstructionBar({
                     onStartDrag(event, payload, shortLabel)
                   }}
                 >
-                  <span
-                    className="wb-instruction-symbol mono"
-                    key={flash?.id === id ? flash.nonce : 0}
-                    aria-hidden="true"
-                  >
+                  {/* 符号不再用 key 重挂载来重播动画：同一张卡里 key 与
+                      下面的按压光效撞号，React 会把旧节点留在原地，点几次
+                      就叠出几个“( )”。动画改由 .is-confirmed 类负责。 */}
+                  <span className="wb-instruction-symbol mono" aria-hidden="true">
                     {entry.symbol}
                   </span>
                   <span className="wb-instruction-label">{shortLabel}</span>
-                  {entry.family === 'output' && (
-                    <span className="wb-instruction-replace">替换</span>
-                  )}
                   <GripIcon size={14} className="wb-drag-mark" />
                   {flash?.id === id && (
                     <span
                       className="wb-instruction-press"
-                      key={flash.nonce}
+                      key={'press-' + flash.nonce}
                       aria-hidden="true"
                       style={{
                         '--press-x': `${flash.x}px`,
@@ -370,7 +366,7 @@ export default function InstructionBar({
                     onToggleFavorite(entry.family, entry.kind)
                   }}
                 >
-                  <StarFilledIcon size={15} />
+                  <StarFilledIcon size={16} />
                 </button>
               </div>
             )

@@ -449,14 +449,52 @@ export function PaletteIcon(props: IconProps) {
   )
 }
 
-/** 咖啡杯：杯身 + 杯把 + 杯垫横线，小尺寸下也能一眼认出是“喝一杯”。 */
-export function CoffeeIcon(props: IconProps) {
+/**
+ * 咖啡杯：杯身 + 杯把 + 杯垫横线，小尺寸下也能一眼认出是“喝一杯”。
+ * 杯身用奶咖渐变填充、杯口压一层奶沫，热气用暖橙，比纯线稿更像是
+ * 一杯真的咖啡；外轮廓仍跟随 currentColor，深浅主题都不会糊掉。
+ */
+export function CoffeeIcon({ size = 16, ...props }: IconProps) {
   return (
-    <IconBase {...props}>
-      <path d="M4.6 8.4h13.1v4.5a5.1 5.1 0 0 1-5.1 5.1h-2.9a5.1 5.1 0 0 1-5.1-5.1V8.4Z" />
-      <path d="M17.7 10.2h1.5a2.7 2.7 0 0 1 0 5.4h-1.5" />
-      <path d="M3.1 20.7h13.6" />
-      <path d="M8.4 3.1c-.8.9.8 1.4 0 2.4M12.3 3.1c-.8.9.8 1.4 0 2.4" />
-    </IconBase>
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      {...props}
+    >
+      <defs>
+        <linearGradient
+          id="ll-coffee-brew"
+          x1="4.6"
+          y1="8.2"
+          x2="17.7"
+          y2="18.4"
+          gradientUnits="userSpaceOnUse"
+        >
+          <stop stopColor="#F0D3AC" />
+          <stop offset="0.38" stopColor="#C88C58" />
+          <stop offset="1" stopColor="#8A5533" />
+        </linearGradient>
+      </defs>
+      <path
+        d="M4.6 8.4h13.1v4.5a5.1 5.1 0 0 1-5.1 5.1h-2.9a5.1 5.1 0 0 1-5.1-5.1V8.4Z"
+        fill="url(#ll-coffee-brew)"
+        stroke="currentColor"
+        strokeWidth="1.5"
+      />
+      <path d="M5.7 9.5h10.9" stroke="#F8E7CE" strokeWidth="1.5" strokeOpacity="0.92" />
+      <path d="M17.7 10.2h1.5a2.7 2.7 0 0 1 0 5.4h-1.5" stroke="#B5794A" strokeWidth="1.6" />
+      <path d="M3.1 20.7h13.6" stroke="#B5794A" strokeWidth="1.6" />
+      <path
+        d="M8.4 3.1c-.8.9.8 1.4 0 2.4M12.3 3.1c-.8.9.8 1.4 0 2.4"
+        stroke="#E08A3C"
+        strokeWidth="1.5"
+        strokeOpacity="0.92"
+      />
+    </svg>
   )
 }

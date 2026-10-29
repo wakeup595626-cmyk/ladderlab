@@ -349,6 +349,73 @@ check(
   selectedFavoriteFrame,
 )
 
+/* 连续点收藏只应追加画布元件，不能在收藏卡内部堆出多个符号；
+   输出卡中间也不再渲染“替换”小标签，避免把卡片撑得更复杂。 */
+await evaluate(`(() => {
+  const button = document.querySelector('.wb-instruction-card .wb-instruction-button')
+  if (!button) return false
+  for (let index = 0; index < 5; index += 1) button.click()
+  return true
+})()`)
+await sleep(900)
+const favoriteCardHygiene = await evaluate(`(() => {
+  const cards = [...document.querySelectorAll('.wb-instruction-card')]
+  return {
+    cards: cards.length,
+    maxSymbols: Math.max(0, ...cards.map((card) => card.querySelectorAll('.wb-instruction-symbol').length)),
+    replaceBadges: document.querySelectorAll('.wb-instruction-replace').length,
+    cardsShowingReplaceWord: cards.filter((card) => card.innerText.includes('替换')).length,
+  }
+})()`)
+check(
+  'favorites/repeated-clicks-keep-one-symbol',
+  favoriteCardHygiene.cards > 0
+    && favoriteCardHygiene.maxSymbols === 1
+    && favoriteCardHygiene.replaceBadges === 0
+    && favoriteCardHygiene.cardsShowingReplaceWord === 0,
+  favoriteCardHygiene,
+)
+
+/* 星标悬停只放大 SVG 本身：不能带动左侧分隔线旋转，也不能让星形被卡片裁掉。 */
+const starPoint = await evaluate(`(() => {
+  const button = document.querySelector('.wb-instruction-card .wb-instruction-star')
+  if (!button) return null
+  const box = button.getBoundingClientRect()
+  return { x: box.left + box.width / 2, y: box.top + box.height / 2 }
+})()`)
+if (starPoint) {
+  await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: starPoint.x, y: starPoint.y })
+  await sleep(320)
+}
+const starHover = await evaluate(`(() => {
+  const button = document.querySelector('.wb-instruction-card .wb-instruction-star')
+  const svg = button?.querySelector('svg')
+  if (!button || !svg) return null
+  const outer = button.getBoundingClientRect()
+  const inner = svg.getBoundingClientRect()
+  const style = getComputedStyle(svg)
+  return {
+    transform: style.transform,
+    contained: inner.left >= outer.left && inner.right <= outer.right
+      && inner.top >= outer.top && inner.bottom <= outer.bottom,
+    pathCount: svg.querySelectorAll('path').length,
+    width: inner.width,
+  }
+})()`)
+check(
+  'favorites/star-hover-scales-without-clipping',
+  Boolean(starHover)
+    && /^matrix\(1\.(?:2|3)\d*, 0, 0, 1\.(?:2|3)\d*, 0, 0\)$/.test(starHover.transform)
+    && starHover.contained
+    && starHover.pathCount === 1
+    && starHover.width >= 18,
+  starHover,
+)
+if (starPoint) {
+  await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 8, y: 8 })
+  await sleep(120)
+}
+
 const cursorRungId = await evaluate(
   `document.querySelector('.ll-rung.is-favorite-target')?.dataset.rungId ?? null`,
 )

@@ -476,7 +476,7 @@ export default function SupportBadge() {
             setOpen((value) => !value)
           }}
         >
-          <CoffeeIcon className="support-badge-icon" size={18} />
+          <CoffeeIcon className="support-badge-icon" size={20} />
         </button>
 
         <span

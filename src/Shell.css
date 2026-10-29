@@ -4352,16 +4352,6 @@ body[data-drag-kind] {
   color: var(--faint);
 }
 
-.wb-instruction-replace {
-  padding: 1px 4px;
-  border: 1px solid var(--warning);
-  border-radius: 2px;
-  background: var(--warning-wash);
-  color: var(--warning);
-  font-size: 10px;
-  font-weight: 600;
-}
-
 .sidebar-insert-target {
   display: flex;
   flex-direction: column;

@@ -458,11 +458,16 @@
 }
 
 .wb-instruction-star {
-  transform-origin: center;
   transition:
-    transform 180ms var(--ease-fluid),
     color 140ms linear,
     background-color 140ms linear;
+}
+
+.wb-instruction-star svg {
+  transform-origin: center;
+  transition:
+    transform 220ms var(--ease-fluid),
+    filter 220ms var(--ease-out);
 }
 
 .wb-construct-button svg,
@@ -569,13 +574,15 @@
     transform: translateX(2px);
   }
 
-  .wb-instruction-star:hover {
-    transform: scale(1.16) rotate(-8deg);
+  /* 只放大星形本身：按钮保持不动，右侧那根分隔线才不会跟着倾斜。 */
+  .wb-instruction-star:hover svg {
+    transform: scale(1.34);
+    filter: drop-shadow(0 1px 4px color-mix(in srgb, var(--accent) 62%, transparent));
   }
 
-  .wb-instruction-star:active {
-    transform: scale(0.88) rotate(3deg);
-    transition-duration: 80ms;
+  .wb-instruction-star:active svg {
+    transform: scale(0.94);
+    transition-duration: 90ms;
   }
 
   .wb-construct-button:hover svg {
