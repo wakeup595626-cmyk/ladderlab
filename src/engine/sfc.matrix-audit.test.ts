@@ -512,19 +512,19 @@ describe('4 置位复位步链', () => {
 describe('5 定时步链', () => {
   const chart = chartOf(timerProgram())
 
-  it('只有置位没有复位的步链走组合视图，定时与两盏灯一个不少', () => {
+  it('组合视图保留启动、步骤联锁与定时条件，动作一个不少', () => {
     const step = combinedStepOf(chart)
     expect(step.actions.map((action) => action.text)).toEqual([
-      '启动 时 第 1 步 置位',
-      'T1 计时 2s',
-      '两秒到 时 第 2 步 置位',
-      '一号灯',
-      '二号灯',
+      '启动 且 第 2 步=0 时 第 1 步 置位',
+      '第 1 步 时 T1 计时 2s',
+      '第 1 步 且 两秒到 时 第 2 步 置位',
+      '第 1 步 时 一号灯',
+      '第 2 步 时 二号灯',
     ])
   })
 
   it('第 1 步必须启动 T1（2s），否则「T1 到时」这条转移永远不会成立', () => {
-    expect(actionPairs(chart).map(([text]) => text)).toContain('T1 计时 2s')
+    expect(actionPairs(chart).map(([text]) => text)).toContain('第 1 步 时 T1 计时 2s')
   })
 })
 
@@ -711,12 +711,12 @@ describe('13 启保停加定时和运行灯', () => {
 describe('14 两触点同时到位的动作', () => {
   const chart = chartOf(andActionProgram())
 
-  it('两个步骤位只出现在各自的置位动作里，没有伪造出额外边', () => {
+  it('两个步骤位作为真实前置条件保留，没有伪造出额外边', () => {
     const step = combinedStepOf(chart)
     expect(actionsOf(chart, step.key)).toEqual([
-      ['启动 时 第 1 步 置位', 'M1.0=1'],
-      ['下一步 时 第 2 步 置位', 'M1.1=1'],
-      ['两步同时灯', 'Q0.0=1'],
+      ['启动 且 第 2 步=0 时 第 1 步 置位', 'M1.0=1'],
+      ['第 1 步 且 下一步 时 第 2 步 置位', 'M1.1=1'],
+      ['第 1 步 且 第 2 步 时 两步同时灯', 'Q0.0=1'],
     ])
   })
 

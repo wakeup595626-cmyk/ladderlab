@@ -181,6 +181,77 @@ describe('互斥状态的进入条件', () => {
   })
 })
 
+describe('组合视图的动作前置条件', () => {
+  it('两个普通触点必须同时满足时，两个条件都留在动作文案里', () => {
+    const chart = mustBuild({
+      schema: 1,
+      name: '双条件点灯',
+      profile: 'v21',
+      tags: [
+        tag('Enable', '%I0.0', '使能'),
+        tag('Ready', '%I0.1', '就绪'),
+        tag('Lamp', '%Q0.0', '点灯'),
+      ],
+      rungs: [
+        rung('g1', '', [contact('g1-a', 'Enable'), contact('g1-b', 'Ready')], {
+          kind: 'COIL',
+          tag: 'Lamp',
+        }),
+      ],
+    })
+
+    expect(chart.source).toBe('network')
+    expect(chart.steps[0].actions).toEqual([{ text: '使能 且 就绪 时 点灯', detail: 'Q0.0=1' }])
+  })
+
+  it('互斥状态位是动作分组依据，不再作为常开前置条件重复写进文案', () => {
+    const chart = mustBuild({
+      schema: 1,
+      name: '两组步骤位下的互斥状态',
+      profile: 'v21',
+      tags: [
+        tag('Start', '%I0.0', '启动'),
+        tag('Stop', '%I0.1', '停止'),
+        tag('Enable', '%I0.2', '使能'),
+        tag('WordA', '%MB10', 'A 组步骤', { kind: 'INT', initial: 0 }),
+        tag('Step1', '%M10.0', '第 1 步', { bitOf: 'WordA' }),
+        tag('Step2', '%M10.1', '第 2 步', { bitOf: 'WordA' }),
+        tag('WordB', '%MB11', 'B 组步骤', { kind: 'INT', initial: 0 }),
+        tag('Step3', '%M11.0', '第 3 步', { bitOf: 'WordB' }),
+        tag('Step4', '%M11.1', '第 4 步', { bitOf: 'WordB' }),
+        tag('StateA', '%M2.0', '状态 A'),
+        tag('StateB', '%M2.1', '状态 B'),
+        tag('Lamp', '%Q0.0', '点灯'),
+      ],
+      rungs: [
+        rung('s1', '', [contact('s1-a', 'Start')], { kind: 'SET', tag: 'Step1' }),
+        rung('s2', '', [contact('s2-a', 'Enable')], { kind: 'SET', tag: 'Step2' }),
+        rung('s3', '', [contact('s3-a', 'Start')], { kind: 'SET', tag: 'Step3' }),
+        rung('s4', '', [contact('s4-a', 'Enable')], { kind: 'SET', tag: 'Step4' }),
+        rung('l1', '', [contact('l1-a', 'Start'), contact('l1-b', 'StateB', 'NC')], {
+          kind: 'SET',
+          tag: 'StateA',
+        }),
+        rung('l2', '', [contact('l2-a', 'Stop')], { kind: 'RESET', tag: 'StateA' }),
+        rung('l3', '', [contact('l3-a', 'Enable'), contact('l3-b', 'StateA', 'NC')], {
+          kind: 'SET',
+          tag: 'StateB',
+        }),
+        rung('l4', '', [contact('l4-a', 'Stop')], { kind: 'RESET', tag: 'StateB' }),
+        rung('g1', '', [contact('g1-a', 'StateA'), contact('g1-b', 'Enable')], {
+          kind: 'COIL',
+          tag: 'Lamp',
+        }),
+      ],
+    })
+
+    // 两组步骤位都没有转移网络，强制走组合视图；互斥状态仍由 SET/RESET 识别。
+    expect(chart.source).toBe('network')
+    const lamp = chart.steps[0].actions.find((action) => action.detail === 'Q0.0=1')
+    expect(lamp?.text).toBe('使能 时 点灯')
+  })
+})
+
 describe('六个课程实验的图形规模', () => {
   it.each([
     ['course-1', 'state-tags', 6, 10],

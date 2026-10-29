@@ -188,7 +188,7 @@ describe('自建工程顺序功能图：三种不同结构', () => {
     expect(chart.edges).toHaveLength(3)
   })
 
-  it('三步置位流程没有可证明的状态链，统一收进组合逻辑', () => {
+  it('三步置位流程没有可证明的状态链，组合逻辑保留全部条件', () => {
     const chart = mustBuild(threeStepJumpProgram())
     expect(chart.source).toBe('network')
     expect(chart.kind).toBe('combined')
@@ -200,13 +200,13 @@ describe('自建工程顺序功能图：三种不同结构', () => {
       initial: true,
     })
     expect(chart.steps[0].actions.map((action) => action.text)).toEqual([
-      '启动循环 时 第 1 步，配料 置位',
-      '配料完成 时 第 2 步，加热 置位',
-      '（越级跳转 或 正常完成） 时 第 3 步，报警 置位',
-      '循环结束 时 第 1 步，配料 置位',
-      '配料泵',
-      '加热器',
-      '报警灯',
+      '启动循环 且 Step2=0 且 Step3=0 时 第 1 步，配料 置位',
+      'Step1 且 配料完成 时 第 2 步，加热 置位',
+      '（Step1 且 越级跳转 或 Step2 且 正常完成） 时 第 3 步，报警 置位',
+      'Step3 且 循环结束 时 第 1 步，配料 置位',
+      'Step1 时 配料泵',
+      'Step2 时 加热器',
+      'Step3 时 报警灯',
     ])
     expect(chart.edges).toEqual([])
   })
@@ -443,7 +443,7 @@ describe('自建工程顺序功能图：不伪造拓扑', () => {
     expect(chart.steps).toHaveLength(1)
     expect(chart.steps[0].actions).toEqual([
       { text: '重启 时 第 1 步 置位', detail: 'M1.0=1' },
-      { text: '来料就绪 时 第 3 步 置位', detail: 'M3.0=1' },
+      { text: '第 1 步 且 第 2 步 且 来料就绪 时 第 3 步 置位', detail: 'M3.0=1' },
     ])
     expect(chart.edges).toEqual([])
   })
@@ -454,8 +454,8 @@ describe('自建工程顺序功能图：不伪造拓扑', () => {
     expect(chart.kind).toBe('combined')
     expect(chart.steps).toHaveLength(1)
     expect(chart.steps[0].actions).toEqual([
-      { text: '启动推进 时 第 2 步 置位', detail: 'M2.0=1' },
-      { text: '本步完成 时 第 3 步 置位', detail: 'M3.0=1' },
+      { text: '第 1 步 且 启动推进 时 第 2 步 置位', detail: 'M2.0=1' },
+      { text: '第 2 步 且 本步完成 时 第 3 步 置位', detail: 'M3.0=1' },
       { text: '故障信号 时 第 2 步 复位', detail: 'M2.0=0' },
     ])
     expect(chart.edges).toEqual([])
@@ -501,9 +501,9 @@ describe('自建工程顺序功能图：不伪造拓扑', () => {
     expect(chart.kind).toBe('combined')
     expect(chart.container).toBeUndefined()
     expect(chart.steps[0].actions.map((action) => action.text)).toEqual([
-      '推进按钮 时 第 2 步 置位',
-      '推进按钮 时 第 3 步 置位',
-      '推进按钮 时 第 4 步 置位',
+      '第 1 步 且 推进按钮 时 第 2 步 置位',
+      '第 2 步 且 推进按钮 时 第 3 步 置位',
+      '第 3 步 且 推进按钮 时 第 4 步 置位',
     ])
     expect(chart.edges).toEqual([])
   })

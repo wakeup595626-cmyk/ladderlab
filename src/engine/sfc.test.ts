@@ -224,11 +224,11 @@ describe('顺序功能图归纳', () => {
     expect(chart!.steps).toHaveLength(1)
     expect(chart!.edges).toEqual([])
     expect(chart!.steps[0].actions.map((action) => action.text)).toEqual([
-      '运行状态 时 第 1 步 置位',
-      '第 2 步 置位',
-      '第 1 步 置位',
-      '一号灯',
-      '二号灯',
+      '运行状态 且 第 2 步=0 时 第 1 步 置位',
+      '第 1 步 时 第 2 步 置位',
+      '第 2 步 时 第 1 步 置位',
+      '第 1 步 时 一号灯',
+      '第 2 步 时 二号灯',
     ])
   })
 
@@ -307,7 +307,7 @@ describe('顺序功能图渲染', () => {
     expect(svgTexts.some((line) => line.includes('自动'))).toBe(true)
     expect(svgTexts.some((line) => line.includes('一秒节拍'))).toBe(true)
     expect(rendered.svg).toContain('单步 H 且 SD 保持')
-    expect(rendered.svg).toContain('SD=0 清工位')
+    expect(svgTexts.join('').replace(/\s/g, '')).toContain('SD=0清工位')
     expect(rendered.svg).toContain('全部工位输出关闭')
     expect(rendered.svg).toContain('工位 D')
     expect(rendered.svg).toContain('Q0.3=1')
@@ -363,7 +363,7 @@ describe('顺序功能图渲染', () => {
       .toBe('H 完成·SD=0·单步 或 自动')
   })
 
-  it('两条回跳到同一步时，左侧条件自动错开不重叠', () => {
+  it('回跳条件同列右对齐、纵向错开不重叠', () => {
     const chart: SfcChart = {
       programName: '同目标回跳',
       source: 'network',
@@ -389,9 +389,9 @@ describe('顺序功能图渲染', () => {
     expect(labels).toHaveLength(2)
     const ys = labels.map((match) => Number(match[2]))
     expect(Math.abs(ys[0] - ys[1])).toBeGreaterThanOrEqual(13)
-    // 每条回跳的条件贴着自己那条竖线，两条线相差一个通道间距。
+    // 回跳条件统一落在同一个右对齐标签槽：x 相同，靠 y 错开避免重叠。
     const xs = labels.map((match) => Number(match[1]))
-    expect(Math.abs(xs[0] - xs[1])).toBeGreaterThanOrEqual(30)
+    expect(xs[0]).toBe(xs[1])
     expect(Math.min(...xs)).toBeGreaterThan(0)
     expect(rendered.svg).not.toContain('NaN')
     expect(rendered.width).toBeGreaterThan(0)

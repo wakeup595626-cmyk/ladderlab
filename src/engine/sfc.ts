@@ -1888,9 +1888,12 @@ function buildNetworkChart(ctx: Context): SfcChart | null {
   // 没有输出变量的网络不算一步，跳过；全空说明还没有可归纳的梯形图。
   const rungs = ctx.rungs.filter((rung) => rung.output.tag.trim() !== '')
   if (rungs.length === 0) return null
+  // 互斥状态之间的常闭联锁只是另一状态未激活的替代表达，组合视图已用各自
+  // 的动作条件区分状态，不必再写成「无某状态」；普通步骤位和现场信号必须保留。
+  const stateNames = new Set(mutexGroups(collectLatches(ctx)).flat())
   const actions: SfcAction[] = []
   for (const rung of rungs) {
-    const skip = new Set(ctx.stepByTag.keys())
+    const skip = new Set(stateNames)
     skip.add(rung.output.tag)
     const guard = compactNodes(rung.nodes, ctx, skip)
     const action = outputAction(rung.output, ctx)
