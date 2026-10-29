@@ -273,6 +273,30 @@ export function ArrowRightIcon(props: IconProps) {
   )
 }
 
+export function ArrowUpRightIcon(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <path d="M7.5 16.5 16.5 7.5M9.2 7.5h7.3v7.3" />
+    </IconBase>
+  )
+}
+
+/** GitHub 品牌标是实心路径，单独画一层，免得 IconBase 的描边在小尺寸下发虚。 */
+export function GithubIcon({ size = 16, ...props }: IconProps) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      aria-hidden="true"
+      {...props}
+    >
+      <path d="M12 .3a12 12 0 0 0-3.8 23.4c.6.1.8-.3.8-.6v-2.2c-3.3.7-4-1.6-4-1.6-.6-1.4-1.4-1.8-1.4-1.8-1.1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1.1 1.9 2.8 1.3 3.5 1 .1-.8.4-1.3.8-1.6-2.7-.3-5.5-1.3-5.5-5.9 0-1.3.5-2.4 1.2-3.2-.1-.3-.5-1.5.1-3.2 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0c2.3-1.5 3.3-1.2 3.3-1.2.6 1.7.2 2.9.1 3.2.8.8 1.2 1.9 1.2 3.2 0 4.6-2.8 5.6-5.5 5.9.4.4.8 1.1.8 2.2v3.3c0 .3.2.7.8.6A12 12 0 0 0 12 .3Z" />
+    </svg>
+  )
+}
+
 /** 打开分支：主线路末尾向下分出一条支路。 */
 export function BranchIcon(props: IconProps) {
   return (

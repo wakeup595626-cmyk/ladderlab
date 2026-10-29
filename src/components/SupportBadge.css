@@ -127,11 +127,11 @@
 
 .support-badge-panel {
   position: fixed;
-  width: 264px;
+  width: 300px;
   max-width: calc(100vw - 16px);
   overflow-y: auto;
   overscroll-behavior: contain;
-  padding: 12px;
+  padding: 14px 16px;
   border: 1px solid var(--border);
   border-radius: var(--radius-card);
   background: var(--surface);
@@ -155,31 +155,33 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  margin-bottom: 6px;
+  gap: 10px;
+  margin-bottom: 8px;
 }
 
 .support-badge-head h2 {
   margin: 0;
   color: var(--frame-ink);
-  font-size: 13.5px;
+  font-size: 14px;
   font-weight: 600;
   letter-spacing: 0.01em;
 }
 
 .support-badge-close {
   display: grid;
-  width: 26px;
-  height: 26px;
+  width: 24px;
+  height: 24px;
   flex: 0 0 auto;
   place-items: center;
   border: 1px solid transparent;
   border-radius: var(--radius-control);
   background: transparent;
   color: var(--faint);
-  font-size: 16px;
-  line-height: 1;
   cursor: pointer;
+}
+
+.support-badge-close svg {
+  display: block;
 }
 
 @media (hover: hover) and (pointer: fine) {
@@ -191,61 +193,82 @@
 }
 
 .support-badge-copy {
-  margin: 0 0 10px;
+  margin: 0;
   color: var(--muted);
-  font-size: 11.5px;
-  line-height: 1.55;
+  font-size: 12px;
+  line-height: 1.7;
+  text-wrap: pretty;
+}
+
+/* 二维码图片自带白色卡纸和蓝色描边，这里只做一块浅色托盘，避免再套一层边框。 */
+.support-badge-scan {
+  display: grid;
+  gap: 8px;
+  justify-items: center;
+  margin: 12px 0 0;
+  padding: 12px 12px 10px;
+  border-radius: var(--radius-card);
+  background: var(--raised);
 }
 
 .support-badge-qr {
-  width: min(100%, 168px);
-  margin: 0 auto;
-  padding: 8px;
-  border: 1px solid var(--rule);
-  border-radius: var(--radius-control);
-  background: #fff;
-  text-align: center;
-}
-
-.support-badge-qr img {
   display: block;
-  width: 100%;
+  width: 168px;
+  max-width: 100%;
   height: auto;
-  border-radius: 2px;
+  border-radius: 6px;
+  background: #fff;
 }
 
-.support-badge-qr figcaption {
-  margin-top: 6px;
+.support-badge-scan figcaption {
   color: var(--faint);
   font-size: 11px;
-  line-height: 1.4;
+  line-height: 1.5;
+  text-align: center;
 }
 
 .support-badge-actions {
   display: grid;
-  grid-template-columns: 1fr auto;
   gap: 6px;
-  margin-top: 10px;
+  margin-top: 12px;
 }
 
 .support-badge-link {
-  display: inline-flex;
-  min-height: 32px;
+  display: flex;
+  min-height: 36px;
   align-items: center;
-  justify-content: center;
-  gap: 4px;
-  padding: 0 10px;
+  gap: 8px;
+  padding: 0 12px;
   border: 1px solid var(--border);
   border-radius: var(--radius-control);
   background: var(--raised);
   color: var(--muted);
-  font-size: 11.5px;
+  font-size: 12px;
   font-weight: 500;
   text-decoration: none;
   transition:
     background-color var(--dur-quick) var(--ease-out),
     border-color var(--dur-quick) var(--ease-out),
     color var(--dur-quick) var(--ease-out);
+}
+
+.support-badge-link svg {
+  display: block;
+  flex: 0 0 auto;
+}
+
+.support-badge-link-label {
+  flex: 1 1 auto;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.support-badge-link-tail {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
 }
 
 .support-badge-link.is-primary {
@@ -256,9 +279,9 @@
 }
 
 .support-badge-count {
-  padding: 1px 5px;
+  padding: 1px 6px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.2);
   font-size: 10px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;

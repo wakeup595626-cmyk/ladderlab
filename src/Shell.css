@@ -695,14 +695,17 @@ body[data-drag-kind] {
 }
 
 .wb-all-mark {
-  display: inline-grid;
+  display: grid;
   width: 25px;
   height: 25px;
+  flex: 0 0 auto;
   place-items: center;
   border: 1px solid var(--control);
   border-radius: 4px;
-  font-size: 17px;
-  line-height: 1;
+}
+
+.wb-all-mark svg {
+  display: block;
 }
 
 .wb-instruction-button.is-all {
@@ -2674,7 +2677,6 @@ body[data-drag-kind] {
   border-color: var(--control);
   border-radius: 2px;
   background: var(--surface);
-  font-size: 15px;
 }
 
 .wb-coach {

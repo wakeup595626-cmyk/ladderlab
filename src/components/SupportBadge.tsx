@@ -11,6 +11,12 @@ import {
 } from 'react'
 import './SupportBadge.css'
 import alipayQr from '../assets/support-alipay.png'
+import {
+  ArrowUpRightIcon,
+  CloseIcon,
+  GithubIcon,
+  StarFilledIcon,
+} from './Icons'
 
 const GITHUB_PROFILE = 'https://github.com/wakeup595626-cmyk'
 const GITHUB_REPO = 'https://github.com/wakeup595626-cmyk/ladderlab'
@@ -27,7 +33,7 @@ const DEFAULT_ANCHOR = { x: 0, y: 1 }
 const MOUSE_THRESHOLD = 4
 const TOUCH_THRESHOLD = 8
 const PANEL_GAP = 10
-const PANEL_WIDTH = 264
+const PANEL_WIDTH = 300
 const FALLBACK_GAP = 12
 const FALLBACK_BOTTOM = 46
 
@@ -531,16 +537,25 @@ export default function SupportBadge() {
               aria-label="收起打赏面板"
               onClick={() => close(true)}
             >
-              ×
+              <CloseIcon size={14} />
             </button>
           </header>
 
           <p className="support-badge-copy">
-            这个工具免费、不插广告，靠业余时间维护。如果它帮你省了一晚上的调试，可以请作者喝杯咖啡。
+            免费、没有广告，靠业余时间维护。
+            <br />
+            如果它帮到了你，可以请作者喝杯咖啡。
           </p>
 
-          <figure className="support-badge-qr">
-            <img src={alipayQr} alt="支付宝收款二维码，收款人显示为「树」" width={640} height={727} />
+          <figure className="support-badge-scan">
+            <img
+              className="support-badge-qr"
+              src={alipayQr}
+              alt="支付宝收款二维码，收款人显示为「树」"
+              width={640}
+              height={727}
+              draggable={false}
+            />
             <figcaption>打开支付宝「扫一扫」即可</figcaption>
           </figure>
 
@@ -551,13 +566,16 @@ export default function SupportBadge() {
               target="_blank"
               rel="noopener noreferrer"
             >
-              给项目点个 Star
-              {stars !== null && (
-                <span className="support-badge-count" aria-label={'当前 ' + stars + ' 个'}>
-                  {formatStarCount(stars)}
-                </span>
-              )}
-              <span aria-hidden="true">↗</span>
+              <StarFilledIcon size={14} />
+              <span className="support-badge-link-label">给项目点个 Star</span>
+              <span className="support-badge-link-tail">
+                {stars !== null && (
+                  <span className="support-badge-count" aria-label={'当前 ' + stars + ' 个 Star'}>
+                    {formatStarCount(stars)}
+                  </span>
+                )}
+                <ArrowUpRightIcon size={13} />
+              </span>
             </a>
             <a
               className="support-badge-link"
@@ -565,7 +583,11 @@ export default function SupportBadge() {
               target="_blank"
               rel="noopener noreferrer"
             >
-              GitHub 主页
+              <GithubIcon size={14} />
+              <span className="support-badge-link-label">作者 GitHub 主页</span>
+              <span className="support-badge-link-tail">
+                <ArrowUpRightIcon size={13} />
+              </span>
             </a>
           </div>
         </section>

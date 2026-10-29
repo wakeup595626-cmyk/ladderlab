@@ -21,6 +21,7 @@ import {
   ChevronRightIcon,
   GripIcon,
   MergeIcon,
+  PlusIcon,
   StarFilledIcon,
 } from './Icons'
 import InsertTargetControl from './InsertTargetControl'
@@ -400,7 +401,9 @@ export default function InstructionBar({
           aria-label="打开全部指令"
           title="搜索全部指令"
         >
-          <span className="wb-all-mark" aria-hidden="true">+</span>
+          <span className="wb-all-mark" aria-hidden="true">
+            <PlusIcon size={12} strokeWidth={2.1} />
+          </span>
           <span className="wb-instruction-label">全部指令</span>
           <ChevronRightIcon size={15} aria-hidden="true" />
         </button>

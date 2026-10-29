@@ -473,7 +473,6 @@
 }
 
 .wb-instruction-button.is-all .wb-all-mark {
-  display: inline-flex;
   transform-origin: center;
   transition: transform 200ms var(--ease-fluid);
 }
@@ -587,7 +586,7 @@
     transform: rotate(90deg) scale(1.05);
   }
 
-  .wb-instruction-button.is-all:hover svg,
+  .wb-instruction-button.is-all:hover > svg,
   .wb-instruction-scroll:hover svg {
     transform: translateX(2px);
   }
