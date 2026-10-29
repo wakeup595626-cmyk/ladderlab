@@ -4137,6 +4137,17 @@ body[data-drag-kind] {
   color: var(--accent);
 }
 
+/* 带说明的两行菜单项：图标顶格对齐标题，别浮在两行中间。 */
+.wb-file-menu .wb-menu-group > button:has(.wb-menu-item-copy small) {
+  align-items: flex-start;
+  padding-top: 9px;
+  padding-bottom: 9px;
+}
+
+.wb-file-menu .wb-menu-group > button:has(.wb-menu-item-copy small) > svg {
+  margin-top: 1px;
+}
+
 .wb-menu-item-copy {
   display: grid;
   min-width: 0;
@@ -4148,6 +4159,15 @@ body[data-drag-kind] {
   color: var(--text);
   font-size: 12.5px;
   font-weight: 600;
+}
+
+/* 菜单里每项的第二行说明：告诉学生这东西导出来是干嘛用的。 */
+.wb-menu-item-copy small {
+  color: var(--faint);
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.35;
+  white-space: normal;
 }
 
 .wb-shell .wb-topbar:has(.wb-more-menu),

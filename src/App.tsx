@@ -59,7 +59,14 @@ import type {
 } from './engine/types'
 import type { DragPayload, DropTarget } from './lib/dragTypes'
 import { downloadDataUrl, downloadText, parseProgramText, serializeProgram } from './lib/io'
-import { decodeProgramShare, isShareProgramHash } from './lib/shareLink'
+import { copyText } from './lib/clipboard'
+import {
+  buildShareUrl,
+  decodeProgramShare,
+  encodeProgramShare,
+  isShareProgramHash,
+  SHARE_LINK_SOFT_LIMIT,
+} from './lib/shareLink'
 import { saveLatestNamedProject } from './lib/latestProjectSave'
 import {
   deleteSavedProject as removeSavedProjectFromLibrary,
@@ -2655,6 +2662,38 @@ export default function App() {
     notify('工程 JSON 已导出')
   }
 
+  // 分享链接就是“导出”的另一种形态：文件要给对方传，链接点开就到。
+  // 注意它不需要服务器——整份工程压在 # 后面，GitHub Pages 收不到也不影响。
+  const copyShareLink = async () => {
+    let url: string
+    try {
+      url = buildShareUrl(window.location, await encodeProgramShare(program))
+    } catch (reason) {
+      notify(`分享链接没生成成功：${reason instanceof Error ? reason.message : '未知原因'}`, {
+        tone: 'error',
+      })
+      return
+    }
+    if (!(await copyText(url))) {
+      // 浏览器拒绝写剪贴板时，至少让学生能打开地址栏自己复制。
+      notify('链接已生成，但浏览器不让自动复制；打开后从地址栏复制即可', {
+        tone: 'error',
+        action: { label: '打开链接', run: () => window.open(url, '_blank', 'noopener') },
+      })
+      return
+    }
+    if (url.length > SHARE_LINK_SOFT_LIMIT) {
+      notify(
+        `已复制，但链接有 ${url.length} 字，微信可能截断；工程较大时改用「工程文件（.json）」更稳`,
+        { tone: 'error' },
+      )
+      return
+    }
+    notify(`分享链接已复制（${url.length} 字），同学打开就是这几段梯形图`, {
+      action: { label: '打开看看', run: () => window.open(url, '_blank', 'noopener') },
+    })
+  }
+
   const applyImportedProject = (imported: Program) => {
     const opened = ensureTrailingBlankRung(imported)
     commit(opened)
@@ -3092,6 +3131,7 @@ export default function App() {
         onImportProject={() => setImportOpen(true)}
         onExportProject={exportProject}
         onExportImage={startImageExport}
+        onCopyShareLink={() => void copyShareLink()}
         onGuide={() => setGuideOpen(true)}
         onAbout={() => setAboutOpen(true)}
         theme={theme}

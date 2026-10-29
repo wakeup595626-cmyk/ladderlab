@@ -110,6 +110,16 @@ export function UndoIcon(props: IconProps) {
   )
 }
 
+/** 分享链接的链环：和“导出文件”的箭头形区分开，免得两个入口看着一样。 */
+export function LinkIcon(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <path d="M10.6 13.4a3.6 3.6 0 0 0 5.1 0l2.4-2.4a3.6 3.6 0 0 0-5.1-5.1l-1.2 1.2" />
+      <path d="M13.4 10.6a3.6 3.6 0 0 0-5.1 0l-2.4 2.4a3.6 3.6 0 0 0 5.1 5.1l1.2-1.2" />
+    </IconBase>
+  )
+}
+
 export function RedoIcon(props: IconProps) {
   return (
     <IconBase {...props}>

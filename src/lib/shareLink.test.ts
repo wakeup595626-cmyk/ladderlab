@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { Program } from '../engine/types'
 import { parseProgramText, serializeProgram } from './io'
 import {
+  buildShareUrl,
   decodeProgramShare,
   encodeProgramShare,
   isShareProgramHash,
@@ -74,5 +75,11 @@ describe('分享链接', () => {
     const body = btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
     await expect(decodeProgramShare(`#p=0.${body}`)).rejects.toThrow('分享链接里的工程无法导入')
     expect(() => parseProgramText(JSON.stringify(bad))).toThrow()
+  })
+
+  it('拼出的地址忽略查询参数，只保留站点路径和工程片段', async () => {
+    const hash = await encodeProgramShare(sample)
+    expect(buildShareUrl({ origin: 'https://example.com', pathname: '/ladderlab/' }, hash))
+      .toBe(`https://example.com/ladderlab/${hash}`)
   })
 })

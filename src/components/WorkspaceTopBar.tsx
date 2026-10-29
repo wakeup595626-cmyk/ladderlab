@@ -13,6 +13,7 @@ import {
   ImportIcon,
   InfoIcon,
   LadderIcon,
+  LinkIcon,
   MoreIcon,
   PaletteIcon,
   PauseIcon,
@@ -49,6 +50,7 @@ export interface WorkspaceTopBarProps {
   onImportProject: () => void
   onExportProject: () => void
   onExportImage: (mode: 'complete' | 'plain') => void
+  onCopyShareLink: () => void
   onNewProject: () => void
   onGuide: () => void
   onAbout: () => void
@@ -79,6 +81,7 @@ export default function WorkspaceTopBar({
   onImportProject,
   onExportProject,
   onExportImage,
+  onCopyShareLink,
   onNewProject,
   onGuide,
   onAbout,
@@ -475,22 +478,35 @@ export default function WorkspaceTopBar({
                 <button type="button" role="menuitem" onClick={() => chooseFileMenuAction(onExportProject)}>
                   <ExportIcon size={16} />
                   <span className="wb-menu-item-copy">
-                    <strong>工程文件</strong>
+                    <strong>工程文件（.json）</strong>
+                    <small>下载到电脑，可以再导入；换设备、交作业用这份</small>
+                  </span>
+                </button>
+              </div>
+              <div className="wb-menu-group" role="group" aria-label="分享">
+                <span className="wb-menu-label">分享给同学</span>
+                <button type="button" role="menuitem" onClick={() => chooseFileMenuAction(onCopyShareLink)}>
+                  <LinkIcon size={16} />
+                  <span className="wb-menu-item-copy">
+                    <strong>复制分享链接</strong>
+                    <small>复制一条网址，同学点开就是这张梯形图，不用传文件</small>
                   </span>
                 </button>
               </div>
               <div className="wb-menu-group" role="group" aria-label="PNG 图片">
-                <span className="wb-menu-label">PNG 图片 · 纯白背景</span>
+                <span className="wb-menu-label">PNG 图片 · 纯白背景，可直接贴进论文</span>
                 <button type="button" role="menuitem" onClick={() => chooseFileMenuAction(() => onExportImage('complete'))}>
                   <ImageIcon size={16} />
                   <span className="wb-menu-item-copy">
                     <strong>完整程序 PNG</strong>
+                    <small>带工程名和每段注释，像一份完整图纸</small>
                   </span>
                 </button>
                 <button type="button" role="menuitem" onClick={() => chooseFileMenuAction(() => onExportImage('plain'))}>
                   <ImageIcon size={16} />
                   <span className="wb-menu-item-copy">
                     <strong>纯梯形图 PNG</strong>
+                    <small>只有梯形图本身，自己排版时用</small>
                   </span>
                 </button>
               </div>
@@ -509,30 +525,58 @@ export default function WorkspaceTopBar({
                 <span className="wb-menu-label">工程</span>
                 <button type="button" role="menuitem" onClick={() => chooseFileMenuAction(onOpenProject)}>
                   <FolderIcon size={16} />
-                  <span>项目、变量表与实验库</span>
+                  <span className="wb-menu-item-copy">
+                    <strong>项目、变量表与实验库</strong>
+                    <small>打开本机存过的工程、变量表和课程实验</small>
+                  </span>
                 </button>
                 <button type="button" role="menuitem" onClick={() => chooseFileMenuAction(onNewProject)}>
                   <PlusIcon size={16} />
-                  <span>新建空白工程</span>
+                  <span className="wb-menu-item-copy">
+                    <strong>新建空白工程</strong>
+                    <small>从一张空白图纸重新画</small>
+                  </span>
                 </button>
                 <button type="button" role="menuitem" onClick={() => chooseFileMenuAction(onImportProject)}>
                   <ImportIcon size={16} />
-                  <span>导入工程文件</span>
+                  <span className="wb-menu-item-copy">
+                    <strong>导入工程文件</strong>
+                    <small>选 .json 文件，或直接粘贴工程内容</small>
+                  </span>
                 </button>
                 <button type="button" role="menuitem" onClick={() => chooseFileMenuAction(onExportProject)}>
                   <ExportIcon size={16} />
-                  <span>导出工程 JSON</span>
+                  <span className="wb-menu-item-copy">
+                    <strong>导出工程文件（.json）</strong>
+                    <small>下载到电脑，可以再导入；交作业用这份</small>
+                  </span>
+                </button>
+              </div>
+              <div className="wb-menu-group" role="group" aria-label="分享">
+                <span className="wb-menu-label">分享给同学</span>
+                <button type="button" role="menuitem" onClick={() => chooseFileMenuAction(onCopyShareLink)}>
+                  <LinkIcon size={16} />
+                  <span className="wb-menu-item-copy">
+                    <strong>复制分享链接</strong>
+                    <small>复制一条网址，同学点开就是这张梯形图</small>
+                  </span>
                 </button>
               </div>
               <div className="wb-menu-group" role="group" aria-label="PNG 图片">
                 <span className="wb-menu-label">PNG 图片 · 纯白背景</span>
                 <button type="button" role="menuitem" onClick={() => chooseFileMenuAction(() => onExportImage('complete'))}>
                   <ImageIcon size={16} />
-                  <span>完整程序 PNG</span>
+                  <span className="wb-menu-item-copy">
+                    <strong>完整程序 PNG</strong>
+                    <small>带工程名和每段注释，像一份完整图纸</small>
+                  </span>
                 </button>
                 <button type="button" role="menuitem" onClick={() => chooseFileMenuAction(() => onExportImage('plain'))}>
                   <ImageIcon size={16} />
-                  <span>纯梯形图 PNG</span>
+                  <span className="wb-menu-item-copy">
+                    <strong>纯梯形图 PNG</strong>
+                    <small>只有梯形图本身，自己排版时用</small>
+                  </span>
                 </button>
               </div>
             </div>

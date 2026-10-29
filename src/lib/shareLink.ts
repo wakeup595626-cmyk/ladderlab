@@ -22,6 +22,14 @@ export function isShareProgramHash(hash: string): boolean {
   return hash.startsWith(HASH_PREFIX) && hash.length > HASH_PREFIX.length + 2
 }
 
+/**
+ * 拼出可以直接发出去的完整地址：站点路径 + 分享片段。
+ * 丢掉原来的查询参数，避免把别人手上的旧参数一起传下去。
+ */
+export function buildShareUrl(location: { origin: string; pathname: string }, hash: string): string {
+  return `${location.origin}${location.pathname}${hash}`
+}
+
 function toBase64Url(bytes: Uint8Array): string {
   let binary = ''
   const chunk = 0x8000

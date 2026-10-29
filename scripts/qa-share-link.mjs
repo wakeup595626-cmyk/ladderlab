@@ -142,6 +142,50 @@ try {
   check(typeof bad.toast === 'string' && bad.toast.length > 0, '坏链接应有提示', bad.toast)
   steps.push({ step: '打开损坏的链接', projectName: bad.projectName, toast: bad.toast })
 
+  // 5. 反向：导出菜单里的“复制分享链接”要能拿到当前工程的地址。
+  // 无头浏览器读不到系统剪贴板，所以在 writeText 上装个探针把入参接住；
+  // 链接本身仍然靠后面打开它来验证，不是只看字符串。
+  const probed = await evaluate(`(() => {
+    window.__qaCopied = null
+    const clipboard = navigator.clipboard
+    if (!clipboard?.writeText) return false
+    const original = clipboard.writeText.bind(clipboard)
+    clipboard.writeText = async (text) => {
+      window.__qaCopied = text
+      try { await original(text) } catch { /* 无头环境写不进系统剪贴板不影响验收 */ }
+    }
+    return true
+  })()`)
+  check(probed, '浏览器应提供剪贴板接口', probed)
+  await evaluate(`document.querySelector('.wb-export-trigger')?.click()`)
+  await waitFor('!!document.querySelector("#topbar-export-menu")', '导出菜单展开')
+  const shareItem = await evaluate(`(() => {
+    const items = Array.from(document.querySelectorAll('#topbar-export-menu [role="menuitem"]'))
+    const target = items.find((item) => (item.textContent ?? '').includes('复制分享链接'))
+    if (!target) return null
+    target.click()
+    return (target.textContent ?? '').trim()
+  })()`)
+  check(shareItem !== null, '导出菜单里应有「复制分享链接」', shareItem)
+  await waitFor(
+    `(document.querySelector('.toast-message')?.textContent ?? '').includes('已复制')`,
+    '复制成功提示',
+  )
+  const copied = await evaluate('window.__qaCopied')
+  check(typeof copied === 'string' && copied.startsWith(`${BASE}#p=1.`), '剪贴板里应是一条分享链接', copied?.slice(0, 64))
+
+  if (typeof copied === 'string' && copied.startsWith(BASE)) {
+    await send('Page.navigate', { url: copied })
+    await waitFor('!!document.querySelector(".confirm-dialog")', '复制出的链接弹出导入窗')
+    const copiedDialog = await evaluate(dialogState)
+    check(copiedDialog.title.includes(program.name), '复制出的链接应指向当前工程', copiedDialog.title)
+    steps.push({
+      step: '导出菜单复制分享链接',
+      linkLength: copied.length,
+      dialog: copiedDialog.title,
+    })
+  }
+
   check(errors.length === 0, '控制台不应有异常', errors.slice(0, 3))
 } finally {
   await closeQaPage(CDP, target.id)
