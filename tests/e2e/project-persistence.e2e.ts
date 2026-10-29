@@ -6,9 +6,10 @@ test('命名保存的项目在刷新后仍能从本机项目库打开', async ({
   await openHome(page)
 
   await page.getByRole('button', { name: '新建空白工程' }).click()
-  const newProjectConfirm = page.getByRole('dialog', { name: '新建空白工程？' })
-  await expect(newProjectConfirm).toBeVisible()
-  await newProjectConfirm.getByRole('button', { name: '新建', exact: true }).click()
+  const newProjectDialog = page.getByRole('dialog', { name: '新建工程' })
+  await expect(newProjectDialog).toBeVisible()
+  await newProjectDialog.locator('#new-project-name').fill('未命名工程')
+  await newProjectDialog.getByRole('button', { name: '新建', exact: true }).click()
 
   await page.getByRole('button', { name: '保存到本机项目库' }).click()
   const saveDialog = page.getByRole('dialog', { name: '保存工程' })
@@ -26,7 +27,10 @@ test('命名保存的项目在刷新后仍能从本机项目库打开', async ({
 
   // 切到空白工程，再从项目库把具名工程打开，证明条目真的可用而不只是被列出来。
   await page.getByRole('button', { name: '新建空白工程' }).click()
-  await page.getByRole('dialog', { name: '新建空白工程？' }).getByRole('button', { name: '新建', exact: true }).click()
+  const blankDialog = page.getByRole('dialog', { name: '新建工程' })
+  await expect(blankDialog).toBeVisible()
+  await blankDialog.locator('#new-project-name').fill('未命名工程 2')
+  await blankDialog.getByRole('button', { name: '新建', exact: true }).click()
   await expect(page.locator('#project-name')).not.toHaveValue(projectName)
 
   await page.getByRole('button', { name: '打开项目' }).click()

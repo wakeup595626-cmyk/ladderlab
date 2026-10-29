@@ -149,11 +149,13 @@ export async function renameProject(page: Page, name: string): Promise<void> {
   await input.press('Enter')
 }
 
-/** 从首页新建一个空白工程（会弹确认框）。 */
-export async function createBlankProject(page: Page): Promise<void> {
+/** 从首页新建一个空白工程：主线改成先在对话框里命名，再直接建出来。 */
+export async function createBlankProject(page: Page, name = '未命名工程'): Promise<void> {
   await page.getByRole('button', { name: '新建空白工程' }).click()
-  const confirm = page.getByRole('dialog', { name: '新建空白工程？' })
-  await confirm.getByRole('button', { name: '新建', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: '新建工程' })
+  await dialog.waitFor({ state: 'visible' })
+  await dialog.locator('#new-project-name').fill(name)
+  await dialog.getByRole('button', { name: '新建', exact: true }).click()
   await page.locator('#project-name').waitFor({ state: 'visible' })
 }
 
