@@ -649,6 +649,7 @@ export default function App() {
   const [manualSaveStatus, setManualSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
   const manualSaveStatusTimerRef = useRef<number | null>(null)
   const editorRef = useRef<HTMLElement>(null)
+  const programFrameRef = useRef<HTMLDivElement>(null)
   const tagsButtonRef = useRef<HTMLButtonElement>(null)
   const inspectorResizePointerRef = useRef<number | null>(null)
   const programSheetResizeRef = useRef<{
@@ -1864,6 +1865,50 @@ export default function App() {
   )
   const insertTarget = cursorInsertTarget
   const activeRungId = insertTarget?.rungId ?? selection?.rungId ?? null
+
+  // 两侧调宽把手是图纸的边缘控件，纵向位置应贴近正在编辑的程序段。
+  // 只移动把手本体，贯穿图纸的调整线仍保持全高。
+  useLayoutEffect(() => {
+    const frame = programFrameRef.current
+    if (!frame) return
+
+    const placeGrip = () => {
+      const rung = activeRungId
+        ? Array.from(frame.querySelectorAll<HTMLElement>('.ll-rung'))
+          .find((element) => element.dataset.rungId === activeRungId)
+        : null
+      const header = rung?.querySelector<HTMLElement>(':scope > .ll-rung-header')
+      if (!rung || !header) {
+        frame.style.removeProperty('--program-resizer-grip-top')
+        return
+      }
+
+      const frameRect = frame.getBoundingClientRect()
+      const headerRect = header.getBoundingClientRect()
+      const gripHeight = 44
+      const centered = headerRect.top - frameRect.top + (headerRect.height - gripHeight) / 2
+      const top = Math.max(0, Math.min(centered, Math.max(0, frame.offsetHeight - gripHeight)))
+      frame.style.setProperty('--program-resizer-grip-top', `${Math.round(top)}px`)
+    }
+
+    placeGrip()
+    const observer = new ResizeObserver(placeGrip)
+    observer.observe(frame)
+    const activeRung = activeRungId
+      ? Array.from(frame.querySelectorAll<HTMLElement>('.ll-rung'))
+        .find((element) => element.dataset.rungId === activeRungId)
+      : null
+    const activeHeader = activeRung?.querySelector<HTMLElement>(':scope > .ll-rung-header')
+    if (activeRung) observer.observe(activeRung)
+    if (activeHeader) observer.observe(activeHeader)
+    window.addEventListener('resize', placeGrip)
+
+    return () => {
+      observer.disconnect()
+      window.removeEventListener('resize', placeGrip)
+    }
+  }, [activeRungId, program])
+
   const targetAnchorLabel = useMemo(
     () => (insertTarget
       ? describeFavoriteInsertTarget(program, insertTarget)
@@ -3519,6 +3564,7 @@ export default function App() {
           <div
             id="wb-program-sheet"
             className="wb-program-frame"
+            ref={programFrameRef}
             style={{ '--program-sheet-width': `${programSheetEffectiveWidth}px` } as CSSProperties}
           >
             <div

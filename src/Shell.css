@@ -4205,7 +4205,7 @@ body[data-drag-kind] {
 
   .wb-program-resizer-grip {
     position: absolute;
-    top: 72px;
+    top: var(--program-resizer-grip-top, 72px);
     left: 50%;
     width: 9px;
     height: 44px;
@@ -4222,7 +4222,7 @@ body[data-drag-kind] {
 
   .wb-program-resizer-tip {
     position: absolute;
-    top: 124px;
+    top: calc(var(--program-resizer-grip-top, 72px) + 52px);
     z-index: 2;
     padding: 4px 8px;
     border: 1px solid var(--border);
