@@ -40,10 +40,12 @@ body:has([role='dialog'][aria-modal='true'], .qe-panel) .support-badge {
   width: 62px;
   grid-template-columns: 1fr;
   grid-template-rows: 30px auto;
-  border: 1px solid var(--border);
+  border: 1px solid var(--control);
   border-radius: 11px;
-  background: color-mix(in srgb, var(--surface) 90%, var(--ground));
-  box-shadow: 0 1px 2px rgba(21, 24, 22, 0.05), 0 2px 8px rgba(21, 24, 22, 0.05);
+  /* 实底 + 常驻描边：浮标会停在浅色图纸或灰底工具区上，半透明底会让
+     文字和咖啡杯随背景漂走，点击时像是整块消失了。 */
+  background: var(--surface);
+  box-shadow: 0 1px 2px rgba(21, 24, 22, 0.06), 0 3px 10px rgba(21, 24, 22, 0.07);
   color: var(--muted);
   cursor: grab;
   touch-action: none;
@@ -57,11 +59,20 @@ body:has([role='dialog'][aria-modal='true'], .qe-panel) .support-badge {
 
 @media (hover: hover) and (pointer: fine) {
   .support-badge-pill:hover {
-    border-color: var(--control);
+    border-color: var(--accent);
     background: var(--surface);
-    box-shadow: 0 2px 4px rgba(21, 24, 22, 0.07), 0 8px 18px rgba(21, 24, 22, 0.09);
+    box-shadow: 0 2px 4px rgba(21, 24, 22, 0.08), 0 8px 20px rgba(21, 24, 22, 0.11);
     color: var(--frame-ink);
   }
+}
+
+/* 按下时明确下沉一像素并加深底色，避免“点了但不知道有没有点中”。 */
+.support-badge-pill:active {
+  border-color: var(--accent-ink);
+  background: var(--raised);
+  box-shadow: 0 1px 2px rgba(21, 24, 22, 0.1);
+  color: var(--frame-ink);
+  transform: translateY(1px);
 }
 
 .support-badge[data-dragging='true'] .support-badge-pill {
@@ -120,8 +131,8 @@ body:has([role='dialog'][aria-modal='true'], .qe-panel) .support-badge {
 
 @media (hover: hover) and (pointer: fine) {
   .support-badge-trigger:hover {
-    background: var(--active);
-    color: var(--frame-ink);
+    background: var(--accent-wash);
+    color: var(--accent-ink);
   }
 }
 
@@ -134,6 +145,13 @@ body:has([role='dialog'][aria-modal='true'], .qe-panel) .support-badge {
   border-color: var(--accent);
   background: var(--accent-wash);
   color: var(--accent-ink);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 16%, transparent),
+    0 6px 18px rgba(21, 24, 22, 0.12);
+}
+
+.support-badge[data-open='true'] .support-badge-trigger {
+  background: transparent;
+  color: inherit;
 }
 
 .support-badge-icon {

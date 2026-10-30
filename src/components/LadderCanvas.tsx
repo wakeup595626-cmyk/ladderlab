@@ -1882,10 +1882,10 @@ function RungSection({
     const target = addedId ? nodes.find((node) => node.dataset.nodeId === addedId) : null
     const focus = target ?? (outputChanged ? output : null)
     if (!focus) return
-    // 并联分支是一次结构变化：画布上会立刻多出一整块草稿支路，再叠一次
-    // 缩放弹跳和扩散圈会显得突兀。这里只把它带入视野，不加落点动效。
-    const isParallelBranch = focus.classList.contains('ll-parallel')
-    if (!isParallelBranch) pulseInsertedNode(focus)
+    // 并联结构变化（整组分支，或分支里新增的触点）不加缩放弹跳：用户正在
+    // 观察整张图，突然的落点动效会被误读成画布局部放大。只保留横向露出。
+    const insideParallel = focus.closest('.ll-parallel') !== null
+    if (!insideParallel) pulseInsertedNode(focus)
     revealInserted(container, focus, output && focus !== output ? output : null)
   }, [rung.nodes, rung.output.id])
 
@@ -2540,7 +2540,10 @@ export default function LadderCanvas({
     }
     if (!target) return
     target.focus({ preventScroll: true })
-    target.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+    // 只横向露出插入点。scrollIntoView 会连带滚动整个程序面板，表头和
+    // 当前程序段会被顶出视野，看起来就像画布突然被局部放大。
+    const scroll = target.closest<HTMLElement>('.ll-svg-scroll')
+    if (scroll) revealInserted(scroll as HTMLDivElement, target, null)
   }, [focusOpenBranch, pendingFocus, program])
 
   useEffect(() => {
