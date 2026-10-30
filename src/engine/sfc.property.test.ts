@@ -125,24 +125,31 @@ function stepsProgram(rnd: Rng): Program {
   for (let index = 1; index < count; index += 1) {
     const condition = builder.tag('Cond' + index, '%I0.' + (index + 1), rnd.pick(WORDS))
     const alternate = builder.tag('Alt' + index, '%I1.' + index, rnd.pick(WORDS))
-    const nodes: LadderNode[] = [contact('NO', steps[index - 1])]
-    if (rnd.chance(0.35)) {
-      nodes.push(parallel('p' + index, [[contact('P', condition)], [contact('NO', alternate)]]))
-    } else if (rnd.chance(0.2)) {
-      nodes.push(compare(counter))
-    } else {
-      nodes.push(contact(rnd.pick(['NO', 'P', 'N'] as const), condition))
+    // 条件形状先抽一次，置位与复位用同一组触点，才是一段真正的步进交接。
+    const shape = rnd.chance(0.35) ? 'or' : rnd.chance(0.2) ? 'compare' : 'contact'
+    const kind = rnd.pick(['NO', 'P', 'N'] as const)
+    const guard = (suffix: string): LadderNode[] => {
+      const nodes: LadderNode[] = [contact('NO', steps[index - 1])]
+      if (shape === 'or') {
+        nodes.push(parallel('p' + index + suffix, [[contact('P', condition)], [contact('NO', alternate)]]))
+      } else if (shape === 'compare') {
+        nodes.push(compare(counter))
+      } else {
+        nodes.push(contact(kind, condition))
+      }
+      return nodes
     }
-    builder.rung(rnd.pick(WORDS) + '进入第 ' + (index + 1) + ' 步' + rnd.pick(NOISE), nodes, {
+    builder.rung(rnd.pick(WORDS) + '进入第 ' + (index + 1) + ' 步' + rnd.pick(NOISE), guard('-set'), {
       kind: 'SET',
       tag: steps[index],
     })
+    // 成对复位：没有复位网络，步骤位会同时保持，单令牌顺序图就无从谈起。
+    builder.rung('离开第 ' + index + ' 步', guard('-reset'), { kind: 'RESET', tag: steps[index - 1] })
   }
   const done = builder.tag('CycleDone', '%I0.7', '循环完成')
-  builder.rung('循环结束回第 1 步' + rnd.pick(NOISE), [
-    contact('NO', steps[count - 1]),
-    contact('NO', done),
-  ], { kind: 'SET', tag: steps[0] })
+  const loopBack = (): LadderNode[] => [contact('NO', steps[count - 1]), contact('NO', done)]
+  builder.rung('循环结束回第 1 步' + rnd.pick(NOISE), loopBack(), { kind: 'SET', tag: steps[0] })
+  builder.rung('循环结束退出末步', loopBack(), { kind: 'RESET', tag: steps[count - 1] })
   for (let index = 0; index < count; index += 1) {
     const lamp = builder.tag('Lamp' + (index + 1), '%Q' + (index + 1) + '.0', rnd.pick(WORDS) + '输出')
     builder.rung('第 ' + (index + 1) + ' 步' + rnd.pick(NOISE), [contact('NO', steps[index])], {
@@ -381,12 +388,13 @@ describe('buildSfc 随机工程不变量', () => {
     }
   })
 
-  it('改动步骤或转移条件的信号后，对应工程会导出另一张图', () => {
+  it('改动转移条件信号的名字后，对应工程会导出另一张图', () => {
     const original = makeProgram(1008)
     const changed: Program = {
       ...original,
       tags: original.tags.map((tag) => tag.name === 'StartBtn'
-        ? { ...tag, address: '%I0.7' }
+        // 转移文案只写变量短名，所以这里改的是画面上看得见的部分（变量注释）。
+        ? { ...tag, comment: '启动按钮' }
         : tag),
     }
     const before = buildSfc(original)
@@ -547,7 +555,7 @@ describe('renderSfcSvg 异常输入', () => {
     }
   })
 
-  it('长步骤编号自动缩小字号，不会压进条件列', () => {
+  it('长步骤编号自动缩小字号，不会压进步骤框', () => {
     const rendered = renderSfcSvg(chartOf(
       [plainStep('a', '123456', '保持输出'), plainStep('b', '12', '停止输出')],
       [{ from: 'a', to: 'b', label: 'S1' }],
@@ -556,10 +564,16 @@ describe('renderSfcSvg 异常输入', () => {
     for (const match of rendered.svg.matchAll(/<text\s([^>]*)>([^<]*)<\/text>/g)) {
       sizes.set(match[2], Number(/font-size="([\d.]+)"/.exec(match[1])?.[1]))
     }
-    expect(sizes.get('123456')).toBe(18)
+    // 步骤框会随最长的编号增宽；编号在框内放不下时才继续缩字号。
+    const stepBox = Array.from(rendered.svg.matchAll(/<rect\s([^>]*)>/g), (match) => match[1])
+      .find((raw) => raw.includes('stroke="#1c4b74" stroke-width="1.8"'))
+    expect(stepBox).toBeDefined()
+    const boxWidth = Number(/\bwidth="([\d.]+)"/.exec(stepBox!)?.[1])
+    expect(boxWidth).toBeGreaterThanOrEqual(104)
+    expect(sizes.get('123456')).toBe(25)
     expect(sizes.get('12')).toBe(25)
-    // 数字按 0.62em 估宽：6 位、18px 仍明显窄于 104px 的步骤框。
-    expect(6 * 0.62 * (sizes.get('123456') ?? 0)).toBeLessThanOrEqual(104 - 8)
+    // 数字按 0.62em 估宽：6 位、25px 必须落在实际步骤框的内边距里。
+    expect(6 * 0.62 * (sizes.get('123456') ?? 0)).toBeLessThanOrEqual(boxWidth - 8)
     expect(xmlProblems(rendered.svg)).toEqual([])
   })
 })

@@ -1,6 +1,6 @@
 import type { Program } from '../engine/types'
 import { FIELD_LIMITS } from './limits'
-import { parseProgramText, serializeProgram } from './io'
+import { parseProgramStructureText, parseProgramText, serializeProgram } from './io'
 import { mergeLibraryBackup, validateBackupProjects } from './projectBackup'
 
 /**
@@ -193,7 +193,7 @@ function listStorageKeys(): string[] {
 
 function parseProgramRecord(id: string, value: unknown): Program {
   try {
-    return parseProgramText(JSON.stringify(value))
+    return parseProgramStructureText(JSON.stringify(value)).program
   } catch (error) {
     throw new LibraryCorruptionError(`项目「${id}」的内容无法读取：${errorMessage(error)}`)
   }
@@ -584,7 +584,7 @@ function readLegacyLibrary(): ProjectLibraryResult {
     }
     let program: Program
     try {
-      program = parseProgramText(JSON.stringify(item.program))
+      program = parseProgramStructureText(JSON.stringify(item.program)).program
     } catch (error) {
       isolate(index, itemId, rawItem, `项目「${item.id}」的内容无法读取（${errorMessage(error)}）`)
       continue

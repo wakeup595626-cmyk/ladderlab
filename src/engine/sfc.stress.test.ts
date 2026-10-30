@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { SfcAction, SfcChart, SfcEdge, SfcStep } from './sfc'
-import { renderSfcSvg } from './sfcRender'
+import { computeSfcLayout, renderSfcSvg } from './sfcRender'
 
 /**
  * 顺序功能图渲染的压力与几何正确性测试。
@@ -248,7 +248,7 @@ describe('renderSfcSvg 压力与几何', () => {
     expect(topMost).toBeGreaterThanOrEqual(0)
   })
 
-  it('15 条回跳到第 1 步：每个条件贴着各自竖线，数量完整且不越出画布', () => {
+  it('15 条回跳到第 1 步：标签统一进左侧槽位，数量完整且不越出画布', () => {
     const rendered = renderSfcSvg(backJumps(15))
     expectNoBadNumbers(rendered.svg)
 
@@ -256,17 +256,37 @@ describe('renderSfcSvg 压力与几何', () => {
     const lanes = laneXs(rendered.svg)
     expect(labels).toHaveLength(15)
     expect(lanes).toHaveLength(15)
+    // 每条回跳各自一条 lane，标签不按 lane 分列，而是共用同一个右侧对齐槽。
+    expect(new Set(lanes).size).toBe(15)
 
-    const matched = new Set<number>()
-    labels.forEach((label) => {
-      const lane = lanes.find((x) => Math.abs(x - (label.x + 12)) < 0.6)
-      expect(lane).toBeDefined()
-      if (lane !== undefined) matched.add(lane)
-      expect(label.x).toBeGreaterThan(0)
-      expect(Number.isFinite(label.y)).toBe(true)
-    })
-    // 15 个条件分别属于 15 条通道，没有两个挤在同一条线上。
-    expect(matched.size).toBe(15)
+    const layout = computeSfcLayout(backJumps(15))
+    expect(layout.labels).toHaveLength(15)
+    expect(layout.labelConflictCount).toBe(0)
+    expect(layout.labels.map((label) => label.text).sort()).toEqual(
+      Array.from({ length: 15 }, (_, index) => 'S' + (index + 1) + ' 完成').sort(),
+    )
+    const rightEdges = new Set(layout.labels.map((label) => label.box.x + label.box.width))
+    expect(rightEdges.size).toBe(1)
+    const [rightEdge] = [...rightEdges]
+    // 标签右缘离最外层（x 最小）的通道至少 8px。
+    expect(Math.min(...lanes) - rightEdge).toBeGreaterThanOrEqual(8)
+    for (const label of layout.labels) {
+      expect(label.box.x).toBeGreaterThanOrEqual(0)
+      expect(label.box.y).toBeGreaterThanOrEqual(0)
+      expect(label.box.x + label.box.width).toBeLessThanOrEqual(layout.width)
+      expect(label.box.y + label.box.height).toBeLessThanOrEqual(layout.height)
+    }
+    for (let left = 0; left < layout.labels.length; left += 1) {
+      for (let right = left + 1; right < layout.labels.length; right += 1) {
+        const a = layout.labels[left].box
+        const b = layout.labels[right].box
+        const overlap = a.x < b.x + b.width + 8
+          && a.x + a.width + 8 > b.x
+          && a.y < b.y + b.height + 8
+          && a.y + a.height + 8 > b.y
+        expect(overlap).toBe(false)
+      }
+    }
   })
 
   it('15 条回跳到第 1 步时左侧条件文字 y 互不重叠', () => {
@@ -285,41 +305,52 @@ describe('renderSfcSvg 压力与几何', () => {
   })
 
   it('连续跳步 0→5、5→2：连线路径只含 M/H/V 与数字', () => {
-    const rendered = renderSfcSvg(chart(
+    const source = chart(
       Array.from({ length: 6 }, (_, index) => step(index, [act('置位 Q' + index + '.0', 'Q' + index + '.0')])),
       [
         { from: 's0', to: 's5', label: 'S0' },
         { from: 's5', to: 's2', label: 'S5' },
       ],
-    ))
+    )
+    const rendered = renderSfcSvg(source)
     expectNoBadNumbers(rendered.svg)
 
     const paths = pathData(rendered.svg)
     const routes = paths.filter((d) => d.includes(' V '))
-    expect(routes).toHaveLength(2)
+    // 交叉缺口会把一条「H V H」折线拆成多段，所以这里按竖段数量下限检查；
+    // 两条回跳是否都画出来由布局诊断确认。
+    expect(routes.length).toBeGreaterThanOrEqual(2)
     routes.forEach((d) => {
       expect(d).toMatch(/^[MHV0-9. -]+$/)
       expect(d.startsWith('M ')).toBe(true)
     })
+    const layout = computeSfcLayout(source)
+    expect(layout.segments.filter((segment) => segment.kind === 'vertical')).toHaveLength(2)
     // 曲线/平滑命令一律不许出现（含箭头路径）。
     paths.forEach((d) => expect(d).not.toMatch(/[CSQ]/))
   })
 
-  it('两条回跳落到同一步时使用不同入口，箭头和条件文字都不重叠', () => {
-    const rendered = renderSfcSvg(chart(
+  it('两条回跳落到同一步时使用不同入口，条件贴在各自入口上方', () => {
+    const source = chart(
       Array.from({ length: 3 }, (_, index) => step(index, [act('输出 Q' + index + '.0')])),
       [
         { from: 's1', to: 's0', label: '停止按钮' },
         { from: 's2', to: 's0', label: '计数复位' },
       ],
-    ))
+    )
+    const rendered = renderSfcSvg(source)
     expectNoBadNumbers(rendered.svg)
 
-    const paths = pathData(rendered.svg)
-    const entryYs = paths
-      .filter((d) => d.includes(' V ') && d.includes(' H '))
-      .map((d) => Number(/ V ([\d.]+) H /.exec(d)?.[1]))
+    const layout = computeSfcLayout(source)
+    const stepX = Math.max(...layout.segments.map((segment) => Math.max(segment.x1, segment.x2)))
+    const entryYs = layout.segments
+      .filter((segment) => (
+        segment.kind === 'horizontal' && Math.abs(segment.x2 - (stepX - 9)) < 0.5
+      ))
+      .map((segment) => segment.y1)
       .sort((left, right) => left - right)
+
+    const paths = pathData(rendered.svg)
     expect(entryYs).toHaveLength(2)
     expect(new Set(entryYs).size).toBe(2)
 
@@ -330,19 +361,16 @@ describe('renderSfcSvg 压力与几何', () => {
     expect(arrowYs).toEqual(entryYs)
     expect(new Set(arrowYs).size).toBe(2)
 
-    const labelYs = branchLabels(rendered.svg)
-      .map((label) => label.y - 4.5)
-      .sort((left, right) => left - right)
-    expect(labelYs).toHaveLength(2)
-    // 条件贴着自己离开的那一步（第 2、3 步），不再统一贴到目标步的入口高度：
-    // 两条回跳都回到 s0，贴在入口端会让两组条件看起来像同一个入口的两段文字。
-    const boxes = stepRects(rendered.svg)
-    expect(boxes.length).toBe(3)
-    expect(labelYs[0]).toBeGreaterThan(boxes[1].y - 6)
-    expect(labelYs[0]).toBeLessThan(boxes[1].y + boxes[1].height + 8)
-    expect(labelYs[1]).toBeGreaterThan(boxes[2].y - 6)
-    expect(labelYs[1]).toBeLessThan(boxes[2].y + boxes[2].height + 8)
-    expect(labelYs[1] - labelYs[0]).toBeGreaterThanOrEqual(MIN_LABEL_GAP)
+    expect(layout.labels).toHaveLength(2)
+    expect(layout.labelConflictCount).toBe(0)
+    // 两个标签分别对两个不同入口，入口高度和图上箭头一致。
+    const anchors = layout.labels.map((label) => label.anchor.y).sort((left, right) => left - right)
+    expect(anchors).toEqual(entryYs)
+    expect(anchors[1] - anchors[0]).toBeGreaterThanOrEqual(8)
+    expect(new Set(layout.labels.map((label) => label.text)).size).toBe(2)
+    for (const label of layout.labels) {
+      expect(label.box.y + label.box.height).toBeCloseTo(label.anchor.y - 2, 5)
+    }
   })
 
   it('空 actions 的步骤也能渲染，且不生成动作框', () => {

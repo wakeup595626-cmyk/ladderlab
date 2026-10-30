@@ -1,5 +1,5 @@
 import react from '@vitejs/plugin-react'
-import { defineConfig } from 'vite'
+import { defineConfig } from 'vitest/config'
 
 const reactVendorPattern =
   /[/\\]node_modules[/\\](?:react|react-dom|scheduler)(?:[/\\]|$)/
@@ -21,6 +21,9 @@ function chunkForModule(id: string): string | undefined {
 export default defineConfig({
   base: './',
   plugins: [react()],
+  test: {
+    include: ['src/**/*.test.ts'],
+  },
   build: {
     rolldownOptions: {
       output: {

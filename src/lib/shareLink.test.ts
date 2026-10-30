@@ -4,6 +4,7 @@ import { MAX_IMPORT_BYTES, parseProgramText, serializeProgram } from './io'
 import {
   buildShareUrl,
   decodeProgramShare,
+  decodeProgramShareStructure,
   encodeProgramShare,
   isShareProgramHash,
   SHARE_LINK_SOFT_LIMIT,
@@ -84,6 +85,34 @@ describe('分享链接', () => {
     const hash = await encodeProgramShare(sample)
     expect(buildShareUrl({ origin: 'https://example.com', pathname: '/ladderlab/' }, hash))
       .toBe(`https://example.com/ladderlab/${hash}`)
+  })
+
+  it('待修正的工程也能读回，问题随工程一起保留', async () => {
+    const broken: Program = {
+      ...sample,
+      tags: [
+        { ...sample.tags[0], address: '' },
+        { ...sample.tags[1], address: 'M10.0' },
+        { id: 't-c', name: 'Dup', address: '%M10.0', kind: 'BOOL', initial: false, comment: '' },
+      ],
+      rungs: [
+        {
+          id: 'r1',
+          label: '待修正',
+          nodes: [{ type: 'contact', id: 'c1', kind: 'NO', tag: 'MISSING' }],
+          output: { id: 'o1', kind: 'COIL', tag: 'Lamp' },
+        },
+      ],
+    }
+    const hash = await encodeProgramShare(broken)
+    const parsed = await decodeProgramShareStructure(hash)
+    expect(parsed.program.tags.map((item) => item.address)).toEqual(['', 'M10.0', '%M10.0'])
+    expect(parsed.issues.map((issue) => issue.code)).toEqual([
+      'empty-address',
+      'duplicate-address',
+      'undefined-reference',
+    ])
+    await expect(decodeProgramShare(hash)).rejects.toThrow('分享链接里的工程无法导入')
   })
 })
 

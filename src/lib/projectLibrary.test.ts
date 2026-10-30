@@ -41,6 +41,21 @@ function namedProgram(name: string, label = name): Program {
   }
 }
 
+function programWithSemanticIssues(name: string): Program {
+  const program = namedProgram(name)
+  return {
+    ...program,
+    tags: program.tags.map((tag, index) => {
+      if (index === 1) return { ...tag, address: ' %i0.0 ' }
+      if (index === 2) return { ...tag, address: '' }
+      return tag
+    }),
+    rungs: program.rungs.map((rung, index) => (
+      index === 0 ? { ...rung, output: { ...rung.output, tag: 'MissingMotor' } } : rung
+    )),
+  }
+}
+
 /**
  * 复刻线上那条历史记录：第二个程序段直接沿用了第一个程序段的元件 ID。
  * 其它字段都合法，因此唯一的故障就是“元件 ID 重复”。
@@ -345,6 +360,44 @@ describe('project library', () => {
         expect.objectContaining({ name: '迁移后的新项目' }),
       ]),
     })
+  })
+
+  it('reads a v2 project with semantic issues instead of treating it as broken', () => {
+    const id = 'semantic-v2'
+    storage.setItem(PROJECT_LIBRARY_READY_KEY, '{"schema":2}')
+    storage.setItem(
+      `${PROJECT_LIBRARY_PROJECT_PREFIX}${id}`,
+      storedProjectRecord(id, JSON.parse(serializeProgram(programWithSemanticIssues('语义问题工程')))),
+    )
+
+    const library = readProjectLibrary()
+    expect(library.status).toBe('ok')
+    if (library.status !== 'ok') throw new Error('expected a readable library')
+    expect(library.broken).toEqual([])
+    const project = library.projects.find((item) => item.id === id)
+    expect(project?.name).toBe('语义问题工程')
+    expect(project?.program.tags.map((tag) => tag.address)).toEqual(['%I0.0', '%i0.0', ''])
+    expect(project?.program.rungs[0]?.output.tag).toBe('MissingMotor')
+  })
+
+  it('migrates a legacy project with semantic issues instead of quarantining it', async () => {
+    const id = 'semantic-legacy'
+    storage.setItem(PROJECT_LIBRARY_STORAGE_KEY, JSON.stringify({
+      schema: 1,
+      projects: [{
+        id,
+        createdAt: 1_000,
+        savedAt: 2_000,
+        program: programWithSemanticIssues('旧版语义工程'),
+      }],
+    }))
+
+    const library = readProjectLibrary()
+    expect(library.status).toBe('ok')
+    if (library.status !== 'ok') throw new Error('expected a readable library')
+    expect(library.broken).toEqual([])
+    expect(library.projects).toMatchObject([{ id, name: '旧版语义工程' }])
+    expect(library.projects[0]?.program.rungs[0]?.output.tag).toBe('MissingMotor')
   })
 
   it('does not resurrect a project deleted by another tab', async () => {

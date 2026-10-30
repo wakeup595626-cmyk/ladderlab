@@ -1,0 +1,54 @@
+{
+  "schema": 1,
+  "name": "审核P9串中夹并",
+  "profile": "v21",
+  "tags": [
+    { "id": "v-a", "name": "A", "address": "%I0.0", "kind": "BOOL", "initial": false, "comment": "触点A" },
+    { "id": "v-b", "name": "B", "address": "%I0.1", "kind": "BOOL", "initial": false, "comment": "触点B" },
+    { "id": "v-c", "name": "C", "address": "%I0.2", "kind": "BOOL", "initial": false, "comment": "触点C" },
+    { "id": "v-d", "name": "D", "address": "%I0.3", "kind": "BOOL", "initial": false, "comment": "触点D" },
+    { "id": "v-y1", "name": "Y1", "address": "%Q0.0", "kind": "BOOL", "initial": false, "comment": "串中夹并1" },
+    { "id": "v-y2", "name": "Y2", "address": "%Q0.1", "kind": "BOOL", "initial": false, "comment": "并中夹串1" },
+    { "id": "v-y3", "name": "Y3", "address": "%Q0.2", "kind": "BOOL", "initial": false, "comment": "两组并联" }
+  ],
+  "rungs": [
+    {
+      "id": "y1r",
+      "label": "A 串 （B 或 C）",
+      "nodes": [
+        { "type": "contact", "id": "va", "kind": "NO", "tag": "A" },
+        { "type": "parallel", "id": "vp1", "branches": [
+          [ { "type": "contact", "id": "vb", "kind": "NO", "tag": "B" } ],
+          [ { "type": "contact", "id": "vc", "kind": "NO", "tag": "C" } ]
+        ] }
+      ],
+      "output": { "id": "yo1", "kind": "COIL", "tag": "Y1" }
+    },
+    {
+      "id": "y2r",
+      "label": "A 或 （B 串 C）",
+      "nodes": [
+        { "type": "parallel", "id": "vp2", "branches": [
+          [ { "type": "contact", "id": "vd", "kind": "NO", "tag": "A" } ],
+          [ { "type": "contact", "id": "ve", "kind": "NO", "tag": "B" }, { "type": "contact", "id": "vf", "kind": "NO", "tag": "C" } ]
+        ] }
+      ],
+      "output": { "id": "yo2", "kind": "COIL", "tag": "Y2" }
+    },
+    {
+      "id": "y3r",
+      "label": "（A 或 B） 串 （C 或 D）",
+      "nodes": [
+        { "type": "parallel", "id": "vp3", "branches": [
+          [ { "type": "contact", "id": "vg", "kind": "NO", "tag": "A" } ],
+          [ { "type": "contact", "id": "vh", "kind": "NO", "tag": "B" } ]
+        ] },
+        { "type": "parallel", "id": "vp4", "branches": [
+          [ { "type": "contact", "id": "vi", "kind": "NO", "tag": "C" } ],
+          [ { "type": "contact", "id": "vj", "kind": "NO", "tag": "D" } ]
+        ] }
+      ],
+      "output": { "id": "yo3", "kind": "COIL", "tag": "Y3" }
+    }
+  ]
+}

@@ -167,7 +167,8 @@ describe('置位 / 复位状态图的真实入口', () => {
     const chart = mustBuild(program)
     const intoB = chart.edges.filter((edge) => edge.to === 'StateB')
     expect(intoB.map((edge) => edge.from)).toEqual(['StateA'])
-    expect(intoB[0].label).toContain('无StateC')
+    // StateA/B/C 互相同锁；状态图本身已经表达互斥，常闭联锁不再重复写进标签。
+    expect(intoB[0].label).toBe('Go')
   })
 
   it('循环与停机标签来自网络本身，不硬编码某台设备的 H 与 SD 短语', () => {

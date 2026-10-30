@@ -1,0 +1,50 @@
+{
+  "schema": 1,
+  "name": "审核P2定时计数",
+  "profile": "v21",
+  "tags": [
+    { "id": "t-start", "name": "Start", "address": "%I0.0", "kind": "BOOL", "initial": false, "comment": "启动按钮" },
+    { "id": "t-reset", "name": "Reset", "address": "%I0.1", "kind": "BOOL", "initial": false, "comment": "复位按钮" },
+    { "id": "t-batch", "name": "Batch", "address": "%M0.0", "kind": "BOOL", "initial": false, "comment": "一批完成标志" },
+    { "id": "t-lamp", "name": "Lamp", "address": "%Q0.0", "kind": "BOOL", "initial": false, "comment": "完成指示灯" },
+    { "id": "t-alarm", "name": "Alarm", "address": "%Q0.1", "kind": "BOOL", "initial": false, "comment": "故障报警灯" }
+  ],
+  "rungs": [
+    {
+      "id": "r1",
+      "label": "启动后 T1 计时 3 秒",
+      "nodes": [ { "type": "contact", "id": "c1", "kind": "NO", "tag": "Start" } ],
+      "output": { "id": "o1", "kind": "TON", "tag": "T1", "pt": 3000 }
+    },
+    {
+      "id": "r2",
+      "label": "每 3 秒累计一个数，满 3 个为一批",
+      "nodes": [ { "type": "contact", "id": "c2", "kind": "NO", "tag": "T1.Q" } ],
+      "output": { "id": "o2", "kind": "CTU", "tag": "C1", "pv": 3, "resetTag": "Reset" }
+    },
+    {
+      "id": "r3",
+      "label": "计数到 3 置位批次完成标志",
+      "nodes": [ { "type": "contact", "id": "c3", "kind": "NO", "tag": "C1.Q" } ],
+      "output": { "id": "o3", "kind": "SET", "tag": "Batch" }
+    },
+    {
+      "id": "r4",
+      "label": "计数到 3 点亮完成指示灯",
+      "nodes": [ { "type": "contact", "id": "c4", "kind": "NO", "tag": "C1.Q" } ],
+      "output": { "id": "o4", "kind": "COIL", "tag": "Lamp" }
+    },
+    {
+      "id": "r5",
+      "label": "批次完成时点亮故障报警灯",
+      "nodes": [ { "type": "contact", "id": "c5", "kind": "NO", "tag": "Batch" } ],
+      "output": { "id": "o5", "kind": "COIL", "tag": "Alarm" }
+    },
+    {
+      "id": "r6",
+      "label": "复位按钮清掉批次标志",
+      "nodes": [ { "type": "contact", "id": "c6", "kind": "NO", "tag": "Reset" } ],
+      "output": { "id": "o6", "kind": "RESET", "tag": "Batch" }
+    }
+  ]
+}

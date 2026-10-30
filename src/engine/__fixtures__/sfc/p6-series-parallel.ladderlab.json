@@ -1,0 +1,56 @@
+{
+  "schema": 1,
+  "name": "审核P6串并联嵌套",
+  "profile": "v21",
+  "tags": [
+    { "id": "t-a", "name": "A", "address": "%I0.0", "kind": "BOOL", "initial": false, "comment": "触点A" },
+    { "id": "t-b", "name": "B", "address": "%I0.1", "kind": "BOOL", "initial": false, "comment": "触点B" },
+    { "id": "t-c", "name": "C", "address": "%I0.2", "kind": "BOOL", "initial": false, "comment": "触点C" },
+    { "id": "t-d", "name": "D", "address": "%I0.3", "kind": "BOOL", "initial": false, "comment": "触点D" },
+    { "id": "t-y1", "name": "Y1", "address": "%Q0.0", "kind": "BOOL", "initial": false, "comment": "嵌套输出" },
+    { "id": "t-y2", "name": "Y2", "address": "%Q0.1", "kind": "BOOL", "initial": false, "comment": "纯串联输出" },
+    { "id": "t-y3", "name": "Y3", "address": "%Q0.2", "kind": "BOOL", "initial": false, "comment": "纯并联输出" }
+  ],
+  "rungs": [
+    {
+      "id": "r1",
+      "label": "嵌套分支：A串B 或 C串D",
+      "nodes": [
+        {
+          "type": "parallel",
+          "id": "px1",
+          "branches": [
+            [ { "type": "contact", "id": "x1", "kind": "NO", "tag": "A" }, { "type": "contact", "id": "x2", "kind": "NO", "tag": "B" } ],
+            [ { "type": "contact", "id": "x3", "kind": "NO", "tag": "C" }, { "type": "contact", "id": "x4", "kind": "NO", "tag": "D" } ]
+          ]
+        }
+      ],
+      "output": { "id": "oy1", "kind": "COIL", "tag": "Y1" }
+    },
+    {
+      "id": "r2",
+      "label": "纯串联三触点",
+      "nodes": [
+        { "type": "contact", "id": "x5", "kind": "NO", "tag": "A" },
+        { "type": "contact", "id": "x6", "kind": "NO", "tag": "B" },
+        { "type": "contact", "id": "x7", "kind": "NO", "tag": "C" }
+      ],
+      "output": { "id": "oy2", "kind": "COIL", "tag": "Y2" }
+    },
+    {
+      "id": "r3",
+      "label": "纯并联两触点",
+      "nodes": [
+        {
+          "type": "parallel",
+          "id": "px2",
+          "branches": [
+            [ { "type": "contact", "id": "x8", "kind": "NO", "tag": "A" } ],
+            [ { "type": "contact", "id": "x9", "kind": "NO", "tag": "B" } ]
+          ]
+        }
+      ],
+      "output": { "id": "oy3", "kind": "COIL", "tag": "Y3" }
+    }
+  ]
+}

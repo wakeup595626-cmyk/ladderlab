@@ -1,0 +1,63 @@
+{
+  "schema": 1,
+  "name": "审核P7计数故障复位",
+  "profile": "v21",
+  "tags": [
+    { "id": "t-start", "name": "Start", "address": "%I0.0", "kind": "BOOL", "initial": false, "comment": "启动按钮" },
+    { "id": "t-reset", "name": "Reset", "address": "%I0.1", "kind": "BOOL", "initial": false, "comment": "复位按钮" },
+    { "id": "t-stop", "name": "Stop", "address": "%I0.2", "kind": "BOOL", "initial": false, "comment": "停止按钮" },
+    { "id": "t-run", "name": "Run", "address": "%Q0.0", "kind": "BOOL", "initial": false, "comment": "运行接触器" },
+    { "id": "t-alarm", "name": "Alarm", "address": "%Q0.1", "kind": "BOOL", "initial": false, "comment": "故障报警灯" },
+    { "id": "t-fault", "name": "Fault", "address": "%M0.5", "kind": "BOOL", "initial": false, "comment": "故障标志" }
+  ],
+  "rungs": [
+    {
+      "id": "q1",
+      "label": "启动并自锁运行",
+      "nodes": [
+        { "type": "parallel", "id": "pq1", "branches": [
+          [ { "type": "contact", "id": "qn1", "kind": "NO", "tag": "Start" } ],
+          [ { "type": "contact", "id": "qn2", "kind": "NO", "tag": "Run" } ]
+        ] },
+        { "type": "contact", "id": "qn3", "kind": "NC", "tag": "Stop" }
+      ],
+      "output": { "id": "qo1", "kind": "COIL", "tag": "Run" }
+    },
+    {
+      "id": "q2",
+      "label": "运行满 1 秒",
+      "nodes": [ { "type": "contact", "id": "qn4", "kind": "NO", "tag": "Run" } ],
+      "output": { "id": "qo2", "kind": "TON", "tag": "T5", "pt": 1000 }
+    },
+    {
+      "id": "q3",
+      "label": "每秒计一个数，满 2 个",
+      "nodes": [ { "type": "contact", "id": "qn5", "kind": "NO", "tag": "T5.Q" } ],
+      "output": { "id": "qo3", "kind": "CTU", "tag": "C4", "pv": 2, "resetTag": "Reset" }
+    },
+    {
+      "id": "q4",
+      "label": "计数到位置位故障标志",
+      "nodes": [ { "type": "contact", "id": "qn6", "kind": "NO", "tag": "C4.Q" } ],
+      "output": { "id": "qo4", "kind": "SET", "tag": "Fault" }
+    },
+    {
+      "id": "q5",
+      "label": "故障标志点亮报警灯",
+      "nodes": [ { "type": "contact", "id": "qn7", "kind": "NO", "tag": "Fault" } ],
+      "output": { "id": "qo5", "kind": "COIL", "tag": "Alarm" }
+    },
+    {
+      "id": "q6",
+      "label": "复位按钮清除故障标志",
+      "nodes": [ { "type": "contact", "id": "qn8", "kind": "NO", "tag": "Reset" } ],
+      "output": { "id": "qo6", "kind": "RESET", "tag": "Fault" }
+    },
+    {
+      "id": "q7",
+      "label": "停止按钮复位故障标志（急停复位）",
+      "nodes": [ { "type": "contact", "id": "qn9", "kind": "NC", "tag": "Stop" } ],
+      "output": { "id": "qo7", "kind": "RESET", "tag": "Fault" }
+    }
+  ]
+}

@@ -1,0 +1,58 @@
+{
+  "schema": 1,
+  "name": "审核P8只复位前一步",
+  "profile": "v21",
+  "tags": [
+    { "id": "u-start", "name": "Start", "address": "%I0.0", "kind": "BOOL", "initial": false, "comment": "启动按钮" },
+    { "id": "u-stop", "name": "Stop", "address": "%I0.1", "kind": "BOOL", "initial": false, "comment": "停止按钮" },
+    { "id": "u-s1", "name": "S1", "address": "%M0.0", "kind": "BOOL", "initial": false, "comment": "第一步" },
+    { "id": "u-s2", "name": "S2", "address": "%M0.1", "kind": "BOOL", "initial": false, "comment": "第二步" },
+    { "id": "u-km1", "name": "KM1", "address": "%Q0.0", "kind": "BOOL", "initial": false, "comment": "第一步电机" },
+    { "id": "u-km2", "name": "KM2", "address": "%Q0.1", "kind": "BOOL", "initial": false, "comment": "第二步电机" }
+  ],
+  "rungs": [
+    {
+      "id": "w1",
+      "label": "启动进入第一步",
+      "nodes": [
+        { "type": "parallel", "id": "wp1", "branches": [
+          [ { "type": "contact", "id": "wc1", "kind": "NO", "tag": "Start" } ],
+          [ { "type": "contact", "id": "wc2", "kind": "NO", "tag": "S1" } ]
+        ] },
+        { "type": "contact", "id": "wc3", "kind": "NC", "tag": "S2" },
+        { "type": "contact", "id": "wc4", "kind": "NC", "tag": "Stop" }
+      ],
+      "output": { "id": "wo1", "kind": "SET", "tag": "S1" }
+    },
+    {
+      "id": "w2",
+      "label": "第一步完成进入第二步",
+      "nodes": [
+        { "type": "contact", "id": "wc5", "kind": "NO", "tag": "S1" },
+        { "type": "contact", "id": "wc6", "kind": "NC", "tag": "Stop" }
+      ],
+      "output": { "id": "wo2", "kind": "SET", "tag": "S2" }
+    },
+    {
+      "id": "w3",
+      "label": "第二步按停止复位第一步",
+      "nodes": [
+        { "type": "contact", "id": "wc7", "kind": "NO", "tag": "S2" },
+        { "type": "contact", "id": "wc8", "kind": "NO", "tag": "Stop" }
+      ],
+      "output": { "id": "wo3", "kind": "RESET", "tag": "S1" }
+    },
+    {
+      "id": "w4",
+      "label": "第一步电机",
+      "nodes": [ { "type": "contact", "id": "wc9", "kind": "NO", "tag": "S1" } ],
+      "output": { "id": "wo4", "kind": "COIL", "tag": "KM1" }
+    },
+    {
+      "id": "w5",
+      "label": "第二步电机",
+      "nodes": [ { "type": "contact", "id": "wc10", "kind": "NO", "tag": "S2" } ],
+      "output": { "id": "wo5", "kind": "COIL", "tag": "KM2" }
+    }
+  ]
+}

@@ -13,9 +13,9 @@ import {
 const EXPORT_MENU_ITEMS = [
   '工程文件（.json）',
   '复制分享链接',
+  '顺序功能图 SVG',
   '完整程序 SVG',
   '纯梯形图 SVG',
-  '顺序功能图 SVG',
   '完整程序 PNG',
   '纯梯形图 PNG',
   '顺序功能图 PNG',
@@ -67,9 +67,9 @@ test.describe('自定义工程导出验收', () => {
       {
         kind: 'sfc',
         item: '顺序功能图 SVG',
-        // 顺序功能图只写步骤号与动作/转移条件，不写「第 N 步」字样；
-        // M0.0 = StartCycle、M3.0 = SkipRequest 是本工程的两条转移信号。
-        expected: ['0', '1', '2', '3', 'ConveyorRun', 'M5.0=1', 'AlarmLamp', 'M6.0=1', 'M0.0', 'M3.0'],
+        // 顺序功能图只写步骤号与动作/转移条件，不写「第 N 步」字样，也不
+        // 打印步骤位地址；两条转移信号按变量名出现：StartCycle、SkipRequest。
+        expected: ['0', '1', '2', '3', 'ConveyorRun', 'M5.0=1', 'AlarmLamp', 'M6.0=1', 'StartCycle', 'SkipRequest'],
         exact: true,
       },
     ]

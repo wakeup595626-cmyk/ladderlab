@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest'
 import { buildCourseLab } from './courseLabs'
 import { buildSfc } from './sfc'
 import type { SfcChart } from './sfc'
-import { compactSfcText, renderSfcSvg, wrapText } from './sfcRender'
+import { compactSfcText, computeSfcLayout, renderSfcSvg, wrapText } from './sfcRender'
+import type { SfcLayoutDiagnosis, SfcLayoutSegment } from './sfcRender'
 
 function chartWithJumps(labels: [string, string]): SfcChart {
   const steps = Array.from({ length: 7 }, (_, index) => ({
@@ -21,11 +22,22 @@ function chartWithJumps(labels: [string, string]): SfcChart {
   return { programName: '回跳通道', source: 'network', notes: [], steps, edges }
 }
 
-function lanePositions(svg: string): number[] {
-  const lanes: number[] = []
-  const pattern = /d="M [\d.]+ [\d.]+ H ([\d.]+) V [\d.]+ H [\d.]+"/g
-  for (const match of svg.matchAll(pattern)) lanes.push(Number(match[1]))
-  return [...new Set(lanes)].sort((a, b) => a - b)
+/**
+ * 回跳通道的 x。交叉处会留 6px 缺口，一条折线被拆成「横 + 竖 + 横」几段，
+ * 不能再靠匹配整条 path 取通道；布局诊断里的竖直段就是通道本身。
+ */
+function lanePositions(layout: SfcLayoutDiagnosis): number[] {
+  return [...new Set(layout.segments
+    .filter((segment) => segment.kind === 'vertical')
+    .map((segment) => segment.x1))].sort((left, right) => left - right)
+}
+
+/** 回跳条件：右对齐、13px/450 的灰色文字，逐行取回基线与内容。 */
+function branchLabelLines(svg: string): Array<{ x: number; y: number; text: string }> {
+  return Array.from(
+    svg.matchAll(/<text x="([\d.]+)" y="([\d.]+)" font-size="13" font-weight="450" fill="#3d4753" text-anchor="end">([^<]*)<\/text>/g),
+    (match) => ({ x: Number(match[1]), y: Number(match[2]), text: match[3] }),
+  )
 }
 
 describe('顺序功能图的文字与通道', () => {
@@ -52,20 +64,33 @@ describe('顺序功能图的文字与通道', () => {
   })
 
   it('短条件的回跳通道保持紧凑', () => {
-    const lanes = lanePositions(renderSfcSvg(chartWithJumps(['0', '1'])).svg)
+    const lanes = lanePositions(computeSfcLayout(chartWithJumps(['0', '1'])))
     expect(lanes).toHaveLength(2)
     expect(lanes[1] - lanes[0]).toBe(40)
   })
 
-  it('条件很长时通道按文字宽度撑开，标签不会横穿相邻竖线', () => {
+  it('条件很长时标签统一进左侧槽位，通道只保留固定间距', () => {
     const longLabels: [string, string] = [
       '东西红灯亮且南北绿灯亮时按下启动按钮才允许回跳',
       '自动模式一秒节拍与单步按钮同时按下时才允许回跳',
     ]
-    const lanes = lanePositions(renderSfcSvg(chartWithJumps(longLabels)).svg)
+    const layout = computeSfcLayout(chartWithJumps(longLabels))
+    const lanes = lanePositions(layout)
     expect(lanes).toHaveLength(2)
-    // 旧实现固定 40，长条件会压到左边那条竖线上。
-    expect(lanes[1] - lanes[0]).toBeGreaterThan(150)
+    // 通道不再按文字宽度撑开；长条件折行后统一放在最外层通道左侧的槽里。
+    expect(lanes[1] - lanes[0]).toBe(40)
+    expect(layout.labels).toHaveLength(2)
+    expect(layout.labels.some((label) => label.lines.length > 1)).toBe(true)
+    const rightEdges = new Set(layout.labels.map((label) => label.box.x + label.box.width))
+    expect(rightEdges.size).toBe(1)
+    expect([...rightEdges][0] + 12).toBe(lanes[0])
+    expect(layout.labelConflictCount).toBe(0)
+    // SVG 里每行条件都落在同一个右对齐槽位，长句只是纵向多行，不会横向分裂成两列。
+    const svgLabels = branchLabelLines(renderSfcSvg(chartWithJumps(longLabels)).svg)
+    expect(svgLabels.length).toBeGreaterThanOrEqual(2)
+    expect(new Set(svgLabels.map((line) => line.x)).size).toBe(1)
+    expect(svgLabels.map((line) => line.text).join('').replace(/\s/g, ''))
+      .toContain('东西红灯亮且南北绿灯亮时按下启动按钮才允许回跳')
   })
 
   it('长条件的整张图不会被裁掉左侧文字', () => {
@@ -160,21 +185,21 @@ describe('回跳的出口与标签', () => {
     expect(Math.abs(exits[0] - exits[1])).toBeGreaterThan(8)
   })
 
-  it('回跳条件贴在发出它的那一步，而不是目标步', () => {
-    const { svg } = renderSfcSvg(chartWithSameSourceJumps())
-    const rows = Array.from(
-      svg.matchAll(/<rect x="[\d.]+" y="([\d.]+)" width="104" height="([\d.]+)"/g),
-      (match) => ({ y: Number(match[1]), height: Number(match[2]) }),
-    )
-    const last = rows[rows.length - 1]
-    const labelYs = Array.from(
-      svg.matchAll(/<text x="[\d.]+" y="([\d.]+)" font-size="13" font-weight="450" fill="#3d4753" text-anchor="end">/g),
-      (match) => Number(match[1]),
-    )
-    expect(labelYs.length).toBeGreaterThanOrEqual(2)
-    for (const y of labelYs) {
-      expect(y).toBeGreaterThan(last.y - 6)
-      expect(y).toBeLessThan(last.y + last.height + 30)
+  it('回跳条件贴在目标步入口上方，同列右对齐且不压走线', () => {
+    const layout = computeSfcLayout(chartWithSameSourceJumps())
+    expect(layout.labels).toHaveLength(2)
+    expect(layout.labelConflictCount).toBe(0)
+    const right = layout.labels[0].box.x + layout.labels[0].box.width
+    const loop = layout.labels.find((label) => label.text === '循环回第一步')
+    const reset = layout.labels.find((label) => label.text === '复位回初始步')
+    expect(loop).toBeDefined()
+    expect(reset).toBeDefined()
+    // 两条回跳都从最后一步发出，但入口分别落在第 2 步与初始步。
+    expect(loop!.anchor.y).toBeGreaterThan(reset!.anchor.y)
+    for (const label of layout.labels) {
+      expect(label.box.x + label.box.width).toBe(right)
+      // 单行标签末行基线在入口上方约 7px，框底与入口留 2px，贴着目标步不脱节。
+      expect(label.box.y + label.box.height).toBeCloseTo(label.anchor.y - 2, 5)
     }
   })
 })
@@ -220,7 +245,7 @@ describe('步骤标题', () => {
     expect(svg).toContain('>2<')
   })
 
-  it('描述性标题和动作框重复，一律不画；互斥状态名才保留', () => {
+  it('描述性标题和动作框重复时不画，短状态名才保留', () => {
     const chart: SfcChart = {
       programName: '标题取舍',
       source: 'state-tags',
@@ -249,10 +274,11 @@ describe('步骤标题', () => {
       svg.matchAll(/<text x="[\d.]+" y="[\d.]+" font-size="1[01]" font-weight="500" fill="#14405f" text-anchor="middle">([^<]*)<\/text>/g),
       (match) => match[1],
     )
-    expect(titles.join(' ')).not.toContain('Allow')
-    expect(titles.join(' ')).not.toContain('StateA')
+    // 不超过 8 个字、无句读的短标题本身就是状态名，必须画出来。
+    expect(titles.join(' ')).toContain('Allow')
+    expect(titles.join(' ')).toContain('StateA')
     expect(titles.join(' ')).not.toContain('自保持')
-    expect(titles).toEqual(['手动、自动'])
+    expect(titles).toEqual(['Allow', 'StateA', '手动、自动'])
   })
 
   it('只有标题、没有动作的步骤不画空动作框', () => {
@@ -336,16 +362,24 @@ describe('条件列的宽度与折行', () => {
     expect(width).toBeGreaterThan(Math.min(...lefts) + 200)
   })
 
-  it('左侧回跳条件也按最长一行自适应，不再一律挤在 168px 里', () => {
+  it('左侧回跳条件按 208px 折行，最多三行且内容完整', () => {
     const oneLine = 'H 完成·SD=1·单步·移位脉冲 M4.5'
-    const { svg } = renderSfcSvg(chartWithJumps([oneLine, '1']))
-    const jumpLabels = Array.from(
-      svg.matchAll(/<text x="[\d.]+" y="[\d.]+" font-size="13" font-weight="450" fill="#3d4753" text-anchor="end">([^<]*)<\/text>/g),
-      (match) => match[1],
-    )
-    // 两条回跳各占一行（第二条只有「1」），没有被 168px 折成两三行。
-    expect(jumpLabels).toHaveLength(2)
-    expect(jumpLabels.some((line) => line.includes('移位脉冲'))).toBe(true)
+    const layout = computeSfcLayout(chartWithJumps([oneLine, '1']))
+    expect(layout.labels).toHaveLength(2)
+    const long = layout.labels.find((label) => label.text.includes('移位脉冲'))
+    const short = layout.labels.find((label) => label.text === '1')
+    expect(long).toBeDefined()
+    expect(short).toBeDefined()
+    expect(long!.lines.length).toBeGreaterThan(1)
+    expect(long!.lines.length).toBeLessThanOrEqual(3)
+    expect(short!.lines).toEqual(['1'])
+    // 能压进三行就不加宽：标签框宽度不超过起始的 208px。
+    expect(long!.box.width).toBeLessThanOrEqual(208 + 0.5)
+    const joined = long!.lines.join('')
+    for (const token of ['H 完成', 'SD=1', '单步', '移位脉冲', 'M4.5']) {
+      expect(joined).toContain(token)
+    }
+    expect(layout.labelConflictCount).toBe(0)
   })
 
   it('超长条件仍会折行，且折出来的每一行都不带连接符', () => {
@@ -376,16 +410,35 @@ describe('条件列的宽度与折行', () => {
 })
 
 describe('回跳通道与步骤框的间距', () => {
-  /** 每一条回跳路径「M 步骤边 y0 H 通道 V y1 H 箭头」的坐标。 */
-  function branchRoutes(svg: string) {
-    return Array.from(
-      svg.matchAll(/d="M ([\d.]+) ([\d.]+) H ([\d.]+) V ([\d.]+) H ([\d.]+)"/g),
-      (match) => ({
-        exitY: Number(match[2]),
-        laneX: Number(match[3]),
-        endY: Number(match[4]),
-      }),
-    )
+  /**
+   * 每条回跳的出口 / 入口高度。交叉缺口会把一条折线拆开，所以按 owner 分组：
+   * 竖段给出通道 x，靠步骤一侧的横段是出口，靠箭头一侧的短横段是入口。
+   */
+  function branchRoutes(layout: SfcLayoutDiagnosis) {
+    // 所有回跳横段都从通道起步：出口一直伸到步骤左缘，入口在箭头前 9px 收住。
+    const stepX = Math.max(...layout.segments.map((segment) => Math.max(segment.x1, segment.x2)))
+    const groups = new Map<string, SfcLayoutSegment[]>()
+    for (const segment of layout.segments) {
+      const group = groups.get(segment.owner) ?? []
+      group.push(segment)
+      groups.set(segment.owner, group)
+    }
+    const routes: Array<{ exitY: number; laneX: number; endY: number }> = []
+    for (const segments of groups.values()) {
+      const vertical = segments.find((segment) => segment.kind === 'vertical')
+      if (!vertical) continue
+      const laneX = vertical.x1
+      const entry = segments.find((segment) => (
+        segment.kind === 'horizontal' && Math.abs(segment.x2 - (stepX - 9)) < 0.5
+      ))
+      if (!entry) continue
+      for (const segment of segments) {
+        if (segment.kind === 'horizontal' && Math.abs(segment.x2 - stepX) < 0.5) {
+          routes.push({ exitY: segment.y1, laneX, endY: entry.y1 })
+        }
+      }
+    }
+    return routes
   }
 
   it('任何一条竖直通道都离步骤框左边缘至少 20px', () => {
@@ -404,7 +457,7 @@ describe('回跳通道与步骤框的间距', () => {
       )
       expect(stepLefts.length).toBeGreaterThan(0)
       const stepLeft = Math.min(...stepLefts)
-      const routes = branchRoutes(svg)
+      const routes = branchRoutes(computeSfcLayout(chart))
       expect(routes.length).toBeGreaterThan(0)
       for (const route of routes) {
         expect(stepLeft - route.laneX).toBeGreaterThanOrEqual(20)
@@ -431,10 +484,39 @@ describe('回跳通道与步骤框的间距', () => {
         { from: 'S2', to: 'S1', label: '返回' },
       ],
     }
-    const { svg } = renderSfcSvg(chart)
-    const routes = branchRoutes(svg)
+    const routes = branchRoutes(computeSfcLayout(chart))
     expect(routes).toHaveLength(2)
     const [out, back] = routes
     expect(Math.abs(out.exitY - back.endY)).toBeGreaterThanOrEqual(8)
+  })
+})
+
+describe('课程图的标题与斜杠折行', () => {
+  it('course-1 的四个抢答灯状态名都画在步骤框里', () => {
+    const chart = buildSfc(buildCourseLab('course-1')!)!
+    const { svg } = renderSfcSvg(chart)
+    for (const name of ['1 号抢答灯', '2 号抢答灯', '3 号抢答灯', '4 号抢答灯']) {
+      expect(svg, '步骤框里缺了「' + name + '」').toContain('>' + name + '<')
+    }
+  })
+
+  it('「保持 / 循环」整段折行，斜杠不落到行首、也不单独成行', () => {
+    const lines = wrapText('D 或 自动 H 且 SD 稳定 · 保持 / 循环', 208, 13)
+    expect(lines.length).toBeGreaterThan(1)
+    expect(lines.join('')).toContain('保持 / 循环')
+    for (const line of lines) {
+      expect(line).not.toMatch(/^[·，、；;,/／＋+]/)
+      expect(line).not.toMatch(/^[\s·，、；;,/／＋+]*$/)
+    }
+  })
+
+  it('course-6 的末行完整保留「保持 / 循环」', () => {
+    const chart = buildSfc(buildCourseLab('course-6')!)!
+    const lines = branchLabelLines(renderSfcSvg(chart).svg).map((line) => line.text)
+    expect(lines.some((line) => line.includes('保持 / 循环'))).toBe(true)
+    for (const line of lines) {
+      expect(line).not.toMatch(/^[·，、；;,/／＋+]/)
+      expect(line).not.toMatch(/^[\s·，、；;,/／＋+]*$/)
+    }
   })
 })

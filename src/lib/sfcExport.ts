@@ -5,15 +5,34 @@ import { assertSvgDocument, declareSvgDocument } from './svgDocument'
 
 const WHITE = '#ffffff'
 
-function loadSvgImage(xml: string) {
+function loadSvgImage(xml: string, signal?: AbortSignal) {
   const url = URL.createObjectURL(new Blob([xml], { type: 'image/svg+xml;charset=utf-8' }))
   const image = new Image()
   image.decoding = 'sync'
   const loaded = new Promise<void>((resolve, reject) => {
-    image.onload = () => resolve()
-    image.onerror = () => reject(new Error('顺序功能图解码失败，请重试'))
+    const cleanup = () => signal?.removeEventListener('abort', onAbort)
+    const onAbort = () => {
+      cleanup()
+      image.onload = null
+      image.onerror = null
+      image.src = ''
+      reject(new DOMException('导出已取消', 'AbortError'))
+    }
+    if (signal?.aborted) {
+      onAbort()
+      return
+    }
+    signal?.addEventListener('abort', onAbort, { once: true })
+    image.onload = () => {
+      cleanup()
+      resolve()
+    }
+    image.onerror = () => {
+      cleanup()
+      reject(new Error('顺序功能图解码失败，请重试'))
+    }
   })
-  image.src = url
+  if (!signal?.aborted) image.src = url
   return { image, url, loaded }
 }
 
@@ -24,8 +43,16 @@ export function serializeSfcSvg(chart: SfcChart): string {
   return declareSvgDocument(svg)
 }
 
+export interface SfcPngResult {
+  dataUrl: string
+  width: number
+  height: number
+  /** 相对 SVG 原始尺寸的输出倍率；小于 2 说明长图降过分辨率。 */
+  scale: number
+}
+
 /** 把顺序功能图渲染成纯白背景的 PNG（默认 2 倍，超长时自动降倍率）。 */
-export async function rasterizeSfcPng(chart: SfcChart): Promise<string> {
+export async function rasterizeSfcPng(chart: SfcChart, signal?: AbortSignal): Promise<SfcPngResult> {
   const rendered = renderSfcSvg(chart)
   const plan = planCanvasSize(rendered.width, rendered.height)
   if (!plan) {
@@ -33,10 +60,12 @@ export async function rasterizeSfcPng(chart: SfcChart): Promise<string> {
   }
   const { pixelWidth, pixelHeight } = plan
 
-  const { image, url, loaded } = loadSvgImage(rendered.svg)
+  const { image, url, loaded } = loadSvgImage(rendered.svg, signal)
   try {
     await loaded
+    if (signal?.aborted) throw new DOMException('导出已取消', 'AbortError')
     await image.decode().catch(() => {})
+    if (signal?.aborted) throw new DOMException('导出已取消', 'AbortError')
 
     const canvas = document.createElement('canvas')
     canvas.width = pixelWidth
@@ -46,7 +75,8 @@ export async function rasterizeSfcPng(chart: SfcChart): Promise<string> {
     context.fillStyle = WHITE
     context.fillRect(0, 0, pixelWidth, pixelHeight)
     context.drawImage(image, 0, 0, pixelWidth, pixelHeight)
-    return canvas.toDataURL('image/png')
+    // 把真实尺寸一起交回去，界面才能告诉用户这张长图是不是降过倍率。
+    return { dataUrl: canvas.toDataURL('image/png'), width: pixelWidth, height: pixelHeight, scale: plan.scale }
   } finally {
     URL.revokeObjectURL(url)
   }

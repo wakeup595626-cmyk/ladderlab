@@ -2,7 +2,8 @@ import { useRef, useState } from 'react'
 import type { DragEvent } from 'react'
 import { contentRungs } from '../engine/rungInvariant'
 import type { LadderNode, Program } from '../engine/types'
-import { MAX_IMPORT_BYTES, parseProgramText } from '../lib/io'
+import { createLatestRequestGate, MAX_IMPORT_BYTES, parseProgramStructureText } from '../lib/io'
+import type { ProgramIssue } from '../lib/io'
 import { useModalFocus } from '../lib/useModalFocus'
 import { CloseIcon, ImportIcon } from './Icons'
 import './ProjectImportDialog.css'
@@ -15,6 +16,7 @@ interface ProjectImportDialogProps {
 
 interface ImportPreview {
   program: Program
+  issues: ProgramIssue[]
   source: string
   size: number | null
 }
@@ -44,14 +46,18 @@ function ProjectImportDialogContent({ onClose, onImport }: Omit<ProjectImportDia
   const fileInputRef = useRef<HTMLInputElement>(null)
   const firstButtonRef = useRef<HTMLButtonElement>(null)
   const dialogRef = useModalFocus<HTMLElement>(true, onClose, firstButtonRef)
+  const requestGate = useRef(createLatestRequestGate()).current
 
-  const inspectText = (text: string, source: string, size: number | null) => {
+  const inspectText = (text: string, source: string, size: number | null, requestId = requestGate.begin()) => {
+    if (!requestGate.isCurrent(requestId)) return false
     try {
-      const program = parseProgramText(text)
-      setPreview({ program, source, size })
+      const parsed = parseProgramStructureText(text)
+      if (!requestGate.isCurrent(requestId)) return false
+      setPreview({ program: parsed.program, issues: parsed.issues, source, size })
       setError('')
       return true
     } catch (reason) {
+      if (!requestGate.isCurrent(requestId)) return false
       setPreview(null)
       setError(reason instanceof Error ? reason.message : '工程文件无法读取')
       return false
@@ -60,16 +66,20 @@ function ProjectImportDialogContent({ onClose, onImport }: Omit<ProjectImportDia
 
   const inspectFile = async (file: File | undefined) => {
     if (!file) return
+    const requestId = requestGate.begin()
     try {
       if (file.size > MAX_IMPORT_BYTES) {
         throw new Error(`工程文件超过 ${MAX_IMPORT_BYTES / (1024 * 1024)} MB 上限，请精简后再导入`)
       }
-      inspectText(await file.text(), file.name, file.size)
+      const text = await file.text()
+      if (!requestGate.isCurrent(requestId)) return
+      inspectText(text, file.name, file.size, requestId)
     } catch (reason) {
+      if (!requestGate.isCurrent(requestId)) return
       setPreview(null)
       setError(reason instanceof Error ? reason.message : '工程文件无法读取')
     } finally {
-      if (fileInputRef.current) fileInputRef.current.value = ''
+      if (requestGate.isCurrent(requestId) && fileInputRef.current) fileInputRef.current.value = ''
     }
   }
 
@@ -183,9 +193,23 @@ function ProjectImportDialogContent({ onClose, onImport }: Omit<ProjectImportDia
               <div><dt>元件</dt><dd>{elementCount}</dd></div>
             </dl>
             <p className="project-import-note">导入会替换当前工程，并保留在撤销历史中。</p>
+            {preview.issues.length > 0 && (
+              <div className="project-import-issues" role="status">
+                <strong>{preview.issues.length} 处变量问题待修正</strong>
+                <span>工程可以先打开，变量表会标出需要补地址或改引用的位置。</span>
+                <details>
+                  <summary>查看全部问题</summary>
+                  <ul>
+                    {preview.issues.map((issue, index) => <li key={`${issue.code}-${index}`}>{issue.message}</li>)}
+                  </ul>
+                </details>
+              </div>
+            )}
             <div className="project-import-actions">
               <button type="button" className="project-import-back" onClick={() => setPreview(null)}>重新选择</button>
-              <button type="button" className="project-import-confirm" onClick={() => onImport(preview.program)}>导入并打开</button>
+              <button type="button" className="project-import-confirm" onClick={() => onImport(preview.program)}>
+                {preview.issues.length > 0 ? '仍然导入并打开' : '导入并打开'}
+              </button>
             </div>
           </div>
         )}

@@ -11,7 +11,7 @@ import type {
   TagKind,
 } from '../engine/types'
 import { uid } from '../lib/uid'
-import { withinFieldLimit } from '../lib/limits'
+import { FIELD_LIMITS, withinFieldLimit } from '../lib/limits'
 import { isBlankRung } from '../engine/rungInvariant'
 import {
   byteAddressLength,
@@ -47,14 +47,17 @@ export function nextInstanceName(program: Program, prefix: 'T' | 'C'): string {
   return `${prefix}${index}`
 }
 
-function freeAddress(program: Program, kind: TagKind): string {
-  const used = new Set(program.tags.map((tag) => tag.address.trim().toUpperCase()))
+function freeAddress(program: Program, kind: TagKind): string | null {
+  const used = new Set(program.tags.map((tag) => canonicalAddress(tag.address)))
   const boolBytes = new Set<number>()
   const intBytes = new Set<number>()
   for (const tag of program.tags) {
-    const bit = parseBitAddress(tag.address)
+    // 旧工程可能把地址写成不带 % 的 M10.0；先规范化再解析，
+    // 否则地址池会把同一个地址再发一次，导出时才暴露重复。
+    const normalized = canonicalAddress(tag.address)
+    const bit = parseBitAddress(normalized)
     if (bit?.area === 'M') boolBytes.add(bit.byte)
-    const byte = parseByteAddress(tag.address)
+    const byte = parseByteAddress(normalized)
     if (byte?.area === 'M') {
       for (let offset = 0; offset < byteAddressLength(byte.width); offset += 1) {
         intBytes.add(byte.byte + offset)
@@ -64,15 +67,73 @@ function freeAddress(program: Program, kind: TagKind): string {
   for (let index = 0; index < 512; index += 1) {
     if (kind === 'BOOL') {
       const address = `%M${index}.0`
-      if (!used.has(address.toUpperCase()) && !intBytes.has(index)) return address
+      if (!used.has(address) && !intBytes.has(index)) return address
     } else {
       const address = `%MW${index * 2}`
-      if (!used.has(address.toUpperCase())
+      if (!used.has(address)
         && !boolBytes.has(index * 2) && !boolBytes.has(index * 2 + 1)
         && !intBytes.has(index * 2) && !intBytes.has(index * 2 + 1)) return address
     }
   }
-  return ''
+  return null
+}
+
+/** 合法 PLC 地址统一成 TIA 写法；格式不对时返回 null（空地址也算 null）。 */
+function normalizedTagAddress(input: string): string | null {
+  const compact = input.trim().toUpperCase().replace(/\s+/g, '')
+  if (!compact) return null
+  return normalizeBitAddress(compact) ?? normalizeByteAddress(compact)
+}
+
+/**
+ * 变量地址的比较口径，必须与 src/lib/io.ts 的 canonicalAddress 保持一致：
+ * 合法地址统一成 %M10.0 / %MW10，无法识别的输入只做大小写与空白压缩。
+ * 这里刻意本地实现一份：programOps 不依赖存储层，两边靠测试对齐。
+ */
+function canonicalAddress(address: string): string {
+  return normalizedTagAddress(address) ?? address.trim().toUpperCase().replace(/\s+/g, '')
+}
+
+/**
+ * 变量地址可否写进 tagId 这一行的唯一判定。
+ * updateTag 与界面上的 tagAddressProblem 都走这里，避免一边放行一边拒收。
+ */
+function addressProblem(program: Program, tagId: string, rawAddress: string): string | null {
+  const address = rawAddress.trim()
+  if (!address) return '变量地址不能为空。'
+  if (!withinFieldLimit('address', address)) {
+    return `变量地址最多 ${FIELD_LIMITS.address} 个字符（现在是 ${address.length} 个）。`
+  }
+  const key = normalizedTagAddress(address)
+  if (!key) return `“${address}”不是有效的 PLC 地址，请写成 M10.0 或 MW10 这样的形式。`
+  const clash = program.tags.find((tag) => tag.id !== tagId && canonicalAddress(tag.address) === key)
+  if (clash) return `地址 ${key} 已被变量“${clash.name}”占用。`
+  return null
+}
+
+/**
+ * 供界面在提交前问一句“这个地址写进去行不行”。合法返回 null，否则返回可读的中文原因。
+ */
+export function tagAddressProblem(program: Program, tagId: string, address: string): string | null {
+  return addressProblem(program, tagId, address)
+}
+
+function createTag(
+  program: Program,
+  kind: TagKind,
+  address: string,
+  options: { auto?: boolean } = {},
+): Program {
+  const tag: TagDef = {
+    id: uid('tag'),
+    name: nextTagName(program, kind),
+    address,
+    kind,
+    initial: kind === 'BOOL' ? false : 0,
+    comment: '',
+    ...(options.auto ? { auto: true } : {}),
+  }
+  return { ...program, tags: [...program.tags, tag] }
 }
 
 /**
@@ -84,16 +145,11 @@ export function addTag(
   kind: TagKind,
   options: { auto?: boolean } = {},
 ): Program {
-  const tag: TagDef = {
-    id: uid('tag'),
-    name: nextTagName(program, kind),
-    address: freeAddress(program, kind),
-    kind,
-    initial: kind === 'BOOL' ? false : 0,
-    comment: '',
-    ...(options.auto ? { auto: true } : {}),
-  }
-  return { ...program, tags: [...program.tags, tag] }
+  const address = freeAddress(program, kind)
+  // 地址池用完就保持原样：宁可这次不建变量，也不能登记一个空地址的变量，
+  // 否则它会被写进工程文件，下次载入直接变成一条无法编译的表项。
+  if (!address) return program
+  return createTag(program, kind, address, options)
 }
 
 function rewriteRefs(program: Program, oldName: string, newName: string): Program {
@@ -149,16 +205,21 @@ export function updateTag(
   const current = program.tags.find((tag) => tag.id === tagId)
   if (!current) return program
   const nextName = patch.name === undefined ? current.name : patch.name.trim()
+  // 合法地址写回规范形式，避免 M10.0 与 %M10.0 在变量表里看起来像两个地址。
+  const nextAddress = patch.address === undefined
+    ? current.address
+    : normalizedTagAddress(patch.address) ?? patch.address.trim()
   const nextComment = patch.comment === undefined ? current.comment : patch.comment
   if (
     (patch.name !== undefined && (!nextName || !withinFieldLimit('tagName', nextName)))
     || (patch.comment !== undefined && !withinFieldLimit('tagComment', nextComment))
+    || (patch.address !== undefined && addressProblem(program, tagId, nextAddress) !== null)
   ) {
     return program
   }
   const renaming = nextName !== current.name
   const unchanged = (Object.keys(patch) as Array<keyof typeof patch>).every((key) => (
-    Object.is(current[key], key === 'name' ? nextName : patch[key])
+    Object.is(current[key], key === 'name' ? nextName : key === 'address' ? nextAddress : patch[key])
   ))
   if (unchanged) return program
   const duplicate = renaming && program.tags.some((tag) => (
@@ -171,7 +232,7 @@ export function updateTag(
       if (tag.id === tagId) {
         // 用户亲手改过这一行，就当作他自己登记的表项，删指令时不再跟着消失。
         const adopted = tag.auto === true && !options.keepAuto ? { auto: false as const } : {}
-        return { ...tag, ...patch, name: nextName, ...adopted }
+        return { ...tag, ...patch, name: nextName, address: nextAddress, ...adopted }
       }
       if (tag.bitOf !== undefined && normalizeReference(tag.bitOf) === normalizeReference(current.name)) {
         return { ...tag, bitOf: nextName }
@@ -204,18 +265,17 @@ export function ensureAddressTag(
         : '整数地址要写成 MW10、MD10 或 %MW100。',
     }
   }
-  const existing = program.tags.find((tag) => tag.address.trim().toUpperCase() === address)
+  const existing = program.tags.find((tag) => canonicalAddress(tag.address) === address)
   if (existing) {
     if (existing.kind !== kind) {
       return { error: `${address} 已被 ${existing.kind} 变量“${existing.name}”占用。` }
     }
     return { program, tag: existing }
   }
-  const added = addTag(program, kind, { auto: true })
-  const created = added.tags.at(-1)
+  const next = createTag(program, kind, address, { auto: true })
+  const created = next.tags[next.tags.length - 1]
   if (!created) return { error: '无法新建变量。' }
-  const next = updateTag(added, created.id, { address }, { keepAuto: true })
-  return { program: next, tag: next.tags.find((tag) => tag.id === created.id) ?? created }
+  return { program: next, tag: created }
 }
 
 export function deleteTag(program: Program, tagId: string): Program {
@@ -796,16 +856,18 @@ function tagForNewContact(
 export function makeContactNode(
   program: Program,
   kind: ContactKind,
-): { program: Program; node: ContactNode; createdTag?: TagDef } {
+): { program: Program; node: ContactNode | null; createdTag?: TagDef } {
   const tagKind: TagKind = kind === 'CMP' ? 'INT' : 'BOOL'
   const made = tagForNewContact(program, tagKind)
   const next = made.program
   const tag = made.tag
+  // 地址池耗尽时 addTag 会保持原样：宁可这次不落元件，也不能生成空操作数。
+  if (!tag) return { program: next, node: null }
   const node: ContactNode = {
     type: 'contact',
     id: uid('c'),
     kind,
-    tag: tag?.name ?? '',
+    tag: tag.name,
     ...(kind === 'CMP' ? { compare: { op: '>=', value: 1 } } : {}),
   }
   return { program: next, node, createdTag: made.created ? tag : undefined }
@@ -823,6 +885,7 @@ export function insertContactAt(
     return program
   }
   const made = makeContactNode(program, kind)
+  if (!made.node) return program
   return insertNodeAt(made.program, rungId, slot, made.node)
 }
 
@@ -835,12 +898,13 @@ export function insertContact(
   const tagKind: TagKind = kind === 'CMP' ? 'INT' : 'BOOL'
   const made = tagForNewContact(program, tagKind)
   const tag = made.tag
+  if (!tag) return program
   let next = made.program
   const node: LadderNode = {
     type: 'contact',
     id: uid('c'),
     kind,
-    tag: tag?.name ?? '',
+    tag: tag.name,
     ...(kind === 'CMP' ? { compare: { op: '>=', value: 1 } } : {}),
   }
   next = withRung(next, rungId, (rung) => ({
@@ -862,7 +926,9 @@ export function wrapInParallel(program: Program, rungId: string, path: number[])
   const target = getNodeAtPath(next, rungId, path)
   const boolTags = next.tags.filter((tag) => tag.kind === 'BOOL')
   const preferred = boolTags.find((tag) => tag.name !== (target?.type === 'contact' ? target.tag : '')) ?? boolTags[0]
-  const branchNode: LadderNode = { type: 'contact', id: uid('c'), kind: 'NO', tag: preferred?.name ?? '' }
+  // 没有可用的 BOOL 地址就不开分支：空操作数的并联支路在编译时必定报错。
+  if (!preferred) return program
+  const branchNode: LadderNode = { type: 'contact', id: uid('c'), kind: 'NO', tag: preferred.name }
   next = withRung(next, rungId, (rung) => ({
     ...rung,
     nodes: sanitizeChain(
@@ -993,9 +1059,11 @@ export function openBranchAtSlot(
     const parent = getNodeAtPath(program, rungId, parallelPath)
     if (!parent || parent.type !== 'parallel') return null
     const made = makeContactNode(program, 'NO')
+    if (!made.node) return null
+    const madeNode = made.node
     const nextNodes = mapChain(rung.nodes, parallelPath, (node) => (
       node.type === 'parallel'
-        ? { ...node, branches: [...node.branches, [made.node]] }
+        ? { ...node, branches: [...node.branches, [madeNode]] }
         : node
     ))
     return {
@@ -1013,6 +1081,7 @@ export function openBranchAtSlot(
   // 继续拒绝，避免生成永远无法闭合的双线。
   if (chain.length === 0 || slot.index >= chain.length) return null
   const made = makeContactNode(program, 'NO')
+  if (!made.node) return null
   const parallel: LadderNode = {
     type: 'parallel',
     id: uid('par'),
@@ -1350,7 +1419,8 @@ export function changeOutputKind(program: Program, rungId: string, kind: OutputK
   let output: OutputElement
   if (kind === 'COIL' || kind === 'SET' || kind === 'RESET') {
     const boolTag = next.tags.find((tag) => tag.kind === 'BOOL')
-    output = { id: base.id, kind, tag: boolTag?.name ?? '' }
+    if (!boolTag) return program
+    output = { id: base.id, kind, tag: boolTag.name }
   } else if (kind === 'CTU') {
     output = { id: base.id, kind, tag: nextInstanceName(next, 'C'), pv: 5, resetTag: '' }
   } else if (kind === 'TON' || kind === 'TOF' || kind === 'TONR') {
@@ -1358,12 +1428,14 @@ export function changeOutputKind(program: Program, rungId: string, kind: OutputK
   } else if (kind === 'PATTERN') {
     const intTag = next.tags.find((tag) => tag.kind === 'INT')
     const boolTag = next.tags.find((tag) => tag.kind === 'BOOL')
-    output = { id: base.id, kind, tag: intTag?.name ?? '', pulseTag: boolTag?.name ?? '', pattern: [1, 2, 4, 8] }
+    if (!intTag || !boolTag) return program
+    output = { id: base.id, kind, tag: intTag.name, pulseTag: boolTag.name, pattern: [1, 2, 4, 8] }
   } else {
     const intTag = next.tags.find((tag) => tag.kind === 'INT')
+    if (!intTag) return program
     output = kind === 'MOVE'
-      ? { id: base.id, kind, tag: intTag?.name ?? '', value: 0 }
-      : { id: base.id, kind, tag: intTag?.name ?? '', value: 1 }
+      ? { id: base.id, kind, tag: intTag.name, value: 0 }
+      : { id: base.id, kind, tag: intTag.name, value: 1 }
   }
   return withRung(next, rungId, (item) => ({ ...item, output }))
 }
@@ -1389,11 +1461,13 @@ export function changeContactKind(program: Program, rungId: string, path: number
       }))
     }
     const made = tagForNewContact(program, 'INT')
+    if (!made.tag) return program
+    const madeTag = made.tag
     return withRung(made.program, rungId, (rung) => ({
       ...rung,
       nodes: replaceContactAtPath(rung.nodes, path, {
         kind,
-        tag: made.tag?.name ?? '',
+        tag: madeTag.name,
         compareOp: '>=',
         compareValue: 1,
       }),
@@ -1401,9 +1475,11 @@ export function changeContactKind(program: Program, rungId: string, path: number
   }
   if (kind === 'NO' || kind === 'NC' || kind === 'P' || kind === 'N') {
     const made = tagForNewContact(program, 'BOOL')
+    if (!made.tag) return program
+    const madeTag = made.tag
     return withRung(made.program, rungId, (rung) => ({
       ...rung,
-      nodes: replaceContactAtPath(rung.nodes, path, { kind, tag: made.tag?.name ?? '' }),
+      nodes: replaceContactAtPath(rung.nodes, path, { kind, tag: madeTag.name }),
     }))
   }
   return program

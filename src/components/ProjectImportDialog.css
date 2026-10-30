@@ -251,6 +251,44 @@
   line-height: 1.5;
 }
 
+.project-import-issues {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 11px 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border));
+  border-radius: var(--radius-control);
+  background: var(--accent-wash);
+  color: var(--text);
+  font-size: 11.5px;
+  line-height: 1.55;
+}
+
+.project-import-issues strong {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.project-import-issues > span {
+  color: var(--muted);
+}
+
+.project-import-issues summary {
+  width: fit-content;
+  color: var(--accent-ink);
+  cursor: pointer;
+}
+
+.project-import-issues ul {
+  margin: 7px 0 0;
+  padding-left: 18px;
+  color: var(--muted);
+}
+
+.project-import-issues li + li {
+  margin-top: 3px;
+}
+
 .project-import-actions {
   display: flex;
   justify-content: flex-end;
@@ -304,5 +342,14 @@
 
   .project-import-actions button {
     flex: 1;
+  }
+}
+
+@media (pointer: coarse) {
+  .project-import-file,
+  .project-import-check,
+  .project-import-confirm,
+  .project-import-back {
+    min-height: 44px;
   }
 }

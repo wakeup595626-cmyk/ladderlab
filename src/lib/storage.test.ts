@@ -49,6 +49,22 @@ class MemoryStorage implements Storage {
 let storage: MemoryStorage
 let session: MemoryStorage
 
+function programWithSemanticIssues(name = '带问题草稿') {
+  const program = starterProgram()
+  return {
+    ...program,
+    name,
+    tags: program.tags.map((tag, index) => {
+      if (index === 1) return { ...tag, address: ' %i0.0 ' }
+      if (index === 2) return { ...tag, address: '' }
+      return tag
+    }),
+    rungs: program.rungs.map((rung, index) => (
+      index === 0 ? { ...rung, output: { ...rung.output, tag: 'MissingMotor' } } : rung
+    )),
+  }
+}
+
 function recoveryKeys(): string[] {
   return Array.from({ length: storage.length }, (_, index) => storage.key(index)).filter(
     (key): key is string => key?.startsWith(RECOVERY_KEY_PREFIX) ?? false,
@@ -271,6 +287,62 @@ describe('storage', () => {
     expect(loaded.source).toBe('legacy')
     expect(loaded.savedAt).toBe(1700000000000)
     expect(loaded.program).toEqual(program)
+  })
+
+  it('loads a schema 2 draft with semantic issues and returns them alongside the program', () => {
+    const raw = JSON.stringify({
+      schema: 2,
+      tabId: 'tab-semantic',
+      projectId: 'project-semantic',
+      baseSavedAt: Date.now() - 2_000,
+      savedAt: Date.now() - 1_000,
+      program: programWithSemanticIssues(),
+    })
+    session.setItem(SESSION_STORAGE_KEY, raw)
+
+    const loaded = loadSavedProgram()
+    expect(loaded.status).toBe('ok')
+    if (loaded.status !== 'ok') throw new Error('expected the semantic-issue draft')
+    expect(loaded.source).toBe('tab')
+    expect(loaded.projectId).toBe('project-semantic')
+    expect(loaded.issues.map((issue) => issue.code).sort()).toEqual([
+      'duplicate-address',
+      'empty-address',
+      'undefined-reference',
+    ])
+    expect(loaded.program.tags.map((tag) => tag.address)).toEqual(['%I0.0', '%i0.0', ''])
+    expect(loaded.program.rungs[0]?.output.tag).toBe('MissingMotor')
+  })
+
+  it('loads a legacy draft with semantic issues instead of reporting corruption', () => {
+    storage.setItem(LEGACY_STORAGE_KEY, JSON.stringify(programWithSemanticIssues('旧版带问题工程')))
+
+    const loaded = loadSavedProgram()
+    expect(loaded.status).toBe('ok')
+    if (loaded.status !== 'ok') throw new Error('expected the legacy semantic-issue draft')
+    expect(loaded.source).toBe('legacy')
+    expect(loaded.program.name).toBe('旧版带问题工程')
+    expect(loaded.issues.map((issue) => issue.code).sort()).toEqual([
+      'duplicate-address',
+      'empty-address',
+      'undefined-reference',
+    ])
+  })
+
+  it('still reports a structurally broken schema 2 draft as corrupt', () => {
+    const program = starterProgram()
+    const duplicatedId = program.tags[0]?.id
+    if (!duplicatedId) throw new Error('expected the starter project to have tags')
+    program.tags[1] = { ...program.tags[1]!, id: duplicatedId }
+    const raw = JSON.stringify({ schema: 2, savedAt: Date.now(), program })
+    session.setItem(SESSION_STORAGE_KEY, raw)
+
+    const loaded = loadSavedProgram()
+    expect(loaded.status).toBe('corrupt')
+    if (loaded.status !== 'corrupt') throw new Error('expected a corrupt result')
+    expect(loaded.raw).toContain(raw)
+    expect(loaded.message).toContain('草稿里的工程内容已损坏')
+    expect(loaded.message).toContain('重复')
   })
 
   it('parses and rejects schema 2 drafts based on their actual project contents', () => {

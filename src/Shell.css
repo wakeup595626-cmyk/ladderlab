@@ -5219,6 +5219,15 @@ body[data-drag-kind] {
   text-align: center;
 }
 
+.tag-card .table-input[aria-invalid='true'] {
+  border-color: var(--negative);
+  background: var(--negative-wash);
+}
+
+.tag-card .table-input[aria-invalid='true']:focus {
+  outline-color: color-mix(in srgb, var(--negative) 30%, transparent);
+}
+
 .tag-card select.table-input {
   appearance: none;
   padding: 0 12px 0 3px;
@@ -5358,6 +5367,16 @@ body[data-drag-kind] {
   .wb-project-name input,
   .wb-coach-dismiss {
     height: 44px;
+    min-height: 44px;
+  }
+
+  .wb-shell .tag-card .table-input,
+  .wb-shell .tag-card .live-value,
+  .wb-shell .tag-card > .comment-input,
+  .wb-shell .tag-name-cell,
+  .wb-shell .tag-search,
+  .wb-shell .tag-search-input,
+  .wb-shell .comment-input {
     min-height: 44px;
   }
 

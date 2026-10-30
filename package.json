@@ -30,6 +30,7 @@
     "qa:share": "node scripts/qa-share-link.mjs",
     "qa:a11y": "node scripts/qa-a11y.mjs",
     "qa:export": "node scripts/qa-export-svg.mjs",
+    "qa:export-custom": "node scripts/qa-export-custom.mjs",
     "qa:perf": "node scripts/qa-perf-large.mjs",
     "pretest:e2e": "npm run build",
     "test:e2e": "playwright test --config=tests/e2e/playwright.config.ts",
