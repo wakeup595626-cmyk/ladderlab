@@ -4170,8 +4170,10 @@ body[data-drag-kind] {
 
 @media (min-width: 1025px) {
   .wb-program-resizer {
-    --program-resizer-rail: color-mix(in srgb, var(--faint) 78%, var(--control));
-    --program-resizer-ink: color-mix(in srgb, var(--text) 58%, var(--faint));
+    --program-resizer-rail: color-mix(in srgb, var(--accent) 34%, var(--control));
+    --program-resizer-chip: var(--accent);
+    --program-resizer-chip-hover: var(--accent-ink);
+    --program-resizer-highlight-x: 1px;
     position: absolute;
     inset-block: 0;
     z-index: 4;
@@ -4180,7 +4182,6 @@ body[data-drag-kind] {
     padding: 0;
     border: 0;
     background: transparent;
-    color: var(--program-resizer-ink);
     cursor: col-resize;
     touch-action: none;
     outline: none;
@@ -4192,13 +4193,21 @@ body[data-drag-kind] {
 
   .wb-program-resizer.is-right {
     right: -24px;
+    --program-resizer-highlight-x: -1px;
+  }
+
+  .wb-program-resizer.is-left::before {
+    left: 100%;
+  }
+
+  .wb-program-resizer.is-right::before {
+    left: 0;
   }
 
   .wb-program-resizer::before {
     content: '';
     position: absolute;
     inset-block: 0;
-    left: 50%;
     width: 1px;
     background: var(--program-resizer-rail);
     box-shadow: 1px 0 0 color-mix(in srgb, var(--surface) 58%, transparent);
@@ -4209,32 +4218,28 @@ body[data-drag-kind] {
   .wb-program-resizer-grip {
     position: absolute;
     top: var(--program-resizer-grip-top, 72px);
-    left: 50%;
-    width: 11px;
-    height: 46px;
-    border: 1px solid color-mix(in srgb, var(--program-resizer-rail) 76%, var(--muted));
-    border-radius: 999px;
-    background-color: color-mix(in srgb, var(--surface) 94%, var(--program-resizer-rail));
-    background-image:
-      radial-gradient(circle at 3px 3px, currentColor 1.15px, transparent 1.45px),
-      radial-gradient(circle at 7px 3px, currentColor 1.15px, transparent 1.45px),
-      radial-gradient(circle at 3px 8px, currentColor 1.15px, transparent 1.45px),
-      radial-gradient(circle at 7px 8px, currentColor 1.15px, transparent 1.45px),
-      radial-gradient(circle at 3px 13px, currentColor 1.15px, transparent 1.45px),
-      radial-gradient(circle at 7px 13px, currentColor 1.15px, transparent 1.45px);
-    background-position: center;
-    background-repeat: no-repeat;
-    background-size: 10px 16px;
+    width: 8px;
+    height: 42px;
+    border-radius: 4px 0 0 4px;
+    background: var(--program-resizer-chip);
     box-shadow:
-      0 1px 2px color-mix(in srgb, var(--text) 13%, transparent),
-      inset 0 1px 0 color-mix(in srgb, var(--surface) 88%, transparent);
-    transform: translateX(-50%);
+      0 1px 3px color-mix(in srgb, var(--accent-ink) 26%, transparent),
+      inset var(--program-resizer-highlight-x) 0 0 color-mix(in srgb, var(--surface) 42%, transparent);
     pointer-events: none;
     transition:
-      border-color 120ms ease,
-      background-color 120ms ease,
-      box-shadow 120ms ease,
-      color 120ms ease;
+      width 140ms ease,
+      background-color 140ms ease,
+      box-shadow 140ms ease;
+  }
+
+  .wb-program-resizer.is-left .wb-program-resizer-grip {
+    left: 100%;
+    transform: translateX(-100%);
+  }
+
+  .wb-program-resizer.is-right .wb-program-resizer-grip {
+    left: 0;
+    border-radius: 0 4px 4px 0;
   }
 
   .wb-program-resizer-tip {
@@ -4264,12 +4269,6 @@ body[data-drag-kind] {
     right: 18px;
   }
 
-  .wb-program-resizer:hover,
-  .wb-program-resizer:focus-visible,
-  .wb-shell[data-program-sheet-resizing='true'] .wb-program-resizer {
-    color: var(--accent);
-  }
-
   .wb-program-resizer:hover::before,
   .wb-program-resizer:focus-visible::before,
   .wb-shell[data-program-sheet-resizing='true'] .wb-program-resizer::before {
@@ -4281,12 +4280,11 @@ body[data-drag-kind] {
   .wb-program-resizer:hover .wb-program-resizer-grip,
   .wb-program-resizer:focus-visible .wb-program-resizer-grip,
   .wb-program-resizer[data-resizing='true'] .wb-program-resizer-grip {
-    border-color: var(--accent);
-    background-color: color-mix(in srgb, var(--accent-wash) 74%, var(--surface));
-    color: var(--accent-ink);
+    width: 12px;
+    background-color: var(--program-resizer-chip-hover);
     box-shadow:
-      0 2px 5px color-mix(in srgb, var(--accent) 18%, transparent),
-      inset 0 1px 0 color-mix(in srgb, var(--surface) 84%, transparent);
+      0 2px 6px color-mix(in srgb, var(--accent-ink) 34%, transparent),
+      inset var(--program-resizer-highlight-x) 0 0 color-mix(in srgb, var(--surface) 55%, transparent);
   }
 
   .wb-program-resizer:hover .wb-program-resizer-tip,

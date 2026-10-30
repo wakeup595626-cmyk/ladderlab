@@ -1885,7 +1885,7 @@ export default function App() {
       const frameRect = frame.getBoundingClientRect()
       const rungRect = rung.getBoundingClientRect()
       const grip = frame.querySelector<HTMLElement>('.wb-program-resizer-grip')
-      const gripHeight = grip?.getBoundingClientRect().height || 46
+      const gripHeight = grip?.getBoundingClientRect().height || 42
       const centered = rungRect.top - frameRect.top + (rungRect.height - gripHeight) / 2
       const top = Math.max(0, Math.min(centered, Math.max(0, frame.offsetHeight - gripHeight)))
       frame.style.setProperty('--program-resizer-grip-top', `${Math.round(top)}px`)

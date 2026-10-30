@@ -8,6 +8,13 @@ async function expectGripsToFollowRung(page: Page, index: number): Promise<void>
 
   const grips = page.locator('.wb-program-resizer-grip')
   await expect(grips).toHaveCount(2)
+  await expect(grips.first().locator('svg')).toHaveCount(0)
+  await expect.poll(async () => (
+    await grips.first().evaluate((element) => {
+      const style = getComputedStyle(element)
+      return `${style.backgroundImage}|${style.width}`
+    })
+  )).toBe('none|8px')
 
   await expect.poll(async () => {
     const [rungBox, leftBox, rightBox] = await Promise.all([
