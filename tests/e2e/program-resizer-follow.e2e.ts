@@ -15,6 +15,14 @@ async function expectGripsToFollowRung(page: Page, index: number): Promise<void>
       return `${style.backgroundImage}|${style.width}`
     })
   )).toBe('none|8px')
+  await expect.poll(async () => (
+    await grips.first().evaluate((element) => {
+      const style = getComputedStyle(element)
+      const property = style.transitionProperty.split(',')[0].trim()
+      const duration = style.transitionDuration.split(',')[0].trim()
+      return `${property}|${duration}`
+    })
+  )).toContain('top|0.32s')
 
   await expect.poll(async () => {
     const [rungBox, leftBox, rightBox] = await Promise.all([
