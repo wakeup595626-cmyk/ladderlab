@@ -62,7 +62,7 @@ body:has([role='dialog'][aria-modal='true'], .qe-panel) .support-badge {
     border-color: var(--accent);
     background: var(--surface);
     box-shadow: 0 2px 4px rgba(21, 24, 22, 0.08), 0 8px 20px rgba(21, 24, 22, 0.11);
-    color: var(--frame-ink);
+    color: var(--accent-ink);
   }
 }
 
@@ -99,7 +99,6 @@ body:has([role='dialog'][aria-modal='true'], .qe-panel) .support-badge {
   border: 0;
   border-radius: 10px 10px 0 0;
   background: transparent;
-  background-clip: content-box;
   color: inherit;
   cursor: inherit;
   touch-action: none;
@@ -127,13 +126,6 @@ body:has([role='dialog'][aria-modal='true'], .qe-panel) .support-badge {
   text-align: center;
   white-space: nowrap;
   color: inherit;
-}
-
-@media (hover: hover) and (pointer: fine) {
-  .support-badge-trigger:hover {
-    background: var(--accent-wash);
-    color: var(--accent-ink);
-  }
 }
 
 .support-badge-trigger:focus-visible {

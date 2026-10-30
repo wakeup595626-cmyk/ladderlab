@@ -221,6 +221,42 @@ try {
     `left=${geometry.root.left}, bottom=${geometry.root.bottom}`,
   )
 
+  // 浮标外层负责唯一的可见底色。按钮本身若再涂 hover 背景，会只盖住
+  // 上半块并留下横向硬接缝；这里同时守住透明按钮和统一的悬停前景色。
+  await send('Input.dispatchMouseEvent', {
+    type: 'mouseMoved',
+    x: geometry.trigger.left + geometry.trigger.width / 2,
+    y: geometry.trigger.top + geometry.trigger.height / 2,
+    button: 'none',
+  })
+  await sleep(250)
+  const hoverSurface = await evaluate(`(() => {
+    const pill = document.querySelector('.support-badge-pill')
+    const trigger = document.querySelector('.support-badge-trigger')
+    const caption = document.querySelector('.support-badge-caption')
+    return {
+      pillHovered: pill.matches(':hover'),
+      triggerBackground: getComputedStyle(trigger).backgroundColor,
+      triggerColor: getComputedStyle(trigger).color,
+      captionColor: getComputedStyle(caption).color,
+      pillBackground: getComputedStyle(pill).backgroundColor,
+    }
+  })()`)
+  check(
+    'desktop/hover-has-one-unbroken-surface',
+    hoverSurface.pillHovered
+      && hoverSurface.triggerBackground === 'rgba(0, 0, 0, 0)'
+      && hoverSurface.triggerColor === hoverSurface.captionColor,
+    JSON.stringify(hoverSurface),
+  )
+  const hoverShot = await send('Page.captureScreenshot', { format: 'png', fromSurface: true })
+  const hoverShotPath = resolve(process.env.TEMP ?? '.', 'ladderlab-support-badge-hover.png')
+  await (await import('node:fs/promises')).writeFile(
+    hoverShotPath,
+    Buffer.from(hoverShot.data, 'base64'),
+  )
+  console.log('SCREENSHOT ' + hoverShotPath)
+
   const targetsBeforeTriggerDrag = new Set((await pageTargets()).map((item) => item.id))
   await mouseDrag(
     { x: geometry.trigger.left + geometry.trigger.width / 2, y: geometry.trigger.top + geometry.trigger.height / 2 },
