@@ -4,8 +4,10 @@ import {
   clearAuthRedirectHash,
   clearStoredSession,
   describeAuthError,
+  ensureFreshSession,
   hasRecoveryRedirect,
   readStoredSession,
+  refreshCloudSession,
   resolveRecoverySession,
   updateCloudPassword,
   writeStoredSession,
@@ -57,6 +59,58 @@ describe('cloud session storage', () => {
     writeStoredSession(session, storage)
     clearStoredSession(storage)
     expect(readStoredSession(storage)).toBeNull()
+  })
+})
+
+describe('cloud session refresh', () => {
+  it('令牌还足够新时不发出刷新请求', async () => {
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+
+    const fresh = { ...session, expiresAt: Date.now() + 10 * 60_000 }
+    await expect(ensureFreshSession('https://example.supabase.co', 'anon-key', fresh))
+      .resolves.toBe(fresh)
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('临近过期时用 refresh_token 换取新会话', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      access_token: 'access-2',
+      refresh_token: 'refresh-2',
+      expires_in: 3600,
+      user: session.user,
+    }), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const stale = { ...session, expiresAt: Date.now() + 30_000 }
+    const refreshed = await ensureFreshSession('https://example.supabase.co', 'anon-key', stale)
+
+    expect(refreshed).toMatchObject({
+      accessToken: 'access-2',
+      refreshToken: 'refresh-2',
+      user: session.user,
+    })
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://example.supabase.co/auth/v1/token?grant_type=refresh_token',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({ apikey: 'anon-key' }),
+        body: JSON.stringify({ refresh_token: 'refresh-1' }),
+      }),
+    )
+  })
+
+  it('刷新响应没带邮箱时沿用原账号资料', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      access_token: 'access-3',
+      refresh_token: 'refresh-3',
+      expires_in: 3600,
+      user: { id: session.user.id },
+    }), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(refreshCloudSession('https://example.supabase.co', 'anon-key', session))
+      .resolves.toMatchObject({ user: session.user })
   })
 })
 

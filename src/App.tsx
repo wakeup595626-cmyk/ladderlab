@@ -503,6 +503,7 @@ export default function App() {
   const [guestProjectCount, setGuestProjectCount] = useState(0)
   // 从重置邮件回跳时直接打开账号面板，用户不必猜“下一步点哪里”。
   useEffect(() => {
+    // oxlint-disable-next-line react/set-state-in-effect -- 外部邮件回跳是副作用，必须同步打开面板
     if (account.recovery) setAccountOpen(true)
   }, [account.recovery])
   // 云同步回调要挂在保存/删除里，但那些回调的依赖数组不该被整个 account 对象拖着重算。
@@ -993,6 +994,7 @@ export default function App() {
     setProgramDraftScope(nextScope)
     const resolved = resolveStartupState(loadSavedProgram(), readProjectLibrary())
     const library = resolved.library
+    // oxlint-disable-next-line react/set-state-in-effect -- 账号切换后必须按新存储分区重建界面状态
     if (library.status === 'ok') applyLibrarySnapshot(library.projects, library.broken)
     else setProjectLibraryError(library.message)
 
@@ -1041,6 +1043,7 @@ export default function App() {
   useEffect(() => {
     if (!cloudUserId || !account.lastSync) return
     const latest = readProjectLibrary()
+    // oxlint-disable-next-line react/set-state-in-effect -- 同步完成是外部事件，需要刷新项目列表
     if (latest.status === 'ok') applyLibrarySnapshot(latest.projects, latest.broken)
     else setProjectLibraryError(latest.message)
   }, [account.lastSync, applyLibrarySnapshot, cloudUserId])

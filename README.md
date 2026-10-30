@@ -78,20 +78,23 @@ npm run preview
    `supabase/schema.sql`。脚本会建 `ladderlab_projects` 表，并开启行级安全策略，
    每个登录用户只能读写 `user_id` 等于自己的行。
 2. 在 Project Settings → API 复制 Project URL 和 anon public key。
-3. 在仓库根目录新建 `.env.local`（可参考 `.env.example`），填入：
+3. 回到 LadderLab，打开顶部的「登录」→「云端连接」，粘贴这两项即可。连接信息只保存
+   在当前浏览器，适合先验证自己的项目；不必改代码，也不必重新构建。
+4. 如果希望**所有访问 GitHub Pages 的人都能直接注册**，再把同样的两项配置加入仓库
+   Settings → Secrets and variables → Actions：`VITE_SUPABASE_URL` 和
+   `VITE_SUPABASE_ANON_KEY`，然后重新运行 Deploy workflow。`ci.yml` 与 `deploy.yml`
+   会把它们注入构建。
+5. 在 Supabase 的 Authentication → URL Configuration 中，把 Site URL 设为
+   `https://wakeup595626-cmyk.github.io/ladderlab/`，并把同一地址加入 Redirect URLs。
+   否则确认邮件和重置密码邮件会跳回错误地址。
+
+本地开发也可以把相同变量写入仓库根目录的 `.env.local`（格式见 `.env.example`），
+然后重新运行 `npm run dev`：
 
    ```dotenv
    VITE_SUPABASE_URL=https://你的项目.supabase.co
    VITE_SUPABASE_ANON_KEY=你的-anon-key
    ```
-
-4. 重新运行 `npm run dev` 或 `npm run build`。顶部出现「登录」按钮后即可注册、登录。
-
-发布到 GitHub Pages 时，还要在仓库 Settings → Secrets and variables → Actions 里添加
-同名的 `VITE_SUPABASE_URL` 和 `VITE_SUPABASE_ANON_KEY`；`ci.yml` 与 `deploy.yml` 会把它们
-注入构建。再到 Supabase 的 Authentication → URL Configuration，把 Site URL 设成
-`https://wakeup595626-cmyk.github.io/ladderlab/`，并把该地址加入 Redirect URLs，否则
-确认邮件和重置密码邮件会跳回错误地址。
 
 anon key 是公开密钥，本来就用于浏览器端；真正的权限由数据库的 RLS 策略控制。不要把
 `service_role` key 写进前端。邮箱注册默认需要点确认邮件；开发阶段也可以在 Supabase

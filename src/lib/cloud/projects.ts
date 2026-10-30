@@ -13,6 +13,8 @@ export interface CloudProjectRow {
 const SELECT_COLUMNS = 'id,name,program,created_at,saved_at,deleted_at'
 /** 单次拉取上限，避免账号里项目特别多时一次把页面拖死。 */
 const PAGE_SIZE = 500
+/** 真正的安全阀：正常账号远达不到，只防止后端异常时无限翻页。 */
+const MAX_PAGES = 200
 
 function listPath(table: string, offset: number): string {
   return `/rest/v1/${table}?select=${SELECT_COLUMNS}&order=saved_at.desc&limit=${PAGE_SIZE}&offset=${offset}`
@@ -40,8 +42,9 @@ export async function listCloudProjects(
   signal?: AbortSignal,
 ): Promise<CloudProjectRow[]> {
   const rows: CloudProjectRow[] = []
-  for (let offset = 0; offset < PAGE_SIZE * 20; offset += PAGE_SIZE) {
-    const page = await cloudRequest<unknown[]>(baseUrl, listPath(table, offset), apiKey, {
+  for (let pageIndex = 0; pageIndex < MAX_PAGES; pageIndex += 1) {
+    if (signal?.aborted) break
+    const page = await cloudRequest<unknown[]>(baseUrl, listPath(table, pageIndex * PAGE_SIZE), apiKey, {
       accessToken,
       signal,
     })
@@ -96,7 +99,8 @@ export async function markCloudProjectsDeleted(
     method: 'PATCH',
     accessToken,
     headers: { Prefer: 'return=minimal' },
-    body: { deleted_at: deletedAt },
+    // 墓碑只需要时间和 id；清空 program 避免每行永久携带整份工程。
+    body: { deleted_at: deletedAt, program: {} },
   })
 }
 

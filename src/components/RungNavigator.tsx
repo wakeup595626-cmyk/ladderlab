@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { RefObject } from 'react'
 import type { LadderNode, Program, Selection } from '../engine/types'
 import { contentRungs } from '../engine/rungInvariant'
@@ -22,6 +22,7 @@ function collectTags(nodes: LadderNode[], into: string[]): void {
 /** 程序段总览：跳段、上一段/下一段，以及按标题或变量名定位。 */
 export default function RungNavigator({ program, selection, paneRef, onSelect }: RungNavigatorProps) {
   const [query, setQuery] = useState('')
+  const navRef = useRef<HTMLElement>(null)
   const rungs = useMemo(() => contentRungs(program).map((rung, index) => {
     const tags: string[] = []
     collectTags(rung.nodes, tags)
@@ -40,6 +41,16 @@ export default function RungNavigator({ program, selection, paneRef, onSelect }:
   const current = selectedIndex >= 0 ? rungs[selectedIndex] ?? null : null
   const needle = query.trim().toLowerCase()
   const results = needle ? rungs.filter((rung) => rung.search.includes(needle)).slice(0, 8) : []
+
+  useEffect(() => {
+    if (!needle) return
+    const closeOnOutside = (event: PointerEvent) => {
+      if (navRef.current?.contains(event.target as Node)) return
+      setQuery('')
+    }
+    document.addEventListener('pointerdown', closeOnOutside, true)
+    return () => document.removeEventListener('pointerdown', closeOnOutside, true)
+  }, [needle])
 
   // 只有一段时导航没有意义，还会和下方的段标题重复；两种情况都直接让位给画布。
   if (rungs.length < 2) return null
@@ -72,7 +83,7 @@ export default function RungNavigator({ program, selection, paneRef, onSelect }:
   }
 
   return (
-    <nav className="rung-nav" aria-label="程序段导航">
+    <nav ref={navRef} className="rung-nav" aria-label="程序段导航">
       <button
         type="button"
         className="rung-nav-step"

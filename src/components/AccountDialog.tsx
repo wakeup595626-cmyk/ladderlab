@@ -2,7 +2,16 @@ import { useRef, useState } from 'react'
 import type { CloudAccountState } from '../lib/cloud/useCloudAccount'
 import { copyText } from '../lib/clipboard'
 import { useModalFocus } from '../lib/useModalFocus'
-import { CheckCircleIcon, CloudIcon, CloseIcon, UserIcon } from './Icons'
+import schemaSql from '../../supabase/schema.sql?raw'
+import {
+  ArrowUpRightIcon,
+  CheckCircleIcon,
+  ChevronDownIcon,
+  CloudIcon,
+  CloseIcon,
+  CopyIcon,
+  UserIcon,
+} from './Icons'
 import './AccountDialog.css'
 
 interface AccountDialogProps {
@@ -15,7 +24,7 @@ interface AccountDialogProps {
   onSynced: () => void
 }
 
-const ENV_SNIPPET = 'VITE_SUPABASE_URL=https://<你的项目>.supabase.co\nVITE_SUPABASE_ANON_KEY=<anon public key>'
+const SUPABASE_DASHBOARD = 'https://supabase.com/dashboard'
 
 export default function AccountDialog({
   open,
@@ -45,8 +54,14 @@ function AccountDialogContent({
   onSynced,
 }: Omit<AccountDialogProps, 'open'>) {
   const closeRef = useRef<HTMLButtonElement>(null)
-  const dialogRef = useModalFocus<HTMLElement>(true, onClose, closeRef)
+  const closeDialog = () => {
+    account.clearError()
+    onClose()
+  }
+  const dialogRef = useModalFocus<HTMLElement>(true, closeDialog, closeRef)
   const [passwordUpdated, setPasswordUpdated] = useState(false)
+  const [connected, setConnected] = useState(false)
+  const [showSetup, setShowSetup] = useState(false)
 
   return (
     <div
@@ -55,7 +70,7 @@ function AccountDialogContent({
       onPointerDown={(event) => {
         if (event.target !== event.currentTarget) return
         event.preventDefault()
-        onClose()
+        closeDialog()
       }}
     >
       <section
@@ -71,10 +86,10 @@ function AccountDialogContent({
             <span className="account-dialog-mark" aria-hidden="true"><CloudIcon size={18} /></span>
             <div>
               <h2 id="account-dialog-title">账号与云同步</h2>
-              <p>{account.status === 'signed-in' ? '登录后项目会跟着账号走，换电脑也能打开' : '登录后每个账号只看到自己的项目'}</p>
+              <p>{account.status === 'disabled' ? '先连接一个免费的账号后端，再注册登录' : '登录后每个账号只看到自己的项目，换电脑也能打开'}</p>
             </div>
           </div>
-          <button ref={closeRef} type="button" className="icon-button" onClick={onClose} aria-label="关闭账号面板">
+          <button ref={closeRef} type="button" className="icon-button" onClick={closeDialog} aria-label="关闭账号面板">
             <CloseIcon size={18} />
           </button>
         </header>
@@ -82,9 +97,24 @@ function AccountDialogContent({
         {account.error && (
           <p className="account-error" role="alert">{account.error}</p>
         )}
+        {connected && account.status === 'signed-out' && (
+          <p className="account-notice" role="status">云端已连接，现在可以注册或登录。</p>
+        )}
 
-        {account.status === 'disabled' && <SetupGuide />}
-        {account.status === 'signed-out' && <AuthForm account={account} />}
+        {(account.status === 'disabled' || showSetup) && (
+          <SetupGuide
+            account={account}
+            canCancel={account.status !== 'disabled'}
+            onCancel={() => setShowSetup(false)}
+            onConnected={() => {
+              setConnected(true)
+              setShowSetup(false)
+            }}
+          />
+        )}
+        {account.status === 'signed-out' && !showSetup && (
+          <AuthForm account={account} onOpenSetup={() => setShowSetup(true)} />
+        )}
         {account.status === 'signed-in' && account.recovery && (
           <ResetPasswordForm
             account={account}
@@ -110,46 +140,190 @@ function AccountDialogContent({
   )
 }
 
-function SetupGuide() {
-  const [copied, setCopied] = useState<'env' | null>(null)
+function SetupGuide({
+  account,
+  canCancel,
+  onCancel,
+  onConnected,
+}: {
+  account: CloudAccountState
+  canCancel: boolean
+  onCancel: () => void
+  onConnected: () => void
+}) {
+  const [url, setUrl] = useState(account.config?.url ?? '')
+  const [anonKey, setAnonKey] = useState(account.config?.anonKey ?? '')
+  const [table, setTable] = useState(account.config?.table ?? 'ladderlab_projects')
+  const [advanced, setAdvanced] = useState(false)
+  const [copied, setCopied] = useState<'sql' | 'site' | null>(null)
+  const canSubmit = url.trim().length > 0 && anonKey.trim().length > 0 && !account.busy
+  const siteUrl = (() => {
+    try {
+      return new URL('.', window.location.href).href
+    } catch {
+      return 'https://wakeup595626-cmyk.github.io/ladderlab/'
+    }
+  })()
+  const copyValue = (kind: 'sql' | 'site', value: string) => {
+    void copyText(value).then((ok) => {
+      if (!ok) return
+      setCopied(kind)
+      window.setTimeout(() => setCopied(null), 1800)
+    })
+  }
+
   return (
     <div className="account-setup">
-      <p className="account-setup-lead">
-        这个站点是纯静态页面，没有自己的服务器。要开启账号，需要给它接一个免费的 Supabase 项目（大约 3 分钟）。
-      </p>
-      <ol className="account-setup-steps">
-        <li>
-          <span>建一个 Supabase 项目，在 SQL Editor 里执行仓库里的 <code>supabase/schema.sql</code>。</span>
-        </li>
-        <li>
-          <span>在本地项目根目录新建 <code>.env.local</code>，填两行配置：</span>
-          <pre className="account-snippet">{ENV_SNIPPET}</pre>
-          <button
-            type="button"
-            className="account-copy"
-            onClick={() => {
-              void copyText(ENV_SNIPPET).then((ok) => {
-                if (!ok) return
-                setCopied('env')
-                window.setTimeout(() => setCopied(null), 1600)
-              })
-            }}
-          >
-            {copied === 'env' ? <><CheckCircleIcon size={14} /> 已复制</> : '复制这两行'}
+      <div className="account-setup-intro">
+        <span className="account-setup-kicker">只差一次云端连接</span>
+        <strong>填入 Supabase 的地址和公开密钥</strong>
+        <p>连接成功后即可注册、登录；工程仍会先保存在本机，断网不影响编辑。</p>
+      </div>
+
+      <div className="account-local-first">
+        <CloudIcon size={17} />
+        <span><strong>不连接也能用</strong>：当前所有本机功能照常，账号只负责跨设备同步。</span>
+      </div>
+
+      <form
+        className="account-connect"
+        onSubmit={(event) => {
+          event.preventDefault()
+          if (!canSubmit) return
+          void account.connectCloud({ url, anonKey, table }).then((ok) => {
+            if (ok) onConnected()
+          })
+        }}
+      >
+        <div className="account-connect-heading">
+          <div>
+            <strong>云端连接</strong>
+            <span>只需要 Project URL 和 anon public key 两项。</span>
+          </div>
+          {account.storedConfig && (
+            <span className="account-connect-state"><CheckCircleIcon size={14} /> 已保存</span>
+          )}
+        </div>
+        <label className="account-field" htmlFor="cloud-url">
+          <span>Project URL</span>
+          <input
+            id="cloud-url"
+            type="url"
+            inputMode="url"
+            value={url}
+            onChange={(event) => setUrl(event.target.value)}
+            placeholder="https://xxxx.supabase.co"
+            aria-describedby="cloud-url-hint"
+            spellCheck={false}
+            required
+          />
+          <small id="cloud-url-hint">在 Supabase 的项目设置首页复制，最后应以 .supabase.co 结尾。</small>
+        </label>
+        <label className="account-field" htmlFor="cloud-key">
+          <span>anon public key</span>
+          <input
+            id="cloud-key"
+            type="password"
+            value={anonKey}
+            onChange={(event) => setAnonKey(event.target.value)}
+            placeholder="eyJ… 或 sb_publishable_…"
+            autoComplete="off"
+            aria-describedby="cloud-key-hint"
+            spellCheck={false}
+            required
+          />
+          <small id="cloud-key-hint">这是可公开的前端密钥；不要填 service_role 或 secret key。</small>
+        </label>
+        <button type="button" className="account-advanced" onClick={() => setAdvanced(!advanced)}>
+          <ChevronDownIcon size={14} className={advanced ? 'is-open' : ''} />
+          {advanced ? '收起高级选项' : '高级选项：自定义数据表名'}
+        </button>
+        {advanced && (
+          <label className="account-field" htmlFor="cloud-table">
+            <span>数据表名</span>
+            <input
+              id="cloud-table"
+              value={table}
+              onChange={(event) => setTable(event.target.value)}
+              placeholder="ladderlab_projects"
+              spellCheck={false}
+            />
+          </label>
+        )}
+        <div className="account-form-actions">
+          <button type="submit" className="account-primary" disabled={!canSubmit}>
+            {account.busy ? '正在连接…' : '保存并连接'}
           </button>
-        </li>
-        <li>
-          <span>重新构建并发布。配置为空时账号功能保持关闭，页面照旧离线可用。</span>
-        </li>
-      </ol>
-      <p className="account-setup-note">
-        本机试运行：在项目目录执行 <code>npm run dev</code>，用邮箱注册一个测试账号即可验证。
-      </p>
+          {account.storedConfig && (
+            <button type="button" className="account-secondary" onClick={() => account.disconnectCloud()}>
+              清除本机连接
+            </button>
+          )}
+          {canCancel && (
+            <button type="button" className="account-link" onClick={onCancel}>返回登录</button>
+          )}
+        </div>
+      </form>
+
+      <details className="account-setup-help">
+        <summary>
+          <span>第一次配置？查看 4 个步骤</span>
+          <ChevronDownIcon size={16} />
+        </summary>
+        <div className="account-setup-help-body">
+          <p>大约三分钟。建好的免费项目足够个人使用，之后不必重复配置。</p>
+          <ol className="account-setup-steps">
+            <li>
+              <span>新建一个 Supabase 项目。</span>
+              <a className="account-external" href={SUPABASE_DASHBOARD} target="_blank" rel="noreferrer">
+                打开 Supabase <ArrowUpRightIcon size={13} />
+              </a>
+            </li>
+            <li>
+              <span>打开 SQL Editor，粘贴并运行下面这份建表脚本。</span>
+              <button type="button" className="account-copy" onClick={() => copyValue('sql', schemaSql)}>
+                {copied === 'sql'
+                  ? <><CheckCircleIcon size={14} /> 已复制</>
+                  : <><CopyIcon size={14} /> 复制建表 SQL</>}
+              </button>
+            </li>
+            <li>
+              <span>到 Project Settings → API，复制 Project URL 和 anon public key，填回上方表单。</span>
+            </li>
+            <li>
+              <span>到 Authentication → URL Configuration，把 Site URL 设置为下面的地址；否则确认邮件和重置密码会跳错地方。</span>
+            </li>
+          </ol>
+          <div className="account-site-url">
+            <div>
+              <span>Site URL</span>
+              <code>{siteUrl}</code>
+            </div>
+            <button type="button" className="account-copy" onClick={() => copyValue('site', siteUrl)}>
+              {copied === 'site'
+                ? <><CheckCircleIcon size={14} /> 已复制</>
+                : <><CopyIcon size={14} /> 复制地址</>}
+            </button>
+          </div>
+          <p className="account-security-note">
+            anon public key 可以出现在网页中，权限由数据库的 RLS 策略限制；service_role 或 secret key 绝不能填写，应用会主动拒绝。
+          </p>
+        </div>
+      </details>
+
+      <details className="account-deploy-help">
+        <summary>想让网站的所有访客都能直接注册？</summary>
+        <div>
+          <p>上方连接只对本浏览器生效。公开部署时，在 GitHub 仓库的 Settings → Secrets and variables → Actions 中添加：</p>
+          <pre>VITE_SUPABASE_URL=你的 Project URL{`\n`}VITE_SUPABASE_ANON_KEY=你的 anon public key</pre>
+          <p>保存后重新运行 Deploy 工作流，新的静态页面会带着这份公开配置发布。</p>
+        </div>
+      </details>
     </div>
   )
 }
 
-function AuthForm({ account }: { account: CloudAccountState }) {
+function AuthForm({ account, onOpenSetup }: { account: CloudAccountState; onOpenSetup: () => void }) {
   const [mode, setMode] = useState<'signin' | 'signup'>('signin')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -184,7 +358,7 @@ function AuthForm({ account }: { account: CloudAccountState }) {
           role="tab"
           aria-selected={mode === 'signin'}
           className={mode === 'signin' ? 'is-active' : ''}
-          onClick={() => { setMode('signin'); setNotice(null) }}
+          onClick={() => { setMode('signin'); setNotice(null); account.clearError() }}
         >
           登录
         </button>
@@ -193,7 +367,7 @@ function AuthForm({ account }: { account: CloudAccountState }) {
           role="tab"
           aria-selected={mode === 'signup'}
           className={mode === 'signup' ? 'is-active' : ''}
-          onClick={() => { setMode('signup'); setNotice(null) }}
+          onClick={() => { setMode('signup'); setNotice(null); account.clearError() }}
         >
           注册
         </button>
@@ -250,6 +424,9 @@ function AuthForm({ account }: { account: CloudAccountState }) {
           </button>
         )}
       </div>
+      <button type="button" className="account-cloud-link" onClick={onOpenSetup}>
+        云端连接设置
+      </button>
     </form>
   )
 }

@@ -142,6 +142,21 @@ interface GoTrueUserPayload {
   email?: string | null
 }
 
+/** 确认邮件与重置邮件都应回到当前部署目录，而不是写死的某台机器。 */
+function currentSiteUrl(): string | null {
+  if (typeof window === 'undefined') return null
+  try {
+    return new URL('.', window.location.href).href
+  } catch {
+    return null
+  }
+}
+
+function authPath(path: string): string {
+  const redirect = currentSiteUrl()
+  return redirect ? `${path}?redirect_to=${encodeURIComponent(redirect)}` : path
+}
+
 export async function signUpWithPassword(
   baseUrl: string,
   apiKey: string,
@@ -150,7 +165,7 @@ export async function signUpWithPassword(
 ): Promise<AuthResult> {
   const payload = await cloudRequest<GoTrueSessionPayload & { id?: string; email?: string }>(
     baseUrl,
-    '/auth/v1/signup',
+    authPath('/auth/v1/signup'),
     apiKey,
     { method: 'POST', body: { email: email.trim(), password } },
   )
@@ -219,7 +234,7 @@ export async function requestPasswordReset(
   apiKey: string,
   email: string,
 ): Promise<void> {
-  await cloudRequest<null>(baseUrl, '/auth/v1/recover', apiKey, {
+  await cloudRequest<null>(baseUrl, authPath('/auth/v1/recover'), apiKey, {
     method: 'POST',
     body: { email: email.trim() },
   })

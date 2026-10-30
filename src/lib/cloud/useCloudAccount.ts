@@ -1,11 +1,20 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { CloudConfig } from './config'
-import { readCloudConfig } from './config'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import type { CloudConfig, CloudConfigInput } from './config'
+import {
+  CLOUD_CONFIG_EVENT,
+  clearStoredCloudConfig,
+  hasStoredCloudConfig,
+  normalizeCloudConfig,
+  persistCloudConfig,
+  readCloudConfig,
+} from './config'
+import { CloudError, cloudRequest } from './http'
 import type { CloudSession } from './auth'
 import {
   clearAuthRedirectHash,
   clearStoredSession,
   describeAuthError,
+  ensureFreshSession,
   hasRecoveryRedirect,
   readStoredSession,
   requestPasswordReset,
@@ -22,6 +31,8 @@ export type CloudStatus = 'disabled' | 'signed-out' | 'signed-in'
 
 export interface CloudAccountState {
   config: CloudConfig | null
+  /** 当前连接是否来自本浏览器的“连接云端”向导。 */
+  storedConfig: boolean
   status: CloudStatus
   user: CloudSession['user'] | null
   busy: boolean
@@ -37,6 +48,8 @@ export interface CloudAccountState {
   completePasswordReset: (password: string) => Promise<boolean>
   syncNow: () => Promise<boolean>
   scheduleSync: () => void
+  connectCloud: (input: CloudConfigInput) => Promise<boolean>
+  disconnectCloud: () => void
   clearError: () => void
 }
 
@@ -48,7 +61,7 @@ const AUTO_SYNC_MIN_INTERVAL_MS = 45_000
  * 登录后所有同步都是“本地先写、再推云端”，断网也不会丢用户的操作。
  */
 export function useCloudAccount(): CloudAccountState {
-  const config = useMemo(() => readCloudConfig(), [])
+  const [config, setConfig] = useState<CloudConfig | null>(() => readCloudConfig())
   const [session, setSession] = useState<CloudSession | null>(() => readStoredSession())
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -61,12 +74,19 @@ export function useCloudAccount(): CloudAccountState {
   const lastSyncAtRef = useRef(0)
   const debounceRef = useRef<number | null>(null)
 
-  useEffect(() => {
-    sessionRef.current = session
-  }, [session])
-
   useEffect(() => () => {
     if (debounceRef.current !== null) window.clearTimeout(debounceRef.current)
+  }, [])
+
+  // 连接向导写入配置后，账号状态机要立刻从 disabled 切到可登录，不必刷新整页。
+  useEffect(() => {
+    const refresh = () => setConfig(readCloudConfig())
+    window.addEventListener(CLOUD_CONFIG_EVENT, refresh)
+    window.addEventListener('storage', refresh)
+    return () => {
+      window.removeEventListener(CLOUD_CONFIG_EVENT, refresh)
+      window.removeEventListener('storage', refresh)
+    }
   }, [])
 
   const applySession = useCallback((next: CloudSession | null) => {
@@ -80,6 +100,7 @@ export function useCloudAccount(): CloudAccountState {
   useEffect(() => {
     if (!config || !hasRecoveryRedirect()) return
     let cancelled = false
+    // oxlint-disable-next-line react/set-state-in-effect -- 解析邮件里的恢复令牌是外部异步流程
     setBusy(true)
     void resolveRecoverySession(config.url, config.anonKey)
       .then((next) => {
@@ -110,7 +131,20 @@ export function useCloudAccount(): CloudAccountState {
     syncingRef.current = true
     setSyncing(true)
     try {
-      const outcome = await runProjectSync(config, active)
+      let current = active
+      try {
+        current = await ensureFreshSession(config.url, config.anonKey, active)
+        if (current !== active) applySession(current)
+      } catch (cause) {
+        if (cause instanceof CloudError && cause.status === 401) {
+          applySession(null)
+          setError('登录已过期，请重新登录')
+        } else {
+          setError(cause instanceof Error ? cause.message : '刷新登录状态失败，请检查网络')
+        }
+        return false
+      }
+      const outcome = await runProjectSync(config, current)
       lastSyncAtRef.current = Date.now()
       if (outcome.ok) {
         setLastSync(outcome.summary)
@@ -243,10 +277,60 @@ export function useCloudAccount(): CloudAccountState {
     }
   }, [config])
 
+  /** 先验证 Auth 和工程表都可用，再保存配置，避免“连上了但一同步就报错”。 */
+  const connectCloud = useCallback(async (input: CloudConfigInput) => {
+    setBusy(true)
+    setError(null)
+    try {
+      const candidate = normalizeCloudConfig(input)
+      await cloudRequest(candidate.url, '/auth/v1/settings', candidate.anonKey, {
+        timeoutMs: 15_000,
+      })
+      try {
+        await cloudRequest(
+          candidate.url,
+          `/rest/v1/${candidate.table}?select=id&limit=1`,
+          candidate.anonKey,
+          { timeoutMs: 15_000 },
+        )
+      } catch (cause) {
+        if (cause instanceof CloudError && cause.status === 404) {
+          throw new Error(`Auth 已连通，但还没有数据表「${candidate.table}」。请先在 Supabase SQL Editor 运行建表脚本`)
+        }
+        throw new Error(`Auth 已连通，但工程表检查失败：${cause instanceof Error ? cause.message : '未知错误'}`)
+      }
+      const changedBackend = !config || config.url !== candidate.url
+      const persisted = persistCloudConfig(candidate)
+      setConfig(candidate)
+      if (changedBackend) applySession(null)
+      setRecovery(false)
+      setLastSync(null)
+      if (!persisted) {
+        setError('云端已连接；但浏览器禁止本地存储，刷新页面后需要重新填写连接信息')
+      }
+      return true
+    } catch (cause) {
+      setError(cause instanceof Error ? `连接失败：${cause.message}` : '连接失败，请检查云端配置')
+      return false
+    } finally {
+      setBusy(false)
+    }
+  }, [applySession, config])
+
+  const disconnectCloud = useCallback(() => {
+    clearStoredCloudConfig()
+    setConfig(readCloudConfig())
+    applySession(null)
+    setRecovery(false)
+    setLastSync(null)
+    setError(null)
+  }, [applySession])
+
   const clearError = useCallback(() => setError(null), [])
 
   return {
     config,
+    storedConfig: hasStoredCloudConfig(),
     status: !config ? 'disabled' : session ? 'signed-in' : 'signed-out',
     user: session?.user ?? null,
     busy,
@@ -261,6 +345,8 @@ export function useCloudAccount(): CloudAccountState {
     completePasswordReset,
     syncNow,
     scheduleSync,
+    connectCloud,
+    disconnectCloud,
     clearError,
   }
 }

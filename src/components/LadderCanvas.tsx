@@ -1676,6 +1676,7 @@ function measureRung(
  * 一段图纸按元件排布算出来的自然宽度，不读 DOM、不看可用宽度。
  * 导出器要在挂载前把整表宽度定下来，靠的就是它。
  */
+// oxlint-disable-next-line react/only-export-components -- 与画布共用同一套布局公式，拆开反而会漂移
 export function naturalRungWidth(rung: Program['rungs'][number]): number {
   return measureRung(rung, 0, DEFAULT_METRICS).width
 }
