@@ -31,6 +31,7 @@
     "qa:save": "node scripts/qa-save-button.mjs",
     "qa:share": "node scripts/qa-share-link.mjs",
     "qa:a11y": "node scripts/qa-a11y.mjs",
+    "qa:theme": "node scripts/qa-theme.mjs",
     "qa:export": "node scripts/qa-export-svg.mjs",
     "qa:export-custom": "node scripts/qa-export-custom.mjs",
     "qa:perf": "node scripts/qa-perf-large.mjs",
