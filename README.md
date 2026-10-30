@@ -18,13 +18,13 @@
 - 用变量表、编译诊断和逐周期扫描观察能流；支持 TON / TOF / TONR、CTU、边沿和整数指令。
 - 切换 V14 / V21 指令档案，运行六个课程实验，或从启保停、顺序启动等示例开始练习。
 - 管理本机项目，导入/导出 .ladderlab.json，工程随时能接着改、换电脑迁移。
-- 全部导出为矢量 SVG：完整程序图、纯梯形图、顺序功能图都能存成缩放、打印不糊的
-  矢量文件；PNG 只是可选附加位图，贴微信或老版本 Office 时再用。
-- 一键导出顺序功能图（SVG 矢量）：从当前梯形图按步骤位、状态位或节拍归纳，纯白底，
-  只有步骤、动作和转移条件。
+- 导出默认是 PNG，贴微信或插进旧版 Office 最省事；需要放大、打印或继续排版时，
+  在同一个导出菜单里把格式切到 SVG，完整程序图、纯梯形图和顺序功能图都能存成矢量。
+- 顺序功能图从当前梯形图按步骤位、状态位或节拍归纳，纯白底，只有步骤、动作和转移条件。
 - 「打开项目 → 整包备份」把所有本机工程打包成一个文件，换电脑或清缓存前先存一份。
 - 「导出 → 复制分享链接」把整份工程压进一条网址，发给同学点开就能接着改，不用传文件。
 - 安装为桌面应用；首次联网加载后可离线打开，工程数据保存在当前浏览器本机。
+- 配置 Supabase 后可注册账号，登录后工程按账号分库存到云端，换电脑登录同一个账号即可接着改。
 
 完整操作说明、快捷键、项目保存、离线安装、仿真语义和浏览器验收步骤见
 [docs/GUIDE.md](docs/GUIDE.md)。
@@ -67,10 +67,46 @@ npm run preview
 提交前可运行 npm run check，依次执行单元测试、类型检查、lint 和生产构建；界面、存储
 与导出改动还应运行 npm run test:e2e，或按使用指南完成对应的浏览器回归。
 
+## 账号与云同步（可选）
+
+不配置后端时，LadderLab 仍是完整的本地工具：所有工程只保存在当前浏览器，账号按钮
+会打开一份三分钟配置说明，不需要联网，也不会上传任何内容。
+
+想要“注册账号、换电脑继续改”，需要一个 Supabase 项目（免费额度足够个人使用）：
+
+1. 在 [supabase.com](https://supabase.com/) 新建项目，打开 SQL Editor，执行仓库里的
+   `supabase/schema.sql`。脚本会建 `ladderlab_projects` 表，并开启行级安全策略，
+   每个登录用户只能读写 `user_id` 等于自己的行。
+2. 在 Project Settings → API 复制 Project URL 和 anon public key。
+3. 在仓库根目录新建 `.env.local`（可参考 `.env.example`），填入：
+
+   ```dotenv
+   VITE_SUPABASE_URL=https://你的项目.supabase.co
+   VITE_SUPABASE_ANON_KEY=你的-anon-key
+   ```
+
+4. 重新运行 `npm run dev` 或 `npm run build`。顶部出现「登录」按钮后即可注册、登录。
+
+发布到 GitHub Pages 时，还要在仓库 Settings → Secrets and variables → Actions 里添加
+同名的 `VITE_SUPABASE_URL` 和 `VITE_SUPABASE_ANON_KEY`；`ci.yml` 与 `deploy.yml` 会把它们
+注入构建。再到 Supabase 的 Authentication → URL Configuration，把 Site URL 设成
+`https://wakeup595626-cmyk.github.io/ladderlab/`，并把该地址加入 Redirect URLs，否则
+确认邮件和重置密码邮件会跳回错误地址。
+
+anon key 是公开密钥，本来就用于浏览器端；真正的权限由数据库的 RLS 策略控制。不要把
+`service_role` key 写进前端。邮箱注册默认需要点确认邮件；开发阶段也可以在 Supabase
+的 Authentication 设置里临时关闭邮箱确认。
+
+登录后，本机项目库会切换到该账号的独立分区，同一台电脑换账号不会看到别人的工程。
+未登录时创建的项目可以在账号面板里一键导入当前账号。云端同步按修改时间取较新的
+一侧，删除也会同步；网络失败只影响同步，不影响本机编辑和自动保存。
+
 ## 数据与边界
 
-应用没有账号、数据库或云同步服务，不会自动把梯形图上传到服务器。清理浏览器站点数据
-会删除本机工程，重要内容请导出 .ladderlab.json 备份。
+未配置 Supabase 时，应用不会把梯形图上传到任何服务器。配置并登录后，只有当前账号
+自己的工程会写入你指定的 Supabase 项目；分享链接、收藏指令和界面偏好仍只留在本机。
+清理浏览器站点数据会删除本机工程（云端副本不受影响），重要内容仍建议导出
+.ladderlab.json 备份。
 
 本工具只用于浏览器内的教学编辑与仿真。顺序功能图是从当前这份梯形图归纳出的参考图，
 联锁、延时和扫描细节仍以梯形图为准；它不能导入、编辑或替代 TIA Portal 中的 SFC

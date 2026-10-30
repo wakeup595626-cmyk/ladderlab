@@ -40,7 +40,9 @@ web
   离线打开已缓存版本。
 - 六套课程实验与若干快速示例。
 - v14 / v21 指令档案只控制指令可用性，不读取真实 TIA 工程。
-- 纯前端 React + TypeScript + Vite；不使用后端，不引入账户体系。
+- React + TypeScript + Vite 静态站点；默认纯本机可用，不登录也能完整使用。
+- 可选 Supabase 账号与云同步：未配置 `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY`
+  时不发送云端请求，账号按钮只显示接入说明；配置后每个账号只看到自己的工程（云端 RLS + 本机分区双重隔离）。
 
 ## Brand Commitments
 
