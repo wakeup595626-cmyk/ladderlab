@@ -26,6 +26,63 @@ export const PROJECT_LIBRARY_QUARANTINE_PREFIX = 'ladderlab.library.v2.quarantin
 const LEGACY_LIBRARY_SCHEMA = 1
 const LIBRARY_LOCK_NAME = 'ladderlab.library.v2'
 
+/**
+ * 本机项目库可以按账号分区：未登录时用空作用域（保持所有历史键名不变），
+ * 登录后每个账号一个作用域，键名形如 `...project.@u-1a2b3c4d.<id>`。
+ * 同一台电脑换账号登录时，各自只看到自己的项目，不会互相串数据。
+ */
+const SCOPE_MARK = '@'
+let libraryScope = ''
+
+function normalizeScope(scope: string): string {
+  return scope.trim().replace(/[^\w-]+/g, '-').slice(0, 40)
+}
+
+export function setProjectLibraryScope(scope: string): void {
+  libraryScope = normalizeScope(scope)
+}
+
+export function getProjectLibraryScope(): string {
+  return libraryScope
+}
+
+/** 临时切到另一个作用域执行只读任务，结束后一定切回来。 */
+export function readProjectLibraryInScope<T>(scope: string, task: () => T): T {
+  const previous = libraryScope
+  libraryScope = normalizeScope(scope)
+  try {
+    return task()
+  } finally {
+    libraryScope = previous
+  }
+}
+
+function scopedPrefix(base: string): string {
+  return libraryScope ? `${base}${SCOPE_MARK}${libraryScope}.` : base
+}
+
+function activeProjectPrefix(): string {
+  return scopedPrefix(PROJECT_LIBRARY_PROJECT_PREFIX)
+}
+
+function activeTombstonePrefix(): string {
+  return scopedPrefix(PROJECT_LIBRARY_TOMBSTONE_PREFIX)
+}
+
+/** 活动项目 ID 也按账号分区；游客沿用旧键名，登录后各自独立。 */
+function activeProjectStorageKey(): string {
+  return libraryScope ? `${ACTIVE_PROJECT_STORAGE_KEY}@${libraryScope}` : ACTIVE_PROJECT_STORAGE_KEY
+}
+
+/** 把键拆成「作用域 + 记录 ID」，其他账号作用域的记录一律不参与当前视图。 */
+function belongsToActiveScope(key: string, base: string): boolean {
+  if (!key.startsWith(base)) return false
+  const rest = key.slice(base.length)
+  if (!rest.startsWith(SCOPE_MARK)) return libraryScope === ''
+  if (!libraryScope) return false
+  return rest.startsWith(`${SCOPE_MARK}${libraryScope}.`)
+}
+
 export interface SavedProject {
   id: string
   name: string
@@ -165,11 +222,11 @@ function makeRevision(savedAt: number): string {
 }
 
 function projectKey(id: string): string {
-  return `${PROJECT_LIBRARY_PROJECT_PREFIX}${id}`
+  return `${activeProjectPrefix()}${id}`
 }
 
 function tombstoneKey(id: string): string {
-  return `${PROJECT_LIBRARY_TOMBSTONE_PREFIX}${id}`
+  return `${activeTombstonePrefix()}${id}`
 }
 
 export function isProjectLibraryStorageKey(key: string | null): boolean {
@@ -413,7 +470,8 @@ function readV2View(keys: string[]): LibraryView {
   // 能识别项目 ID 的损坏墓碑：对应工程宁可暂时隐藏，也不能静默复活。
   const unconfirmedDeletions = new Map<string, string>()
   for (const key of keys) {
-    if (key.startsWith(PROJECT_LIBRARY_QUARANTINE_PREFIX)) {
+    // 隔离区来自旧版整库，只属于未登录作用域；账号不是它的主人。
+    if (!libraryScope && key.startsWith(PROJECT_LIBRARY_QUARANTINE_PREFIX)) {
       const raw = window.localStorage.getItem(key)
       if (raw === null) continue
       // 旧版整库里读不出来的单条工程：原文原样保留，等用户导出、修复或移除。
@@ -425,7 +483,7 @@ function readV2View(keys: string[]): LibraryView {
       ))
       continue
     }
-    if (!key.startsWith(PROJECT_LIBRARY_TOMBSTONE_PREFIX)) continue
+    if (!belongsToActiveScope(key, PROJECT_LIBRARY_TOMBSTONE_PREFIX)) continue
     const raw = window.localStorage.getItem(key)
     if (raw === null) continue
     try {
@@ -443,7 +501,7 @@ function readV2View(keys: string[]): LibraryView {
 
   const projects: SavedProject[] = []
   for (const key of keys) {
-    if (!key.startsWith(PROJECT_LIBRARY_PROJECT_PREFIX)) continue
+    if (!belongsToActiveScope(key, PROJECT_LIBRARY_PROJECT_PREFIX)) continue
     const raw = window.localStorage.getItem(key)
     if (raw === null) continue
     try {
@@ -645,6 +703,9 @@ function migrateLegacyIfNeeded(): LibraryView {
   const keys = listStorageKeys()
   if (keys.includes(PROJECT_LIBRARY_READY_KEY)) return readV2View(keys)
 
+  // 账号作用域不继承这台电脑上别人的旧版整库：只有未登录的默认作用域才迁移。
+  if (libraryScope) return readV2View(keys)
+
   const legacy = readLegacyLibrary()
   if (legacy.status !== 'ok') throw new LibraryCorruptionError(legacy.message, legacy.raw)
   quarantineLegacyBroken(legacy.broken)
@@ -727,6 +788,11 @@ export function readProjectLibrary(): ProjectLibraryResult {
       const view = readV2View(keys)
       return { status: 'ok', projects: view.projects, broken: view.broken }
     }
+    // 账号作用域不继承游客的旧版整库，只读自己的新分区。
+    if (libraryScope) {
+      const view = readV2View(keys)
+      return { status: 'ok', projects: view.projects, broken: view.broken }
+    }
     return readLegacyLibrary()
   } catch (error) {
     if (error instanceof LibraryCorruptionError) {
@@ -744,16 +810,40 @@ export function readProjectLibrary(): ProjectLibraryResult {
   }
 }
 
+/** 云同步需要知道“本机删过什么”，这里只读当前作用域内的删除墓碑。 */
+export function readProjectTombstones(): Map<string, number> {
+  const result = new Map<string, number>()
+  try {
+    for (const key of listStorageKeys()) {
+      if (!belongsToActiveScope(key, PROJECT_LIBRARY_TOMBSTONE_PREFIX)) continue
+      const raw = window.localStorage.getItem(key)
+      if (raw === null) continue
+      try {
+        const tombstone = decodeTombstone(raw, key)
+        const previous = result.get(tombstone.id) ?? 0
+        if (tombstone.deletedAt > previous) result.set(tombstone.id, tombstone.deletedAt)
+      } catch {
+        // 损坏的墓碑已经在项目库里列为异常记录，这里不再重复处理。
+      }
+    }
+  } catch {
+    return result
+  }
+  return result
+}
+
 export function readActiveSavedProjectId(): string | null {
+  const key = activeProjectStorageKey()
   try {
     // 活动项目属于“这个标签页正在看什么”，不能跨标签页共享。旧版本把 ID
     // 放在 localStorage；首次读取时迁移到 sessionStorage 后删除旧值。
-    let id = window.sessionStorage.getItem(ACTIVE_PROJECT_STORAGE_KEY)
-    if (!id) {
+    let id = window.sessionStorage.getItem(key)
+    // 旧版共享键只属于未登录作用域；登录账号不继承游客的活动标记。
+    if (!id && !libraryScope) {
       const legacyId = window.localStorage.getItem(ACTIVE_PROJECT_STORAGE_KEY)
       if (legacyId) {
         id = legacyId
-        window.sessionStorage.setItem(ACTIVE_PROJECT_STORAGE_KEY, legacyId)
+        window.sessionStorage.setItem(key, legacyId)
       }
       window.localStorage.removeItem(ACTIVE_PROJECT_STORAGE_KEY)
     }
@@ -767,11 +857,12 @@ export function readActiveSavedProjectId(): string | null {
 }
 
 export function writeActiveSavedProjectId(id: string | null): boolean {
+  const key = activeProjectStorageKey()
   try {
-    if (id) window.sessionStorage.setItem(ACTIVE_PROJECT_STORAGE_KEY, id)
-    else window.sessionStorage.removeItem(ACTIVE_PROJECT_STORAGE_KEY)
+    if (id) window.sessionStorage.setItem(key, id)
+    else window.sessionStorage.removeItem(key)
     // 清掉旧版本的活动标记，避免新标签页又把过期的共享 ID 迁回来。
-    window.localStorage.removeItem(ACTIVE_PROJECT_STORAGE_KEY)
+    if (!libraryScope) window.localStorage.removeItem(ACTIVE_PROJECT_STORAGE_KEY)
     return true
   } catch {
     return false
@@ -930,10 +1021,11 @@ export async function deleteSavedProject(
       }
 
       try {
-        if (window.sessionStorage.getItem(ACTIVE_PROJECT_STORAGE_KEY) === id) {
-          window.sessionStorage.removeItem(ACTIVE_PROJECT_STORAGE_KEY)
+        const activeKey = activeProjectStorageKey()
+        if (window.sessionStorage.getItem(activeKey) === id) {
+          window.sessionStorage.removeItem(activeKey)
         }
-        window.localStorage.removeItem(ACTIVE_PROJECT_STORAGE_KEY)
+        if (!libraryScope) window.localStorage.removeItem(ACTIVE_PROJECT_STORAGE_KEY)
       } catch {
         // 活动标识只是恢复提示；项目本体已经删除时不应误报失败。
       }
@@ -946,6 +1038,65 @@ export async function deleteSavedProject(
     })
   } catch (error) {
     return { ok: false, message: `无法访问本机项目库锁：${errorMessage(error)}` }
+  }
+}
+
+export interface ApplySyncedProjectsResult {
+  ok: boolean
+  message?: string
+  projects: SavedProject[]
+  broken: BrokenSavedProject[]
+}
+
+/**
+ * 云同步把「下载到本机」和「本机确认删除」两步压成一次加锁写入：
+ * 中途不会让项目列表出现“删了一半、写了一半”的中间态。
+ */
+export async function applySyncedProjects(input: {
+  upserts?: SavedProject[]
+  deletes?: string[]
+}): Promise<ApplySyncedProjectsResult> {
+  const upserts = input.upserts ?? []
+  const deletes = input.deletes ?? []
+  try {
+    return await withLibraryLock(() => {
+      loadLibraryForWrite()
+      const now = Date.now()
+      for (const id of deletes) writeTombstone(id, now)
+      for (const project of upserts) {
+        try {
+          const parsed = parseProgramStructureText(JSON.stringify(project.program))
+          const existingTombstone = window.localStorage.getItem(tombstoneKey(project.id))
+          if (existingTombstone) {
+            let stale = true
+            try {
+              stale = decodeTombstone(existingTombstone, tombstoneKey(project.id)).deletedAt < project.savedAt
+            } catch {
+              stale = true
+            }
+            if (stale) window.localStorage.removeItem(tombstoneKey(project.id))
+          }
+          writeProjectRecord({
+            id: project.id,
+            name: project.name,
+            createdAt: project.createdAt,
+            savedAt: project.savedAt,
+            program: parsed.program,
+          })
+        } catch {
+          // 单条云端数据坏了只跳过这一条，不能让整次同步失败。
+        }
+      }
+      const view = readV2View(listStorageKeys())
+      return { ok: true, projects: sortProjects(view.projects), broken: view.broken }
+    })
+  } catch (error) {
+    return {
+      ok: false,
+      message: `云同步写入本机项目库失败：${errorMessage(error)}`,
+      projects: [],
+      broken: [],
+    }
   }
 }
 

@@ -4,7 +4,19 @@ import './index.css'
 import App from './App.tsx'
 import './motion.css'
 import ErrorBoundary from './components/ErrorBoundary.tsx'
+import { readStoredSession } from './lib/cloud/auth.ts'
+import { readCloudConfig } from './lib/cloud/config.ts'
+import { initialLibraryScope } from './lib/cloud/scope.ts'
+import { setProjectLibraryScope } from './lib/projectLibrary.ts'
+import { setProgramDraftScope } from './lib/storage.ts'
 import { monitorServiceWorkerUpdates } from './lib/swUpdate.ts'
+
+// 账号作用域必须在任何项目库读取之前生效：刷新页面时先按已保存的登录状态分区，
+// 避免先读到未登录项目、再闪一下切换到账号项目。
+const bootScope = initialLibraryScope(readStoredSession(), readCloudConfig() !== null)
+setProjectLibraryScope(bootScope)
+// 草稿与恢复副本同样要分区：否则换账号登录时会先看到上一个账号没写完的程序。
+setProgramDraftScope(bootScope)
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

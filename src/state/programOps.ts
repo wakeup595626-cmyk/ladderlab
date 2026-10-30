@@ -285,36 +285,55 @@ export function deleteTag(program: Program, tagId: string): Program {
   return { ...program, tags: program.tags.filter((tag) => tag.id !== tagId) }
 }
 
-export function tagUsage(program: Program, name: string): number {
-  const target = normalizeReference(name)
-  const matches = (ref: string | undefined) => {
-    const value = normalizeReference(ref ?? '')
-    return Boolean(value) && (value === target || value.startsWith(`${target}.`))
+/**
+ * 一次遍历算出全工程每个变量的引用次数。
+ *
+ * 变量名里的点号表示位或字段：引用 Motor.1.2 同时算作 Motor、Motor.1 和
+ * Motor.1.2 的引用，所以每个引用会记到它的每一级前缀上。位别名（tag.bitOf）
+ * 额外算一次父变量引用，与 tagUsage 的判定完全一致。
+ *
+ * 旧实现是「每个变量扫一遍整棵梯形图」，变量表和自动回收在大型工程里因此变成
+ * O(变量数 × 节点数)。这里改成 O(节点数 + 引用的层级数)，调用方只算一次。
+ */
+export function tagUsageCounts(program: Program): Map<string, number> {
+  const counts = new Map<string, number>()
+  const add = (reference: string | undefined) => {
+    const normalized = normalizeReference(reference ?? '')
+    if (!normalized) return
+    counts.set(normalized, (counts.get(normalized) ?? 0) + 1)
+    let dot = normalized.indexOf('.')
+    while (dot > 0) {
+      const prefix = normalized.slice(0, dot)
+      counts.set(prefix, (counts.get(prefix) ?? 0) + 1)
+      dot = normalized.indexOf('.', dot + 1)
+    }
   }
-  let count = 0
   const walk = (chain: LadderNode[]) => {
     for (const node of chain) {
-      if (node.type === 'contact') {
-        if (matches(node.tag)) count += 1
-      } else {
-        node.branches.forEach(walk)
-      }
+      if (node.type === 'contact') add(node.tag)
+      else node.branches.forEach(walk)
     }
   }
   for (const rung of program.rungs) {
     walk(rung.nodes)
-    if (matches(rung.output.tag)) count += 1
-    if (matches(rung.output.resetTag)) count += 1
-    if (matches(rung.output.qTag)) count += 1
-    if (matches(rung.output.valueTag)) count += 1
-    if (matches(rung.output.sourceTag)) count += 1
-    if (matches(rung.output.pulseTag)) count += 1
-    if (matches(rung.output.stepTag)) count += 1
+    add(rung.output.tag)
+    add(rung.output.resetTag)
+    add(rung.output.qTag)
+    add(rung.output.valueTag)
+    add(rung.output.sourceTag)
+    add(rung.output.pulseTag)
+    add(rung.output.stepTag)
   }
   for (const tag of program.tags) {
-    if (tag.bitOf !== undefined && normalizeReference(tag.bitOf) === target) count += 1
+    if (tag.bitOf === undefined) continue
+    const base = normalizeReference(tag.bitOf)
+    if (base) counts.set(base, (counts.get(base) ?? 0) + 1)
   }
-  return count
+  return counts
+}
+
+export function tagUsage(program: Program, name: string): number {
+  return tagUsageCounts(program).get(normalizeReference(name)) ?? 0
 }
 
 /** 引用去掉位号后的基名：Motor.0 与 Motor 指向同一个变量。 */
@@ -339,17 +358,34 @@ export interface TagPruneResult {
  * 位别名（bitOf）也算引用，先删别名再删父变量，因此循环直到没有可回收项。
  */
 export function pruneOrphanTags(program: Program): TagPruneResult {
-  if (!program.tags.some((tag) => tag.auto === true)) return { program, removed: [] }
+  const pending = program.tags.filter((tag) => tag.auto === true)
+  if (pending.length === 0) return { program, removed: [] }
+
+  // 引用次数只算一次；回收一个位别名后父变量的计数减一，两者都归零时一起清掉。
+  // 反复清扫到稳定，与旧实现「每删一个就全量重算」的结果一致。
+  const counts = tagUsageCounts(program)
   const removed: TagDef[] = []
-  let tags = program.tags
-  for (;;) {
-    const current: Program = { ...program, tags }
-    const orphan = tags.find((tag) => tag.auto === true && tagUsage(current, tag.name) === 0)
-    if (!orphan) break
-    removed.push(orphan)
-    tags = tags.filter((tag) => tag.id !== orphan.id)
+  let changed = true
+  while (changed) {
+    changed = false
+    for (let index = pending.length - 1; index >= 0; index -= 1) {
+      const tag = pending[index]
+      if ((counts.get(normalizeReference(tag.name)) ?? 0) > 0) continue
+      pending.splice(index, 1)
+      removed.push(tag)
+      if (tag.bitOf !== undefined) {
+        const base = normalizeReference(tag.bitOf)
+        counts.set(base, Math.max(0, (counts.get(base) ?? 0) - 1))
+      }
+      changed = true
+    }
   }
-  return removed.length ? { program: { ...program, tags }, removed } : { program, removed }
+  if (removed.length === 0) return { program, removed: [] }
+  const removedIds = new Set(removed.map((tag) => tag.id))
+  return {
+    program: { ...program, tags: program.tags.filter((tag) => !removedIds.has(tag.id)) },
+    removed,
+  }
 }
 
 /**

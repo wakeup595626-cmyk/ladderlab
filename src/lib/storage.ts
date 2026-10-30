@@ -4,11 +4,37 @@ import { parseProgramStructure, parseProgramStructureText, serializeProgram } fr
 
 const LEGACY_STORAGE_KEY = 'ladderlab.project.v1'
 const MIRROR_STORAGE_KEY = 'ladderlab.project.v1.mirror.v2'
-/** 供多标签页同步监听使用，避免在 App 里重复硬编码键名。 */
-export const PROGRAM_STORAGE_KEY = MIRROR_STORAGE_KEY
 const SESSION_STORAGE_KEY = 'ladderlab.project.v1.tab.v2'
 const LEGACY_SAVED_AT_KEY = 'ladderlab.project.v1.savedAt'
-export const RECOVERY_STORAGE_KEY_PREFIX = 'ladderlab.project.v1.recovery.'
+const RECOVERY_STORAGE_KEY_PREFIX = 'ladderlab.project.v1.recovery.'
+
+/**
+ * 草稿按账号分区：未登录时后缀为空，键名与旧版本完全一致，老用户的草稿
+ * 不会凭空消失；登录后追加 `@<scope>`，同一台电脑换账号登录时各自只读到
+ * 自己的草稿、镜像与恢复副本。
+ */
+let draftScope = ''
+
+export function setProgramDraftScope(scope: string | null | undefined): void {
+  draftScope = scope ? `@${scope.trim().replace(/[^\w-]+/g, '-').slice(0, 40)}` : ''
+}
+
+export function getProgramDraftScope(): string {
+  return draftScope
+}
+
+function scopedKey(base: string): string {
+  return draftScope ? `${base}${draftScope}` : base
+}
+
+/** 供多标签页同步监听使用，避免在 App 里重复硬编码键名。 */
+export function getProgramStorageKey(): string {
+  return scopedKey(MIRROR_STORAGE_KEY)
+}
+
+export function getRecoveryStorageKeyPrefix(): string {
+  return scopedKey(RECOVERY_STORAGE_KEY_PREFIX)
+}
 const MAX_RECOVERY_BACKUPS = 3
 const DRAFT_SCHEMA = 2
 /** 保存时间只用于界面提示；超出容忍窗口的值按脏数据处理，避免 Intl 格式化抛错。 */
@@ -258,14 +284,16 @@ function draftEnvelope(program: Program, scope: ProgramDraftScope | undefined, s
 /** 崩溃兜底优先取本标签页草稿，其次才取上次会话镜像。 */
 export function readRawSavedProgram(): string | null {
   try {
-    const tabDraft = window.sessionStorage.getItem(SESSION_STORAGE_KEY)
+    const tabDraft = window.sessionStorage.getItem(scopedKey(SESSION_STORAGE_KEY))
     if (tabDraft) return tabDraft
   } catch {
     // 继续尝试本机镜像。
   }
   try {
-    return window.localStorage.getItem(MIRROR_STORAGE_KEY)
-      ?? window.localStorage.getItem(LEGACY_STORAGE_KEY)
+    const mirror = window.localStorage.getItem(scopedKey(MIRROR_STORAGE_KEY))
+    if (mirror) return mirror
+    // 旧版单个键属于未登录草稿，登录账号不能把它当成自己的内容。
+    return draftScope ? null : window.localStorage.getItem(LEGACY_STORAGE_KEY)
   } catch {
     return null
   }
@@ -286,7 +314,10 @@ function getLegacySavedAt(): number | null {
 
 export function getLastSavedAt(): number | null {
   try {
-    const candidates = [window.sessionStorage.getItem(SESSION_STORAGE_KEY), window.localStorage.getItem(MIRROR_STORAGE_KEY)]
+    const candidates = [
+      window.sessionStorage.getItem(scopedKey(SESSION_STORAGE_KEY)),
+      window.localStorage.getItem(scopedKey(MIRROR_STORAGE_KEY)),
+    ]
     for (const raw of candidates) {
       if (!raw) continue
       try {
@@ -302,11 +333,11 @@ export function getLastSavedAt(): number | null {
   } catch {
     // 继续尝试旧版时间戳。
   }
-  return getLegacySavedAt()
+  return draftScope ? null : getLegacySavedAt()
 }
 
 function recoveryKey(): string {
-  const base = `${RECOVERY_STORAGE_KEY_PREFIX}${new Date().toISOString()}`
+  const base = `${getRecoveryStorageKeyPrefix()}${new Date().toISOString()}`
   if (window.localStorage.getItem(base) === null) return base
 
   let suffix = 1
@@ -319,10 +350,11 @@ function recoveryKey(): string {
 }
 
 function pruneRecoveryBackups(): void {
+  const prefix = getRecoveryStorageKeyPrefix()
   const keys: string[] = []
   for (let index = 0; index < window.localStorage.length; index += 1) {
     const key = window.localStorage.key(index)
-    if (key?.startsWith(RECOVERY_STORAGE_KEY_PREFIX)) keys.push(key)
+    if (key?.startsWith(prefix)) keys.push(key)
   }
   keys.sort()
   while (keys.length > MAX_RECOVERY_BACKUPS) {
@@ -332,10 +364,11 @@ function pruneRecoveryBackups(): void {
 }
 
 function findRecoveryBackup(raw: string): string | undefined {
+  const prefix = getRecoveryStorageKeyPrefix()
   try {
     for (let index = 0; index < window.localStorage.length; index += 1) {
       const key = window.localStorage.key(index)
-      if (key?.startsWith(RECOVERY_STORAGE_KEY_PREFIX) && window.localStorage.getItem(key) === raw) {
+      if (key?.startsWith(prefix) && window.localStorage.getItem(key) === raw) {
         return key
       }
     }
@@ -360,7 +393,7 @@ export function readRecoveryBackup(key: string): string | null {
 }
 
 function recoverySavedAt(key: string): number | null {
-  const stamp = key.slice(RECOVERY_STORAGE_KEY_PREFIX.length).replace(/-\d+$/, '')
+  const stamp = key.slice(getRecoveryStorageKeyPrefix().length).replace(/-\d+$/, '')
   const parsed = Date.parse(stamp)
   return Number.isFinite(parsed) ? parsed : null
 }
@@ -368,10 +401,11 @@ function recoverySavedAt(key: string): number | null {
 /** 列出本机保留的恢复副本，最新在前；界面上可以据此下载或重新载入。 */
 export function listRecoveryBackups(): RecoveryBackup[] {
   const items: RecoveryBackup[] = []
+  const prefix = getRecoveryStorageKeyPrefix()
   try {
     for (let index = 0; index < window.localStorage.length; index += 1) {
       const key = window.localStorage.key(index)
-      if (!key?.startsWith(RECOVERY_STORAGE_KEY_PREFIX)) continue
+      if (!key?.startsWith(prefix)) continue
       const value = window.localStorage.getItem(key)
       if (value === null) continue
       items.push({ key, savedAt: recoverySavedAt(key), bytes: value.length })
@@ -428,12 +462,12 @@ export function loadSavedProgram(): LoadSavedProgramResult {
     {
       source: 'tab',
       label: '本标签页草稿',
-      draft: readDraftSafely(() => window.sessionStorage, SESSION_STORAGE_KEY),
+      draft: readDraftSafely(() => window.sessionStorage, scopedKey(SESSION_STORAGE_KEY)),
     },
     {
       source: 'mirror',
       label: '本机镜像草稿',
-      draft: readDraftSafely(() => window.localStorage, MIRROR_STORAGE_KEY),
+      draft: readDraftSafely(() => window.localStorage, scopedKey(MIRROR_STORAGE_KEY)),
     },
   ]
   const tabDraft = candidates[0].draft
@@ -464,6 +498,10 @@ export function loadSavedProgram(): LoadSavedProgramResult {
       copies,
     }
   }
+
+  // 旧版整份工程键只在未登录作用域里兼容；登录账号必须从空白开始，
+  // 否则会把游客的工程当成自己的第一份草稿。
+  if (draftScope) return { status: 'none' }
 
   let legacyText: string | null
   try {
@@ -526,14 +564,14 @@ export function saveProgram(program: Program, scope?: ProgramDraftScope): SavePr
   // sessionStorage 只属于当前标签页，保证两个标签页编辑不同项目时不会互相覆盖。
   let tabSaved = false
   try {
-    window.sessionStorage.setItem(SESSION_STORAGE_KEY, raw)
+    window.sessionStorage.setItem(scopedKey(SESSION_STORAGE_KEY), raw)
     tabSaved = true
   } catch {
     // 某些隐私模式禁用 sessionStorage，继续尝试本机镜像。
   }
 
   try {
-    window.localStorage.setItem(MIRROR_STORAGE_KEY, raw)
+    window.localStorage.setItem(scopedKey(MIRROR_STORAGE_KEY), raw)
   } catch (error) {
     return {
       ok: false,

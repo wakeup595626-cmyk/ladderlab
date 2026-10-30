@@ -25,6 +25,7 @@ import {
   SaveIcon,
   StepIcon,
   UndoIcon,
+  UserIcon,
 } from './Icons'
 
 export interface WorkspaceTopBarProps {
@@ -57,6 +58,9 @@ export interface WorkspaceTopBarProps {
   onNewProject: () => void
   onGuide: () => void
   onAbout: () => void
+  onOpenAccount: () => void
+  accountStatus?: 'disabled' | 'signed-out' | 'signed-in'
+  accountEmail?: string | null
   theme: ThemePreference
   onTheme: (theme: ThemePreference) => void
 }
@@ -90,6 +94,9 @@ export default function WorkspaceTopBar({
   onNewProject,
   onGuide,
   onAbout,
+  onOpenAccount,
+  accountStatus = 'disabled',
+  accountEmail = null,
   theme,
   onTheme,
 }: WorkspaceTopBarProps) {
@@ -241,11 +248,13 @@ export default function WorkspaceTopBar({
       const rect = themeButtonRef.current?.getBoundingClientRect()
       if (!rect) return
       const top = Math.round(rect.bottom + 8)
-      const right = Math.max(12, Math.round(window.innerWidth - rect.right))
+      const width = themeMenuRef.current?.offsetWidth ?? Math.min(326, window.innerWidth - 24)
+      const aligned = Math.round(rect.right - width)
+      const left = Math.max(12, Math.min(aligned, Math.round(window.innerWidth - 12 - width)))
       setThemeMenuStyle({
         top,
-        right,
-        left: 'auto',
+        left,
+        right: 'auto',
         bottom: 'auto',
         maxHeight: Math.max(240, Math.round(window.innerHeight - top - 12)),
       })
@@ -705,10 +714,13 @@ export default function WorkspaceTopBar({
                 const rect = themeButtonRef.current?.getBoundingClientRect()
                 if (rect) {
                   const top = Math.round(rect.bottom + 8)
+                  const width = Math.min(326, window.innerWidth - 24)
+                  const aligned = Math.round(rect.right - width)
+                  const left = Math.max(12, Math.min(aligned, Math.round(window.innerWidth - 12 - width)))
                   setThemeMenuStyle({
                     top,
-                    right: Math.max(12, Math.round(window.innerWidth - rect.right)),
-                    left: 'auto',
+                    left,
+                    right: 'auto',
                     bottom: 'auto',
                     maxHeight: Math.max(240, Math.round(window.innerHeight - top - 12)),
                   })
@@ -828,6 +840,31 @@ export default function WorkspaceTopBar({
             </div>
           )}
         </div>
+
+        <button
+          type="button"
+          className={`wb-account${accountStatus === 'signed-in' ? ' is-signed-in' : ''}`}
+          onClick={() => {
+            setMenuOpen(false)
+            setFileMenuOpen(false)
+            onOpenAccount()
+          }}
+          title={
+            accountStatus === 'signed-in'
+              ? `已登录 ${accountEmail ?? ''}：账号与云同步`
+              : accountStatus === 'disabled'
+                ? '账号与云同步（本机尚未配置云端）'
+                : '登录后项目会跟着账号走'
+          }
+          aria-label={accountStatus === 'signed-in' ? '账号与云同步，已登录' : '登录或注册账号'}
+        >
+          <UserIcon size={17} />
+          <span className="wb-account-label">
+            {accountStatus === 'signed-in'
+              ? (accountEmail ?? '').split('@')[0] || '账号'
+              : '登录'}
+          </span>
+        </button>
 
         <div className="overflow wb-more" ref={menuRef}>
           <button

@@ -647,7 +647,8 @@ describe('10 空工程 / 11 只有触点', () => {
     const guard = body.indexOf('if (!chart)')
     // 提示文案变长也不该把这条顺序断言挤掉：按相对位置比，不按固定字数截断。
     expect(guard).toBeGreaterThan(-1)
-    expect(body.indexOf('serializeSfcSvg')).toBeGreaterThan(guard)
+    // 动态 import 的解构里也会出现这个名字；要断言的是真正的调用顺序。
+    expect(body.indexOf('serializeSfcSvg(chart)')).toBeGreaterThan(guard)
   })
 })
 

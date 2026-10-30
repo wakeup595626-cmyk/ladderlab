@@ -319,6 +319,12 @@ const SVG_DEFAULT_VALUES: Record<string, string> = {
   display: 'inline',
   'font-style': 'normal',
   'letter-spacing': 'normal',
+  // 这几项是 SVG 的初始值，浏览器对每个节点都会返回它们。写进文件既不变
+  // 外观，又会在每个节点上重复几十个字节；1000 段的完整程序里能占四成体积。
+  'text-anchor': 'start',
+  'dominant-baseline': 'auto',
+  'alignment-baseline': 'auto',
+  'paint-order': 'normal',
 }
 
 /* DOM 节点类型常量：文本 3、CDATA 4、注释 8。 */
@@ -396,6 +402,9 @@ function inlineSvgStyles(source: SVGSVGElement, clone: SVGSVGElement) {
         else if (property === 'stroke') value = INK
       }
       if (isText && property === 'fill') value = INK
+      // 纯黑就是 SVG 的初始填充色；不少浏览器会给 <tspan> 算成 rgb(0, 0, 0)，
+      // 写出来与省略完全等价。
+      if (property === 'fill' && value === 'rgb(0, 0, 0)') continue
       if (value === SVG_DEFAULT_VALUES[property]) continue
       declarations.push(property + ':' + value)
     }

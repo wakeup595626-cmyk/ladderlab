@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { parseAddress } from '../engine/address'
 import { getProfile, supportsContact, supportsOutput } from '../engine/profiles'
 import { normalizeReference } from '../engine/references'
@@ -24,7 +24,7 @@ import {
   getNodeAtPath,
   tagAddressProblem,
   tagsInRung,
-  tagUsage,
+  tagUsageCounts,
   updateContact,
   updateOutput,
   updateTag,
@@ -237,7 +237,19 @@ const domToken = (value: string) => value.replace(
 const groupDomId = (key: string) => `tag-group-${domToken(key)}`
 const cardDomId = (tagId: string) => `tag-card-${domToken(tagId)}`
 const UNUSED_KEY = 'unused'
+
+/** 系统开了“减少动态效果”时没有过渡事件，收起后要立刻卸载内容。 */
+function prefersReducedMotion(): boolean {
+  return typeof window !== 'undefined'
+    && typeof window.matchMedia === 'function'
+    && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+}
 const rungKey = (rungId: string) => `rung:${rungId}`
+
+function matchesTagQuery(tag: TagDef, query: string): boolean {
+  return !query || [tag.name, tag.address, tag.comment, tag.kind]
+    .some((value) => value.toLocaleLowerCase().includes(query))
+}
 
 function TagsPanel({
   program,
@@ -262,6 +274,9 @@ function TagsPanel({
   // null 表示还没手动开合过，使用“当前段或第一段”作为初始状态；一旦开始
   // 操作就保存所有已展开的段。这样逐个点开时会累积，再点同一段才收起。
   const [openGroupKeys, setOpenGroupKeys] = useState<string[] | null>(null)
+  // 折叠组默认不挂载变量卡片：上千段的工程一打开变量表，只渲染展开的那一两组。
+  // 展开过的组保持挂载，收起动画才不会播放到一半内容先消失。
+  const [mountedGroups, setMountedGroups] = useState<string[]>([])
   const [flashTagId, setFlashTagId] = useState<string | null>(null)
   const [announcement, setAnnouncement] = useState('')
   const flashTimer = useRef<number | null>(null)
@@ -273,23 +288,27 @@ function TagsPanel({
     if (flashTimer.current !== null) window.clearTimeout(flashTimer.current)
     if (scrollTimer.current !== null) window.clearTimeout(scrollTimer.current)
   }, [])
-  const instances = contentRungs(program)
+  const normalizedQuery = tagQuery.trim().toLocaleLowerCase()
+  // 变量表的结构性计算只在工程变化时重做一次。运行值刷新频率很高，
+  // 旧实现会在每次刷新时把每个程序段的变量分组重新推导一遍。
+  const usageCounts = useMemo(() => tagUsageCounts(program), [program])
+  const instances = useMemo(() => contentRungs(program)
     .map((rung) => rung.output)
     .filter((output) => {
       const name = normalizeReference(output.tag)
       return runtime.timers[name] || runtime.counters[name]
-    })
-  const normalizedQuery = tagQuery.trim().toLocaleLowerCase()
-  const matchesQuery = (tag: TagDef) => !normalizedQuery
-    || [tag.name, tag.address, tag.comment, tag.kind]
-      .some((value) => value.toLocaleLowerCase().includes(normalizedQuery))
-  const visibleTags = program.tags.filter(matchesQuery)
+    }), [program, runtime])
+  const visibleTags = useMemo(
+    () => program.tags.filter((tag) => matchesTagQuery(tag, normalizedQuery)),
+    [program, normalizedQuery],
+  )
 
   // 每个变量只在自己的“第一个程序段”里显示可编辑卡片，后面的程序段用胶囊标签提示，
   // 这样同一个变量不会在几段里各出现一张表单，改一处就是改全部。
-  const homeOf = new Map<string, string>()
-  const rungGroups = contentRungs(program)
-    .map((rung, index) => {
+  const { rungGroups, unusedTags, homeOf } = useMemo(() => {
+    const homeOf = new Map<string, string>()
+    const rungGroups = contentRungs(program)
+      .map((rung, index) => {
       const tags = tagsInRung(program, rung)
       const local: TagDef[] = []
       const shared: TagDef[] = []
@@ -311,29 +330,51 @@ function TagsPanel({
         shared,
       }
     })
-    .filter((group) => group.total > 0)
-  const unusedTags = program.tags.filter((tag) => !homeOf.has(tag.id))
-  const queryGroups = rungGroups
+      .filter((group) => group.total > 0)
+    return {
+      rungGroups,
+      unusedTags: program.tags.filter((tag) => !homeOf.has(tag.id)),
+      homeOf,
+    }
+  }, [program])
+  const queryGroups = useMemo(() => rungGroups
     .map((group) => ({
       ...group,
-      local: group.local.filter(matchesQuery),
-      shared: group.shared.filter(matchesQuery),
+      local: group.local.filter((tag) => matchesTagQuery(tag, normalizedQuery)),
+      shared: group.shared.filter((tag) => matchesTagQuery(tag, normalizedQuery)),
     }))
-    .filter((group) => group.local.length > 0 || group.shared.length > 0)
-  const queryUnused = unusedTags.filter(matchesQuery)
+    .filter((group) => group.local.length > 0 || group.shared.length > 0), [rungGroups, normalizedQuery])
+  const queryUnused = useMemo(
+    () => unusedTags.filter((tag) => matchesTagQuery(tag, normalizedQuery)),
+    [unusedTags, normalizedQuery],
+  )
   const selectedRungId = selection?.rungId ?? null
   const activeGroupKey = selectedRungId ? rungKey(selectedRungId) : null
   const defaultOpenKey = (activeGroupKey && rungGroups.some((group) => group.key === activeGroupKey)
     ? activeGroupKey
     : rungGroups[0]?.key) ?? null
-  const openGroupSet = new Set(
-    openGroupKeys ?? (defaultOpenKey ? [defaultOpenKey] : []),
+  const openGroupList = useMemo(
+    () => openGroupKeys ?? (defaultOpenKey ? [defaultOpenKey] : []),
+    [openGroupKeys, defaultOpenKey],
   )
+  const openGroupSet = useMemo(() => new Set(openGroupList), [openGroupList])
   const isSearching = normalizedQuery !== ''
   const isOpen = (key: string) => {
     // 搜索时结果全展开，命中的变量不会藏在收起的段里。
     if (isSearching) return true
     return openGroupSet.has(key)
+  }
+  const mountedSet = new Set(mountedGroups)
+  // 折叠动画需要内容先存在过一帧，所以展开过的分组记进 mountedGroups。
+  // 直接按渲染期派生补齐，省掉一次 effect 重渲染（1000 段时差别很明显）。
+  const missingMounted = openGroupList.filter((key) => !mountedGroups.includes(key))
+  if (missingMounted.length > 0) setMountedGroups([...mountedGroups, ...missingMounted])
+  // 收起动画播完就立刻卸载卡片：搜索会把所有分组都“展开”一次，如果永久保留，
+  // 上千个程序段会一直拖着几万个卡片节点不放。
+  const releaseMounted = (key: string) => {
+    setMountedGroups((current) => (current.includes(key)
+      ? current.filter((item) => item !== key)
+      : current))
   }
   const updateTagQuery = (value: string) => setTagQuery(value)
   const clearTagQuery = () => {
@@ -342,6 +383,8 @@ function TagsPanel({
   }
   const toggleGroup = (key: string) => {
     if (isSearching) return
+    const willClose = openGroupSet.has(key)
+    if (willClose && prefersReducedMotion()) releaseMounted(key)
     setOpenGroupKeys((current) => {
       const next = new Set(current ?? (defaultOpenKey ? [defaultOpenKey] : []))
       if (next.has(key)) next.delete(key)
@@ -401,7 +444,7 @@ function TagsPanel({
   const titleOf = (key: string) => rungGroups.find((group) => group.key === key)?.title ?? '前面的程序段'
 
   const renderTagCard = (tag: TagDef) => {
-    const usage = tagUsage(program, tag.name)
+    const usage = usageCounts.get(normalizeReference(tag.name)) ?? 0
     return (
       <article
         className="tag-card"
@@ -663,9 +706,18 @@ function TagsPanel({
                       {normalizedQuery === '' ? group.total : `${shown}/${group.total}`}
                     </span>
                   </button>
-                  <div className="tag-group-body" id={groupDomId(group.key)} data-collapsed={!open} inert={!open}>
+                  <div
+                    className="tag-group-body"
+                    id={groupDomId(group.key)}
+                    data-collapsed={!open}
+                    inert={!open}
+                    onTransitionEnd={(event) => {
+                      if (event.target !== event.currentTarget || open) return
+                      releaseMounted(group.key)
+                    }}
+                  >
                     <div className="tag-group-inner">
-                      {group.shared.length > 0 && (
+                      {(open || mountedSet.has(group.key)) && group.shared.length > 0 && (
                         <div className="tag-chip-row" role="group" aria-label={`${group.title}复用的变量`}>
                           {group.shared.map((tag) => {
                             const ownerKey = homeOf.get(tag.id) ?? UNUSED_KEY
@@ -684,7 +736,7 @@ function TagsPanel({
                           })}
                         </div>
                       )}
-                      {group.local.map(renderTagCard)}
+                      {(open || mountedSet.has(group.key)) && group.local.map(renderTagCard)}
                     </div>
                   </div>
                 </section>
@@ -705,8 +757,19 @@ function TagsPanel({
                     {normalizedQuery === '' ? queryUnused.length : `${queryUnused.length}/${unusedTags.length}`}
                   </span>
                 </button>
-                <div className="tag-group-body" id={groupDomId(UNUSED_KEY)} data-collapsed={!isOpen(UNUSED_KEY)} inert={!isOpen(UNUSED_KEY)}>
-                  <div className="tag-group-inner">{queryUnused.map(renderTagCard)}</div>
+                <div
+                  className="tag-group-body"
+                  id={groupDomId(UNUSED_KEY)}
+                  data-collapsed={!isOpen(UNUSED_KEY)}
+                  inert={!isOpen(UNUSED_KEY)}
+                  onTransitionEnd={(event) => {
+                    if (event.target !== event.currentTarget || isOpen(UNUSED_KEY)) return
+                    releaseMounted(UNUSED_KEY)
+                  }}
+                >
+                  <div className="tag-group-inner">
+                    {(isOpen(UNUSED_KEY) || mountedSet.has(UNUSED_KEY)) && queryUnused.map(renderTagCard)}
+                  </div>
                 </div>
               </section>
             )}

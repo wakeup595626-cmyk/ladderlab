@@ -371,6 +371,47 @@ body[data-drag-kind] {
   height: 36px;
 }
 
+.wb-account {
+  display: inline-flex;
+  height: 100%;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  padding-inline: 11px;
+  border: 0;
+  border-left: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--muted);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+  transition:
+    background-color var(--dur-press) var(--ease-out),
+    color var(--dur-press) var(--ease-out);
+}
+
+.wb-account:hover {
+  background: var(--active);
+  color: var(--text);
+}
+
+.wb-account:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.wb-account.is-signed-in,
+.wb-account.is-signed-in svg {
+  color: var(--accent-ink);
+}
+
+.wb-account-label {
+  max-width: 96px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .wb-more-menu.topbar-menu {
   /* 顶栏按钮组用 overflow 收圆角；浮层改成相对视口定位，才不会被 40px 高
      的工具条裁掉，菜单项也才点得到。 */
@@ -3602,13 +3643,20 @@ body[data-drag-kind] {
   }
 
   .wb-project-button,
-  .wb-shell .wb-more .icon-button {
+  .wb-shell .wb-more .icon-button,
+  .wb-account {
     width: 44px;
     height: 44px;
   }
 
-  .wb-project-button {
+  .wb-project-button,
+  .wb-account {
     padding: 0;
+    justify-content: center;
+  }
+
+  .wb-account-label {
+    display: none;
   }
 
   .wb-shell .wb-run-toggle {

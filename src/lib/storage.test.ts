@@ -10,6 +10,7 @@ import {
   parseProgramDraft,
   readRawSavedProgram,
   saveProgram,
+  setProgramDraftScope,
 } from './storage'
 
 const LEGACY_STORAGE_KEY = 'ladderlab.project.v1'
@@ -78,6 +79,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  setProgramDraftScope('')
   vi.unstubAllGlobals()
   vi.restoreAllMocks()
 })
@@ -451,5 +453,50 @@ describe('storage', () => {
     expect(loaded.backupKey).toBeUndefined()
     expect(loaded.copies).toEqual([])
     expect(loaded.message).toContain('SecurityError')
+  })
+})
+
+describe('storage account scope', () => {
+  it('keeps each account draft in its own key space', () => {
+    setProgramDraftScope('u-aaaaaaaaaaaa')
+    const first = saveProgram({ ...starterProgram(), name: 'A 的工程' })
+    expect(first.ok).toBe(true)
+
+    setProgramDraftScope('u-bbbbbbbbbbbb')
+    expect(loadSavedProgram()).toEqual({ status: 'none' })
+    expect(readRawSavedProgram()).toBeNull()
+    expect(getLastSavedAt()).toBeNull()
+    expect(saveProgram({ ...starterProgram(), name: 'B 的工程' }).ok).toBe(true)
+
+    setProgramDraftScope('u-aaaaaaaaaaaa')
+    const loaded = loadSavedProgram()
+    if (loaded.status !== 'ok') throw new Error('expected saved A draft')
+    expect(loaded.program.name).toBe('A 的工程')
+  })
+
+  it('does not hand the guest legacy draft to a signed-in account', () => {
+    storage.setItem(LEGACY_STORAGE_KEY, JSON.stringify({ ...starterProgram(), name: '游客工程' }))
+    setProgramDraftScope('u-111111111111')
+    expect(loadSavedProgram()).toEqual({ status: 'none' })
+    expect(readRawSavedProgram()).toBeNull()
+  })
+
+  it('scopes recovery copies to the active account', () => {
+    setProgramDraftScope('u-aaaaaaaaaaaa')
+    const firstKey = archiveRecoveryCopy('{"scope":"a"}')
+    expect(firstKey).toBeTruthy()
+    expect(listRecoveryBackups()).toHaveLength(1)
+
+    setProgramDraftScope('u-bbbbbbbbbbbb')
+    expect(listRecoveryBackups()).toHaveLength(0)
+    const secondKey = archiveRecoveryCopy('{"scope":"b"}')
+    expect(secondKey).toBeTruthy()
+    expect(secondKey).not.toBe(firstKey)
+    expect(listRecoveryBackups()).toHaveLength(1)
+
+    setProgramDraftScope('u-aaaaaaaaaaaa')
+    expect(listRecoveryBackups()).toHaveLength(1)
+    // 两份副本真的都写在 localStorage 里，只是各自只在自己的作用域可见。
+    expect(recoveryKeys()).toHaveLength(2)
   })
 })

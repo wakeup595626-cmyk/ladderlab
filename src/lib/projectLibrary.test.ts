@@ -10,11 +10,14 @@ import {
   PROJECT_LIBRARY_STORAGE_KEY,
   archiveBrokenProjectRecord,
   deleteSavedProject,
+  getProjectLibraryScope,
   isProjectLibraryStorageKey,
   readActiveSavedProjectId,
   readProjectLibrary,
+  readProjectLibraryInScope,
   repairSavedProjectRecord,
   saveNamedProject,
+  setProjectLibraryScope,
   writeActiveSavedProjectId,
 } from './projectLibrary'
 import { serializeProgram } from './io'
@@ -103,11 +106,13 @@ function backupKeys(): string[] {
 beforeEach(() => {
   storage = new MemoryStorage()
   session = new MemoryStorage()
+  setProjectLibraryScope('')
   vi.stubGlobal('window', { localStorage: storage, sessionStorage: session })
   vi.stubGlobal('navigator', {})
 })
 
 afterEach(() => {
+  setProjectLibraryScope('')
   vi.unstubAllGlobals()
   vi.restoreAllMocks()
 })
@@ -210,6 +215,24 @@ describe('project library', () => {
     expect(readActiveSavedProjectId()).toBe(saved.project.id)
     expect(session.getItem(ACTIVE_PROJECT_STORAGE_KEY)).toBe(saved.project.id)
     expect(storage.getItem(ACTIVE_PROJECT_STORAGE_KEY)).toBeNull()
+  })
+
+  it('keeps the active project marker per account scope', async () => {
+    const guest = await saveNamedProject({ name: '游客工程', program: namedProgram('游客工程') })
+    if (!guest.ok) throw new Error('expected a guest save')
+    writeActiveSavedProjectId(guest.project.id)
+    expect(session.getItem(ACTIVE_PROJECT_STORAGE_KEY)).toBe(guest.project.id)
+
+    setProjectLibraryScope('u-aaaaaaaaaaaa')
+    const mine = await saveNamedProject({ name: '账号工程', program: namedProgram('账号工程') })
+    if (!mine.ok) throw new Error('expected an account save')
+    writeActiveSavedProjectId(mine.project.id)
+    expect(session.getItem(`${ACTIVE_PROJECT_STORAGE_KEY}@u-aaaaaaaaaaaa`)).toBe(mine.project.id)
+
+    setProjectLibraryScope('u-bbbbbbbbbbbb')
+    expect(readActiveSavedProjectId()).toBeNull()
+    setProjectLibraryScope('')
+    expect(readActiveSavedProjectId()).toBe(guest.project.id)
   })
 
   it('serializes concurrent saves so neither project is lost', async () => {
@@ -766,5 +789,79 @@ describe('project library', () => {
     expect(isProjectLibraryStorageKey(`${PROJECT_LIBRARY_QUARANTINE_PREFIX}v1-0-abc`)).toBe(true)
     expect(isProjectLibraryStorageKey(`${PROJECT_LIBRARY_BROKEN_PREFIX}backup`)).toBe(true)
     expect(isProjectLibraryStorageKey('ladderlab.project.v1.mirror.v2')).toBe(false)
+  })
+})
+
+describe('per-account library scope', () => {
+  it('不同账号各存一份，互不可见；未登录作用域保持旧键名', async () => {
+    const guest = await saveNamedProject({ name: '访客工程', program: namedProgram('访客工程') })
+    if (!guest.ok) throw new Error('expected a successful guest save')
+    const guestId = guest.project.id
+
+    setProjectLibraryScope('u-accountaaaa')
+    const first = await saveNamedProject({ name: '甲的工程', program: namedProgram('甲的工程') })
+    if (!first.ok) throw new Error('expected a successful scoped save')
+    const firstId = first.project.id
+    const scoped = readProjectLibrary()
+    if (scoped.status !== 'ok') throw new Error('expected a readable library')
+    expect(scoped.projects.map((item) => item.id)).toEqual([firstId])
+
+    setProjectLibraryScope('u-accountbbbb')
+    const second = readProjectLibrary()
+    if (second.status !== 'ok') throw new Error('expected a readable library')
+    expect(second.projects).toEqual([])
+
+    setProjectLibraryScope('')
+    const backToGuest = readProjectLibrary()
+    if (backToGuest.status !== 'ok') throw new Error('expected a readable library')
+    expect(backToGuest.projects.map((item) => item.id)).toEqual([guestId])
+  })
+
+  it('临时切作用域读取不会污染当前作用域', async () => {
+    setProjectLibraryScope('u-accountcccc')
+    const saved = await saveNamedProject({ name: '丙的工程', program: namedProgram('丙的工程') })
+    if (!saved.ok) throw new Error('expected a successful scoped save')
+    const guest = readProjectLibraryInScope('', () => readProjectLibrary())
+    if (guest.status !== 'ok') throw new Error('expected a readable library')
+    expect(guest.projects).toEqual([])
+    expect(getProjectLibraryScope()).toBe('u-accountcccc')
+  })
+
+  it('账号作用域不会迁移或继承游客的旧版整库', () => {
+    const legacyRaw = JSON.stringify({
+      schema: 1,
+      projects: [{
+        id: 'guest-legacy',
+        createdAt: 1_000,
+        savedAt: 2_000,
+        program: namedProgram('游客旧工程'),
+      }],
+    })
+    storage.setItem(PROJECT_LIBRARY_STORAGE_KEY, legacyRaw)
+
+    setProjectLibraryScope('u-accountdddd')
+    const scoped = readProjectLibrary()
+    expect(scoped.status).toBe('ok')
+    if (scoped.status !== 'ok') throw new Error('expected a readable library')
+    expect(scoped.projects).toEqual([])
+    expect(storage.getItem(PROJECT_LIBRARY_READY_KEY)).toBeNull()
+    expect(storage.getItem(PROJECT_LIBRARY_STORAGE_KEY)).toBe(legacyRaw)
+  })
+
+  it('游客的损坏隔离记录不会出现在账号作用域里', () => {
+    const quarantineKey = `${PROJECT_LIBRARY_QUARANTINE_PREFIX}v1-0-guest`
+    storage.setItem(PROJECT_LIBRARY_READY_KEY, '{"schema":2}')
+    storage.setItem(quarantineKey, '{"id":"broken-guest"}')
+
+    const guest = readProjectLibrary()
+    expect(guest.status).toBe('ok')
+    if (guest.status !== 'ok') throw new Error('expected a readable library')
+    expect(guest.broken.map((item) => item.key)).toEqual([quarantineKey])
+
+    setProjectLibraryScope('u-accounteeee')
+    const scoped = readProjectLibrary()
+    expect(scoped.status).toBe('ok')
+    if (scoped.status !== 'ok') throw new Error('expected a readable library')
+    expect(scoped.broken).toEqual([])
   })
 })

@@ -14,7 +14,15 @@ import {
 import './App.css'
 import './Shell.css'
 import AboutDialog from './components/AboutDialog'
+import AccountDialog from './components/AccountDialog'
 import CoachStrip from './components/CoachStrip'
+import { useCloudAccount } from './lib/cloud/useCloudAccount'
+import { libraryScopeForUser } from './lib/cloud/scope'
+import {
+  estimateStoragePressure,
+  formatStorageBytes,
+  type StoragePressure,
+} from './lib/storageQuota'
 import { useConfirmDialog } from './lib/useConfirmDialog'
 import Guide from './components/Guide'
 import { FolderIcon, GripIcon, LadderIcon, TagIcon } from './components/Icons'
@@ -32,6 +40,7 @@ import {
   type ThemePreference,
 } from './lib/theme'
 import ProjectDrawer from './components/ProjectDrawer'
+import RungNavigator from './components/RungNavigator'
 import ProjectImportDialog from './components/ProjectImportDialog'
 import NewProjectDialog from './components/NewProjectDialog'
 import SaveProjectDialog from './components/SaveProjectDialog'
@@ -60,7 +69,6 @@ import {
   programsEqualIgnoringPlaceholder,
 } from './engine/rungInvariant'
 import { createRuntime, step, writeRuntimeValue } from './engine/simulate'
-import { buildSfc } from './engine/sfc'
 import type {
   ContactKind,
   LadderNode,
@@ -92,19 +100,21 @@ import {
 import { saveLatestNamedProject } from './lib/latestProjectSave'
 import {
   archiveBrokenProjectRecord,
+  applySyncedProjects,
   deleteSavedProject as removeSavedProjectFromLibrary,
   importSavedProjectBackup,
   isProjectLibraryStorageKey,
+  readProjectLibraryInScope,
   readActiveSavedProjectId,
   readProjectLibrary,
   repairSavedProjectRecord,
   saveNamedProject,
+  setProjectLibraryScope,
   writeActiveSavedProjectId,
   type BrokenSavedProject,
   type SaveNamedProjectResult,
   type SavedProject,
 } from './lib/projectLibrary'
-import { rasterizeSfcPng, serializeSfcSvg } from './lib/sfcExport'
 import {
   clampInspectorWidth,
   INSPECTOR_DEFAULT_WIDTH,
@@ -141,13 +151,14 @@ import {
   archiveRecoveryCopy,
   isRecoveryBackupIntact,
   getDraftTabId,
+  getProgramStorageKey,
+  getRecoveryStorageKeyPrefix,
   listRecoveryBackups,
   loadSavedProgram,
   parseProgramDraft,
-  PROGRAM_STORAGE_KEY,
-  RECOVERY_STORAGE_KEY_PREFIX,
   readRecoveryBackup,
   saveProgram,
+  setProgramDraftScope,
   type LoadSavedProgramResult,
   type RecoveryBackup,
 } from './lib/storage'
@@ -487,6 +498,15 @@ function chainLengthAtPath(nodes: LadderNode[], chain: number[]): number | null 
 
 export default function App() {
   const { confirm, dialog: confirmDialog } = useConfirmDialog()
+  const account = useCloudAccount()
+  const [accountOpen, setAccountOpen] = useState(false)
+  const [guestProjectCount, setGuestProjectCount] = useState(0)
+  // 从重置邮件回跳时直接打开账号面板，用户不必猜“下一步点哪里”。
+  useEffect(() => {
+    if (account.recovery) setAccountOpen(true)
+  }, [account.recovery])
+  // 云同步回调要挂在保存/删除里，但那些回调的依赖数组不该被整个 account 对象拖着重算。
+  const scheduleCloudSyncRef = useRef<() => void>(() => {})
   const [startupState] = useState<StartupState>(() => {
     const resolved = resolveStartupState(loadSavedProgram(), readProjectLibrary())
     return {
@@ -549,6 +569,8 @@ export default function App() {
   const [lastSavedAt, setLastSavedAt] = useState<number | null>(startupState.lastSavedAt)
   const [savePending, setSavePending] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
+  const [storagePressure, setStoragePressure] = useState<StoragePressure | null>(null)
+  const [storageNoticeDismissed, setStorageNoticeDismissed] = useState(false)
   const [backups, setBackups] = useState<RecoveryBackup[]>(() => listRecoveryBackups())
   const [backupsDismissed, setBackupsDismissed] = useState(false)
   const [rawDownloaded, setRawDownloaded] = useState(false)
@@ -782,6 +804,20 @@ export default function App() {
     return () => window.removeEventListener('storage', onStorage)
   }, [applyLibrarySnapshot])
 
+  // 登录态变化就切换本机项目库作用域：每个账号只看到自己的项目，
+  // 退出后回到未登录作用域，原来本机的东西一个字都不会被别人看到。
+  const cloudUserId = account.user?.id ?? null
+  const syncedUserIdRef = useRef<string | null | undefined>(undefined)
+
+  useEffect(() => {
+    scheduleCloudSyncRef.current = account.scheduleSync
+  }, [account.scheduleSync])
+
+  const syncCloudNowRef = useRef(account.syncNow)
+  useEffect(() => {
+    syncCloudNowRef.current = account.syncNow
+  }, [account.syncNow])
+
   const notify = useCallback((
     message: string,
     options?: {
@@ -808,6 +844,47 @@ export default function App() {
       focusAction: options?.focusAction,
     })
   }, [])
+
+  /** 打开账号面板时顺手点一下本机“未登录”项目数量，决定要不要展示迁移入口。 */
+  const openAccount = useCallback(() => {
+    const guest = readProjectLibraryInScope('', () => readProjectLibrary())
+    setGuestProjectCount(guest.status === 'ok' ? guest.projects.length : 0)
+    setAccountOpen(true)
+  }, [])
+
+  const refreshLibraryFromStorage = useCallback(() => {
+    const latest = readProjectLibrary()
+    if (latest.status === 'ok') applyLibrarySnapshot(latest.projects, latest.broken)
+  }, [applyLibrarySnapshot])
+
+  // 未登录时攒下的项目对每个账号都可见但互不共享，所以迁移只在用户明确点击时
+  // 复制一份进当前账号；同 ID 的已经不在了的才补，避免覆盖账号里已经改过的版本。
+  const importGuestProjects = useCallback(async () => {
+    const guest = readProjectLibraryInScope('', () => readProjectLibrary())
+    if (guest.status !== 'ok') {
+      notify('读取未登录项目失败，请先导出备份再重试', { tone: 'error' })
+      return
+    }
+    const current = readProjectLibrary()
+    const existing = new Set(current.status === 'ok' ? current.projects.map((item) => item.id) : [])
+    const incoming = guest.projects.filter((item) => !existing.has(item.id))
+    if (incoming.length === 0) {
+      setGuestProjectCount(0)
+      notify(current.status === 'ok' && guest.projects.length > 0
+        ? '这些未登录项目已经在当前账号里了，没有重复导入'
+        : '本机没有可导入的未登录项目')
+      return
+    }
+    const result = await applySyncedProjects({ upserts: incoming })
+    if (!result.ok) {
+      notify(result.message ?? '云同步写入失败，请稍后重试', { tone: 'error' })
+      return
+    }
+    applyLibrarySnapshot(result.projects, result.broken)
+    setGuestProjectCount(0)
+    notify(`已把 ${incoming.length} 个未登录项目复制进当前账号，正在同步到云端`)
+    scheduleCloudSyncRef.current()
+  }, [applyLibrarySnapshot, notify])
 
   const showIssues = useCallback((issues: ProgramIssue[]) => {
     if (issues.length > 0) setIssuesDialog(issues)
@@ -880,6 +957,117 @@ export default function App() {
   useEffect(() => {
     writeActiveSavedProjectId(activeSavedProjectRef.current?.id ?? null)
   }, [])
+
+  /**
+   * 账号切换：先把当前草稿写回旧作用域，再切项目库与草稿分区，最后按新作用域
+   * 重新解析启动状态。这样 A 退出、B 登录时，编辑器不会继续显示 A 的程序，
+   * 也不会把 A 的内容自动保存进 B 的键里。
+   */
+  useEffect(() => {
+    if (syncedUserIdRef.current === cloudUserId) return
+    const firstRun = syncedUserIdRef.current === undefined
+    syncedUserIdRef.current = cloudUserId
+    // 首屏作用域已由 main.tsx 在渲染前设好，启动状态也已经按它解析过。
+    if (firstRun) return
+
+    if (saveTimerRef.current !== null) {
+      window.clearTimeout(saveTimerRef.current)
+      saveTimerRef.current = null
+    }
+    if (saveRetryTimerRef.current !== null) {
+      window.clearTimeout(saveRetryTimerRef.current)
+      saveRetryTimerRef.current = null
+    }
+    saveRetryAttemptRef.current = 0
+    // 写入时仍处于旧作用域：这份内容属于即将离开的账号（或游客）。
+    if (savingEnabledRef.current && !remoteConflictRef.current) {
+      const leaving = activeSavedProjectRef.current
+      saveProgram(latestProgramRef.current, {
+        projectId: leaving?.id ?? null,
+        baseSavedAt: leaving?.savedAt ?? null,
+      })
+    }
+
+    const nextScope = libraryScopeForUser(cloudUserId)
+    setProjectLibraryScope(nextScope)
+    setProgramDraftScope(nextScope)
+    const resolved = resolveStartupState(loadSavedProgram(), readProjectLibrary())
+    const library = resolved.library
+    if (library.status === 'ok') applyLibrarySnapshot(library.projects, library.broken)
+    else setProjectLibraryError(library.message)
+
+    const nextProgram = ensureTrailingBlankRung(resolved.initialProgram)
+    const nextCorrupt = resolved.startup.status === 'corrupt' ? resolved.startup : null
+    setCorruptProject(nextCorrupt)
+    setSavingEnabled(!nextCorrupt)
+    savingEnabledRef.current = !nextCorrupt
+    setHistory({ past: [], present: nextProgram, future: [] })
+    latestProgramRef.current = nextProgram
+    lastPersistedProgramRef.current = resolved.startup.status === 'ok' ? nextProgram : null
+    lastDraftStampRef.current = resolved.lastSavedAt
+    projectBaselineProgramRef.current = resolved.baselineProgram
+    saveDirtyRef.current = false
+    lastSaveFailureRef.current = null
+    remoteConflictRef.current = Boolean(resolved.initialConflict)
+    remoteConflictDataRef.current = resolved.initialConflict
+    setRemoteConflict(resolved.initialConflict)
+    activeSavedProjectRef.current = resolved.activeProject
+    setActiveSavedProject(resolved.activeProject)
+    writeActiveSavedProjectId(resolved.activeProject?.id ?? null)
+    setLastSavedAt(resolved.lastSavedAt)
+    setSaveError(null)
+    setSavePending(false)
+    setRunning(false)
+    setRuntime(createRuntime(nextProgram))
+    const opening = preferredRung(nextProgram)
+    setSelection(opening ? { rungId: opening.id, path: null } : null)
+    setFavoriteTargetRungId(opening?.id ?? null)
+    setInsertCursor(null)
+    setMergeArmed(null)
+    setQuickEdit(null)
+    setBackups(listRecoveryBackups())
+    setBackupsDismissed(false)
+    setRawDownloaded(false)
+    setStorageNoticeDismissed(false)
+  }, [applyLibrarySnapshot, cloudUserId])
+
+  // 必须排在上面切换作用域的 effect 之后：登录后的第一次同步要读新账号的分区。
+  useEffect(() => {
+    if (!cloudUserId) return
+    void syncCloudNowRef.current()
+  }, [cloudUserId])
+
+  // 同步可能排队重跑，统一以 lastSync 变化作为“可以刷新项目列表”的信号。
+  useEffect(() => {
+    if (!cloudUserId || !account.lastSync) return
+    const latest = readProjectLibrary()
+    if (latest.status === 'ok') applyLibrarySnapshot(latest.projects, latest.broken)
+    else setProjectLibraryError(latest.message)
+  }, [account.lastSync, applyLibrarySnapshot, cloudUserId])
+
+  // 存储配额预警：启动时估一次，之后每次自动保存成功最多每分钟复测一次。
+  // estimate() 只是浏览器给的近似值，读不到时保持静默，绝不影响编辑。
+  const quotaCheckedAtRef = useRef(0)
+  const storageLevelRef = useRef<StoragePressure['level']>('unknown')
+  useEffect(() => {
+    const now = Date.now()
+    if (now - quotaCheckedAtRef.current < 60_000) return
+    quotaCheckedAtRef.current = now
+    let cancelled = false
+    void estimateStoragePressure().then((pressure) => {
+      if (cancelled) return
+      setStoragePressure((current) => (
+        current && current.level === pressure.level && current.usage === pressure.usage
+          ? current
+          : pressure
+      ))
+      // 余量继续恶化时把用户关掉的提醒重新拿出来；恢复后自然消失。
+      const rank = { unknown: 0, ok: 0, warn: 1, critical: 2 } as const
+      if (rank[pressure.level] > rank[storageLevelRef.current]) setStorageNoticeDismissed(false)
+      storageLevelRef.current = pressure.level
+    })
+    return () => { cancelled = true }
+  }, [lastSavedAt])
 
   const clearSaveRetryTimer = useCallback(() => {
     if (saveRetryTimerRef.current !== null) {
@@ -1041,6 +1229,8 @@ export default function App() {
   const finishNamedSave = useCallback((project: SavedProject, closeDialog: boolean) => {
     commitSavedProjectName(project)
     saveLatestProgram()
+    // 本机写入成功就已经安全了；云端只是排队在后台补一刀，失败不会影响本地保存。
+    scheduleCloudSyncRef.current()
     const settlement = settleSupersededConflict(project.savedAt)
     if (closeDialog) {
       setSaveDialogOpen(false)
@@ -1621,15 +1811,16 @@ export default function App() {
   // 让用户自己决定保留哪一份，而不是由最后写入的一方静默覆盖。
   useEffect(() => {
     const onStorage = (event: StorageEvent) => {
-      if (event.key?.startsWith(RECOVERY_STORAGE_KEY_PREFIX)) {
+      if (event.key?.startsWith(getRecoveryStorageKeyPrefix())) {
         setBackups(listRecoveryBackups())
         return
       }
-      if (event.key !== PROGRAM_STORAGE_KEY || !event.newValue) return
+      const programKey = getProgramStorageKey()
+      if (event.key !== programKey || !event.newValue) return
       // storage 事件可能在后台标签页排队；处理时若镜像已被更新的一笔覆盖，
       // 旧事件不应再制造一次基于过期版本的冲突提示。
       try {
-        if (window.localStorage.getItem(PROGRAM_STORAGE_KEY) !== event.newValue) return
+        if (window.localStorage.getItem(programKey) !== event.newValue) return
       } catch {
         return
       }
@@ -2824,6 +3015,7 @@ export default function App() {
     applyLibrarySnapshot(result.projects, result.broken)
     if (saved.id === activeSavedProjectId) setActiveProject(null)
     notify(`已从本机项目库删除「${saved.name}」`)
+    scheduleCloudSyncRef.current()
   }
 
   const handleRepairBrokenProject = async (record: BrokenSavedProject) => {
@@ -3092,6 +3284,13 @@ export default function App() {
     setSfcExporting(true)
     const controller = new AbortController()
     try {
+      // 顺序功能图的归纳和渲染只在真正导出时才用得到。静态引入会把 90 kB 的
+      // 引擎块和渲染器一起拉进首屏，这里改成按需加载。
+      const [{ buildSfc }, { rasterizeSfcPng, serializeSfcSvg }] = await Promise.all([
+        import('./engine/sfc'),
+        import('./lib/sfcExport'),
+      ])
+      if (controller.signal.aborted) return
       const chart = buildSfc(program)
       if (!chart) {
         const hasOutput = program.rungs.some((rung) => rung.output.tag.trim() !== '')
@@ -3508,6 +3707,9 @@ export default function App() {
         onCopyShareLink={() => void copyShareLink()}
         onGuide={() => setGuideOpen(true)}
         onAbout={() => setAboutOpen(true)}
+        onOpenAccount={openAccount}
+        accountStatus={account.status}
+        accountEmail={account.user?.email ?? null}
         theme={theme}
         onTheme={handleTheme}
       />
@@ -3594,6 +3796,47 @@ export default function App() {
               </span>
             </div>
             <div className="wb-program-inner">
+              <RungNavigator
+                program={program}
+                selection={selection}
+                paneRef={editorRef}
+                onSelect={(next) => {
+                  setInsertCursor(null)
+                  setSelection(next)
+                  setInspectorTab((current) => (
+                    current === 'tags' && next.wholeRung ? 'tags' : 'properties'
+                  ))
+                  setQuickEdit(null)
+                }}
+              />
+              {(storagePressure?.level === 'warn' || storagePressure?.level === 'critical')
+                && !storageNoticeDismissed && (
+                <section
+                  className={`storage-banner storage-banner-${storagePressure.level}`}
+                  role="status"
+                  aria-labelledby="storage-banner-title"
+                >
+                  <div className="storage-banner-copy">
+                    <strong id="storage-banner-title">
+                      {storagePressure.level === 'critical' ? '本机存储快满了' : '本机存储余量偏低'}
+                    </strong>
+                    <span>
+                      已用 {formatStorageBytes(storagePressure.usage)} / {formatStorageBytes(storagePressure.quota)}
+                      （{Math.round(storagePressure.ratio * 100)}%）。自动保存随时可能失败，建议先导出工程备份。
+                    </span>
+                  </div>
+                  <div className="storage-banner-actions">
+                    <button type="button" onClick={() => setBackupOpen(true)}>打开备份</button>
+                    <button
+                      type="button"
+                      className="storage-banner-dismiss"
+                      onClick={() => setStorageNoticeDismissed(true)}
+                    >
+                      知道了
+                    </button>
+                  </div>
+                </section>
+              )}
               {remoteConflict && (
                 <section
                   className="recovery-banner conflict-banner"
@@ -4104,6 +4347,15 @@ export default function App() {
       <Guide open={guideOpen} onClose={closeGuide} onStartDemo={startDemo} />
 
       <AboutDialog open={aboutOpen} onClose={() => setAboutOpen(false)} />
+
+      <AccountDialog
+        open={accountOpen}
+        account={account}
+        guestProjectCount={guestProjectCount}
+        onClose={() => setAccountOpen(false)}
+        onImportGuestProjects={() => void importGuestProjects()}
+        onSynced={refreshLibraryFromStorage}
+      />
 
       {imageExportRequest && (
         <Suspense fallback={null}>

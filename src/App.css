@@ -1034,6 +1034,73 @@
   background: var(--accent-wash);
 }
 
+/* 存储余量提醒：只在浏览器真的报出接近配额时出现，样式比冲突横幅轻。 */
+.storage-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  margin-bottom: 12px;
+  padding: 9px 12px;
+  border: 1px solid var(--warning);
+  border-radius: var(--radius-control);
+  background: var(--warning-wash);
+}
+
+.storage-banner-critical {
+  border-color: var(--negative);
+  background: var(--negative-wash);
+}
+
+.storage-banner-copy {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 280px;
+  flex-direction: column;
+  gap: 1px;
+  overflow-wrap: anywhere;
+}
+
+.storage-banner-copy strong {
+  color: var(--text);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.storage-banner-copy span {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.storage-banner-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.storage-banner-actions button {
+  min-height: 30px;
+  padding: 0 11px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.storage-banner-actions button:hover {
+  border-color: var(--warning);
+  color: var(--warning);
+}
+
+.storage-banner-dismiss {
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
+}
+
 .recovery-copy {
   display: flex;
   min-width: 0;

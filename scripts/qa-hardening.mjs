@@ -274,6 +274,9 @@ async function openTagMonitor(page) {
   }
   await page.click('#inspector-tab-tags')
   await page.waitFor("!!document.querySelector('.tags-panel .tag-card')", '变量卡片显示')
+  // 变量表默认按程序段折叠，只挂载展开组的卡片；验收原型名变量时切到平铺视图。
+  await page.evaluate("(() => { const button = [...document.querySelectorAll('.tags-toolbar button')].find((item) => item.textContent.trim() === '全部'); button?.click(); return Boolean(button) })()")
+  await page.waitFor("document.querySelector('.tag-list')?.getAttribute('data-view') === 'list'", '变量表平铺显示')
 }
 
 async function monitorRows(page) {

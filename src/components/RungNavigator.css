@@ -1,0 +1,162 @@
+.rung-nav {
+  position: sticky;
+  top: 0;
+  z-index: 12;
+  display: flex;
+  min-height: 46px;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: color-mix(in srgb, var(--surface) 94%, transparent);
+  box-shadow: 0 6px 18px rgba(22, 31, 27, 0.06);
+  backdrop-filter: blur(10px);
+}
+
+.rung-nav-step {
+  display: inline-grid;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.rung-nav-step:hover { border-color: var(--control); color: var(--accent-ink); background: var(--raised); }
+.rung-nav-step:disabled { opacity: .45; cursor: default; }
+
+.rung-nav-count {
+  flex: 0 0 auto;
+  padding-left: 4px;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.rung-nav-count span { color: var(--muted); font-weight: 500; }
+
+.rung-nav-title {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rung-nav-search {
+  display: flex;
+  width: min(210px, 34vw);
+  height: 32px;
+  flex: 0 1 210px;
+  align-items: center;
+  gap: 6px;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--muted);
+}
+
+.rung-nav-search:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-wash);
+}
+
+.rung-nav-search input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+}
+
+.rung-nav-search input::-webkit-search-cancel-button { display: none; }
+
+.rung-nav-results {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 10px;
+  width: min(320px, calc(100vw - 40px));
+  overflow: hidden;
+  padding: 4px;
+  border: 1px solid var(--control);
+  border-radius: 9px;
+  background: var(--surface);
+  box-shadow: 0 14px 34px rgba(22, 31, 27, 0.16);
+}
+
+.rung-nav-results p {
+  margin: 0;
+  padding: 10px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.rung-nav-results button {
+  display: flex;
+  width: 100%;
+  min-height: 38px;
+  align-items: center;
+  gap: 9px;
+  padding: 6px 9px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+}
+
+.rung-nav-results button:hover,
+.rung-nav-results button[aria-selected='true'] { background: var(--accent-wash); }
+
+.rung-nav-results button span {
+  display: inline-grid;
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 5px;
+  background: var(--raised);
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.rung-nav-results button strong {
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 550;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rung-nav-progress {
+  position: absolute;
+  bottom: -1px;
+  left: 10px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--accent);
+  opacity: .55;
+  transition: width .24s ease;
+}
+
+/* 手机上画布本来就窄，再加一条跳段栏只会挤压梯形图；滚动和底部标签栏已经够用。 */
+@media (max-width: 720px) {
+  .rung-nav { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rung-nav-progress { transition: none; }
+}

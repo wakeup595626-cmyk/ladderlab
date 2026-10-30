@@ -178,6 +178,23 @@ export function TagIcon(props: IconProps) {
   )
 }
 
+export function UserIcon(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <circle cx="12" cy="8.2" r="3.6" />
+      <path d="M4.8 20a7.2 7.2 0 0 1 14.4 0" />
+    </IconBase>
+  )
+}
+
+export function CloudIcon(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <path d="M7.2 18.5h9.6a4 4 0 0 0 .5-8 5.6 5.6 0 0 0-10.8 1.1 3.6 3.6 0 0 0 .7 6.9Z" />
+    </IconBase>
+  )
+}
+
 export function CheckCircleIcon(props: IconProps) {
   return (
     <IconBase {...props}>
