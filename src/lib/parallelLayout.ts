@@ -3,39 +3,19 @@ export interface ParallelBranchHeight {
 }
 
 export interface ParallelSpacingMetrics {
-  contactH: number
   parallelGap: number
-  parallelPitch: number
-}
-
-export function hasCompactParallelPitch(
-  branches: readonly ParallelBranchHeight[],
-  metrics: ParallelSpacingMetrics,
-): boolean {
-  return branches.length > 0
-    && branches.every((branch) => branch.height <= metrics.contactH)
 }
 
 /**
- * 压缩后的触点框仍要有足够大的触控热区，但不能越过下一支路的起点。
- * 44px 是触控最小目标，常规桌面/窄屏下最终分别保留 65px / 63px。
- */
-export function compactContactHitHeight(metrics: ParallelSpacingMetrics): number {
-  return Math.max(44, Math.min(metrics.contactH - 6, metrics.parallelPitch - 2))
-}
-
-/**
- * 并联支路统一用同一个节距。全是标准触点时取紧凑节距；混有更高的嵌套
- * 分支时，所有相邻行都按最高支路 + 间距落位，不能忽宽忽窄。
+ * 并联支路统一按“组内最高支路 + 行间距”落位。两条支路和六条支路用同
+ * 一个节距，触点图形、命中框和选中框都不会因为支路变多而缩小；混有指令
+ * 框的组也共用同一节距，不会忽宽忽窄。
  */
 export function parallelBranchOffsets(
   branches: readonly ParallelBranchHeight[],
   metrics: ParallelSpacingMetrics,
 ): number[] {
-  const compact = hasCompactParallelPitch(branches, metrics)
-  const pitch = compact
-    ? metrics.parallelPitch
-    : Math.max(0, ...branches.map((branch) => branch.height)) + metrics.parallelGap
+  const pitch = Math.max(0, ...branches.map((branch) => branch.height)) + metrics.parallelGap
   const offsets: number[] = []
   let y = 0
   branches.forEach((_, index) => {

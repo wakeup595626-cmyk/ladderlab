@@ -23,11 +23,7 @@ import type { DragPayload, DropTarget } from '../lib/dragTypes'
 import type { FavoriteInsertTarget } from '../lib/insertTarget'
 import { FIELD_LIMITS } from '../lib/limits'
 import { contentRungs, isBlankRung } from '../engine/rungInvariant'
-import {
-  compactContactHitHeight,
-  hasCompactParallelPitch,
-  parallelBranchOffsets,
-} from '../lib/parallelLayout'
+import { parallelBranchOffsets } from '../lib/parallelLayout'
 import {
   GripIcon,
   MoreIcon,
@@ -115,8 +111,6 @@ interface DrawContext {
   metrics: LadderMetrics
   /** Shared node measurements for the current rung render. */
   measureMemo?: LayoutMemo
-  /** 压缩并联支路内触点热区的最大高度；其他区域沿用完整触点高度。 */
-  contactHitHeight?: number
   onSelect: (selection: Selection) => void
   onEdit?: (selection: Selection, anchor: DOMRect) => void
   onOpenSlotMenu: (request: SlotMenuRequest) => void
@@ -167,7 +161,6 @@ interface LadderMetrics {
   parallelJoinW: number
   parallelGap: number
   /** 全是标准高度支路时的竖向节距，比自然节距短三分之一。 */
-  parallelPitch: number
   /** 未闭合分支右侧「合并分支」按钮预留的宽度。 */
   openMergeW: number
   minWidth: number
@@ -204,7 +197,6 @@ const DEFAULT_METRICS: LadderMetrics = {
   parallelGutter: 18,
   parallelJoinW: 30,
   parallelGap: 8,
-  parallelPitch: 67,
   openMergeW: 116,
   minWidth: 600,
   railLeft: 18,
@@ -238,7 +230,6 @@ const COMPACT_METRICS: LadderMetrics = {
   parallelGutter: 12,
   parallelJoinW: 22,
   parallelGap: 6,
-  parallelPitch: 65,
   openMergeW: 92,
   minWidth: 300,
   railLeft: 6,
@@ -820,7 +811,8 @@ function renderContact(
   const source = context.dragSource === sourceKey
   const nodeTarget: DropTarget = { type: 'node', rungId: context.rungId, path }
   const dropActive = !source && nodeMatches(context.dragTarget, context.rungId, path)
-  const hitHeight = Math.min(size.height - 6, context.contactHitHeight ?? size.height - 6)
+  // 命中框与选中框始终跟触点本身同高：并联支路再多也不缩水。
+  const hitHeight = size.height - 6
 
   return (
     <g
@@ -2827,10 +2819,6 @@ function renderParallel(
   // 草稿分组保留自己的暂存列，等待用户把它接到主线的某个插入点。
   const collectX = !isOpen && mergeColumn !== undefined ? mergeColumn : ownCollectX
   const branchYs = parallelBranchOffsets(branchSizes, m)
-  const compact = hasCompactParallelPitch(branchSizes, m)
-  const branchContext = compact
-    ? { ...context, contactHitHeight: compactContactHitHeight(m) }
-    : context
   const placements = branchSizes.map((branch, index) => ({
     y: branchYs[index],
     centerY: branchYs[index] + branch.lineY,
@@ -3039,7 +3027,7 @@ function renderParallel(
           >
             {renderChain(
               branch,
-              branchContext,
+              context,
               [...path, index],
               incomingPower,
               isOpen ? undefined : collectX - branchOriginX,

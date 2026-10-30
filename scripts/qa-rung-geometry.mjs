@@ -13,16 +13,19 @@ const PITCH_TOLERANCE = 1
 const SHOT_DIR = process.env.LADDERLAB_SHOT_DIR ?? ''
 
 const tag = (name, address, comment) => ({ id: name + '-tag', name, address, kind: 'BOOL', initial: false, comment })
-const no = (name) => ({ type: 'contact', id: 'c-' + name, kind: 'NO', tag: name })
-const nc = (name) => ({ type: 'contact', id: 'n-' + name, kind: 'NC', tag: name })
+// 整个工程要求元件 ID 全局唯一：同一变量会在多个程序段里复用，ID 必须带序号。
+let partId = 0
+const nextPartId = (prefix, name) => `${prefix}-${name}-${++partId}`
+const no = (name) => ({ type: 'contact', id: nextPartId('c', name), kind: 'NO', tag: name })
+const nc = (name) => ({ type: 'contact', id: nextPartId('n', name), kind: 'NC', tag: name })
 const cmp = (name) => ({
   type: 'contact',
-  id: 'm-' + name,
+  id: nextPartId('m', name),
   kind: 'CMP',
   tag: name,
   compare: { op: '>', value: 3 },
 })
-const coil = (name, kind = 'COIL') => ({ id: 'o-' + name, kind, tag: name })
+const coil = (name, kind = 'COIL') => ({ id: nextPartId('o', name), kind, tag: name })
 const rung = (id, nodes, output) => ({ id, label: id, nodes, output })
 
 const PROGRAM = {
@@ -56,6 +59,19 @@ const PROGRAM = {
         [no('N5')],
       ],
     }], coil('Q7')),
+    rung('r8', [{
+      type: 'parallel',
+      id: 'p-six',
+      branches: [
+        [no('Lane1')],
+        [no('Lane2')],
+        [no('Lane3')],
+        [no('Lane4')],
+        [no('Lane5')],
+        [no('Lane6')],
+      ],
+    }], coil('Q1')),
+    rung('r9', [no('A'), no('B')], coil('Q2')),
   ],
 }
 
@@ -95,6 +111,9 @@ const MEASURE = String.raw`(() => {
     }
     const contacts = Array.from(article.querySelectorAll('.ll-contact')).map((node) => {
       const box = node.getBoundingClientRect()
+      const hit = node.querySelector('.ll-node-hit')
+      const bar = node.querySelector('.ll-contact-bar')
+      const selection = node.querySelector('.ll-selection-box')
       return {
         id: node.dataset.nodeId,
         path: node.dataset.nodePath,
@@ -104,13 +123,29 @@ const MEASURE = String.raw`(() => {
         centerY: round(box.top + box.height / 2 - svgTop),
         lineY: lineOf(node),
         width: round(box.width),
+        height: round(box.height),
+        hitHeight: hit ? round(hit.getBoundingClientRect().height) : null,
+        selectionHeight: selection ? round(selection.getBoundingClientRect().height) : null,
+        barHeight: bar ? round(bar.getBoundingClientRect().height) : null,
       }
     })
     const output = article.querySelector('[data-output-id]')
     const outputBox = output ? output.getBoundingClientRect() : null
+    const viewBox = svg ? svg.viewBox.baseVal : null
     return {
       rungId,
+      articleTop: round(rect.top),
+      svgTop: round(svgTop),
       svgHeight: svg ? round(svg.getBoundingClientRect().height) : null,
+      svgWidth: svg ? round(svg.getBoundingClientRect().width) : null,
+      viewBoxWidth: viewBox ? round(viewBox.width) : null,
+      viewBoxHeight: viewBox ? round(viewBox.height) : null,
+      wirePageY: (() => {
+        const wire = (article.querySelector('.ll-contact') ?? output)?.querySelector('.ll-wire-in, .ll-wire')
+        if (!wire) return null
+        const box = wire.getBoundingClientRect()
+        return round(box.top + box.height / 2)
+      })(),
       contacts,
       outputCenterY: outputBox ? round(outputBox.top + outputBox.height / 2 - svgTop) : null,
       outputLineY: lineOf(output),
@@ -136,7 +171,7 @@ const rungs = await page.evaluate(MEASURE)
 if (SHOT_DIR) {
   const { mkdir } = await import('node:fs/promises')
   await mkdir(SHOT_DIR, { recursive: true })
-  for (const id of ['r1', 'r2', 'r3', 'r4']) {
+  for (const id of ['r1', 'r2', 'r3', 'r4', 'r8', 'r9']) {
     await page.locator(`.ll-rung[data-rung-id="${id}"]`).screenshot({ path: `${SHOT_DIR}/${id}.png` })
   }
 }
@@ -154,6 +189,33 @@ check(
   Math.max(...mainLineYs) - Math.min(...mainLineYs) <= PITCH_TOLERANCE,
   '各程序段主线路元件的纵向中心应在同一高度',
   { mainLineYs },
+)
+
+const scales = rungs
+  .filter((item) => item.svgWidth !== null && item.viewBoxWidth)
+  .map((item) => item.svgWidth / item.viewBoxWidth)
+check(
+  'canvas-scale-one',
+  scales.length === rungs.length && scales.every((scale) => Math.abs(scale - 1) <= 0.01),
+  'SVG 必须 1:1 绘制，不允许任何整体缩放',
+  { scales: scales.map((scale) => Math.round(scale * 1000) / 1000) },
+)
+
+const allContacts = rungs.flatMap((item) => item.contacts)
+const uniqueSizes = (values) => [...new Set(values.map((value) => Math.round(value * 10) / 10))]
+const barHeights = uniqueSizes(allContacts.map((item) => item.barHeight).filter(Number.isFinite))
+const hitHeights = uniqueSizes(allContacts.map((item) => item.hitHeight).filter(Number.isFinite))
+check(
+  'contact-art-uniform',
+  barHeights.length === 1,
+  '所有程序段的触点图形高度必须完全一致，支路再多也不能缩小',
+  { barHeights },
+)
+check(
+  'contact-hit-uniform',
+  hitHeights.length === 1,
+  '所有程序段的触点命中框 / 选中框高度必须完全一致',
+  { hitHeights },
 )
 
 const seriesGaps = byId.r6.contacts
@@ -206,6 +268,19 @@ check(
   parallelColumns.every((centers) => Math.max(...centers) - Math.min(...centers) <= PITCH_TOLERANCE),
   '并联各支路同序号元件应落在同一列',
   { parallelColumns },
+)
+
+const sixRowYs = byId.r8.contacts
+  .map((contact) => contact.centerY)
+  .filter(Number.isFinite)
+const sixRowPitch = stats(sixRowYs)
+check(
+  'six-branch-pitch',
+  sixRowYs.length === 6
+    && sixRowPitch.gaps.every((gap) => Math.abs(gap - sixRowPitch.gaps[0]) <= PITCH_TOLERANCE)
+    && Math.abs(sixRowPitch.gaps[0] - parallelPitch) <= PITCH_TOLERANCE,
+  '六条并联支路必须与两条支路使用同一纵向节距，不能因支路多而压缩',
+  { sixRowYs, sixGaps: sixRowPitch.gaps, twoBranchPitch: parallelPitch },
 )
 
 const nested = byId.r7.contacts

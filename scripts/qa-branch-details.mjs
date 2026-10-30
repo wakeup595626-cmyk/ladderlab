@@ -350,7 +350,10 @@ await closeDraft()
 
 const initialChains = await branchChains()
 const secondBranch = initialChains.at(-1)
-const nestedFrameGeometry = await evaluate(`(() => {
+// 画布上的每个并联都遵守同一套虚线框几何契约：框高取未截断高度的 2/3，
+// 左右边界完整包住各支路引线。平铺与嵌套并联都走这里，不依赖某种嵌套结构
+// 恰好能从 UI 里构造出来。
+const frameGeometry = await evaluate(`(() => {
   const box = (element) => {
     if (!element) return null
     const value = element.getBBox()
@@ -361,28 +364,36 @@ const nestedFrameGeometry = await evaluate(`(() => {
       bottom: value.y + value.height,
     }
   }
-  return [...document.querySelectorAll('.ll-parallel[data-split-inherited="true"]')].map((parallel) => ({
-    nodeId: parallel.getAttribute('data-node-id'),
-    frame: box(parallel.querySelector(':scope > .ll-branch-frame')),
-    untrimmedFrameHeight: Number(
-      parallel.querySelector(':scope > .ll-branch-frame')?.getAttribute('data-frame-untrimmed-height'),
-    ),
-    entry: box(parallel.querySelector(':scope > [data-parallel-entry]')),
-    join: box(parallel.querySelector(':scope > [data-parallel-join]')),
-  }))
+  return [...document.querySelectorAll('.ll-parallel')].map((parallel) => {
+    const wires = [...parallel.querySelectorAll('[data-parallel-branch]')]
+      .map(box)
+      .filter(Boolean)
+    return {
+      nodeId: parallel.getAttribute('data-node-id'),
+      frame: box(parallel.querySelector(':scope > .ll-branch-frame')),
+      untrimmedFrameHeight: Number(
+        parallel.querySelector(':scope > .ll-branch-frame')?.getAttribute('data-frame-untrimmed-height'),
+      ),
+      wiresLeft: wires.length > 0 ? Math.min(...wires.map((wire) => wire.left)) : null,
+      wiresRight: wires.length > 0 ? Math.max(...wires.map((wire) => wire.right)) : null,
+      entry: box(parallel.querySelector(':scope > [data-parallel-entry]')),
+      join: box(parallel.querySelector(':scope > [data-parallel-join]')),
+    }
+  })
 })()`)
-const nestedFramePadding = 7
+const framePadding = 7
 const trimmedFrameRatio = 2 / 3
-const framesTrimmedToTwoThirds = nestedFrameGeometry.length > 0
-  && nestedFrameGeometry.every(({ frame, untrimmedFrameHeight }) => (
+const framesTrimmedToTwoThirds = frameGeometry.length > 0
+  && frameGeometry.every(({ frame, untrimmedFrameHeight }) => (
     frame && Number.isFinite(untrimmedFrameHeight) && untrimmedFrameHeight > 0
     && Math.abs(frame.bottom - frame.top - untrimmedFrameHeight * trimmedFrameRatio) < 0.1
   ))
-const nestedFramesContainInheritedWires = nestedFrameGeometry.length > 0
-  && nestedFrameGeometry.every(({ frame, entry, join }) => (
-    frame && entry && join
-    && frame.left <= entry.left - nestedFramePadding
-    && frame.right >= join.right + nestedFramePadding
+const framesSurroundBranchWires = frameGeometry.length > 0
+  && frameGeometry.every(({ frame, wiresLeft, wiresRight }) => (
+    frame
+    && Number.isFinite(wiresLeft) && Number.isFinite(wiresRight)
+    && frame.left <= wiresLeft - framePadding + 0.1
+    && frame.right >= wiresRight + framePadding - 0.1
   ))
 const rails = await evaluate(`(() => ({
   count: document.querySelectorAll('.ll-rail').length,
@@ -402,12 +413,12 @@ check('branch/from-main-draft', branchFromMain.enabled && initialChains.length >
   branchFromMain,
   initialChains,
 })
-check('branch/frame-surrounds-inherited-split', nestedFramesContainInheritedWires, {
-  nestedFrameGeometry,
-  nestedFramePadding,
+check('branch/frame-surrounds-branch-wires', framesSurroundBranchWires, {
+  frameGeometry,
+  framePadding,
 })
 check('branch/frame-trimmed-to-two-thirds', framesTrimmedToTwoThirds, {
-  nestedFrameGeometry,
+  frameGeometry,
   trimmedFrameRatio,
 })
 check('rail/only-left-power-rail', rails.rungCount > 0

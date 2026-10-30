@@ -1,24 +1,26 @@
 import { describe, expect, it } from 'vitest'
-import {
-  compactContactHitHeight,
-  hasCompactParallelPitch,
-  parallelBranchOffsets,
-} from './parallelLayout'
+import { parallelBranchOffsets } from './parallelLayout'
 
 const metrics = {
-  contactH: 92,
   parallelGap: 8,
-  parallelPitch: 67,
 }
 
 describe('parallelBranchOffsets', () => {
-  it('uses the compressed pitch for standard-height branches', () => {
+  it('uses the full row height for standard-height branches', () => {
     const offsets = parallelBranchOffsets(
       [{ height: 92 }, { height: 92 }, { height: 92 }],
       metrics,
     )
 
-    expect(offsets).toEqual([0, 67, 134])
+    expect(offsets).toEqual([0, 100, 200])
+  })
+
+  it('ignores the number of branches so six rows keep the two-row pitch', () => {
+    const two = parallelBranchOffsets([{ height: 92 }, { height: 92 }], metrics)
+    const six = parallelBranchOffsets(Array.from({ length: 6 }, () => ({ height: 92 })), metrics)
+
+    expect(six.slice(1).map((value, index) => value - six[index])).toEqual([100, 100, 100, 100, 100])
+    expect(six[1] - six[0]).toBe(two[1] - two[0])
   })
 
   it('uses one pitch across a mixed-height parallel group', () => {
@@ -44,11 +46,4 @@ describe('parallelBranchOffsets', () => {
     expect(parallelBranchOffsets([{ height: 176 }], metrics)).toEqual([0])
   })
 
-  it('keeps compact hit targets large enough but inside their own branch row', () => {
-    expect(hasCompactParallelPitch([{ height: 92 }, { height: 92 }], metrics)).toBe(true)
-    expect(hasCompactParallelPitch([{ height: 92 }, { height: 176 }], metrics)).toBe(false)
-    expect(compactContactHitHeight(metrics)).toBe(65)
-    expect(compactContactHitHeight({ ...metrics, parallelPitch: 65 })).toBe(63)
-    expect(compactContactHitHeight({ ...metrics, parallelPitch: 40 })).toBe(44)
-  })
 })
