@@ -2003,9 +2003,16 @@ function RungSection({
             onToggle={(event) => {
               const details = event.currentTarget
               if (!details.open) return
-              window.requestAnimationFrame(() => {
-                details.querySelector<HTMLButtonElement>('.ll-rung-menu-panel button:not([disabled])')?.focus()
-              })
+              // 先同步聚焦：键盘用户紧接着按 End/ArrowDown 时，按键要能落到菜单项上。
+              // 下一帧再补一次，兜住 content-visibility 尚未生效导致首次 focus 落空的情况。
+              const focusFirstItem = () => {
+                const panel = details.querySelector<HTMLElement>('.ll-rung-menu-panel')
+                const first = panel?.querySelector<HTMLButtonElement>('button:not([disabled])')
+                if (!panel || !first || panel.contains(document.activeElement)) return
+                first.focus()
+              }
+              focusFirstItem()
+              window.requestAnimationFrame(focusFirstItem)
             }}
             onBlur={(event) => {
               if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
