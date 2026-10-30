@@ -1,55 +1,73 @@
 .sw-update-banner {
   position: fixed;
-  /* 更新提示是临时通知，固定在画布下方的状态栏上方。放在顶栏下面会整条
-     压住收藏指令工具条，用户点不到「常开 / 全部指令 / 变量表」。 */
+  /* 右下角留出一条窄通知，避开底部状态栏；它不遮挡画布主操作区，
+     也不会像居中横幅那样切断程序段的阅读。 */
+  right: calc(env(safe-area-inset-right, 0px) + 14px);
   bottom: calc(env(safe-area-inset-bottom, 0px) + 42px);
-  left: 50%;
   z-index: 120;
-  display: flex;
-  width: min(560px, calc(100vw - 24px));
-  min-height: 30px;
+  display: grid;
+  width: min(300px, calc(100vw - 24px));
+  min-height: 44px;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 8px 14px;
-  padding: 0 4px 0 12px;
-  transform: translateX(-50%);
-  border-radius: var(--radius-control);
+  gap: 10px;
+  padding: 6px 6px 6px 16px;
+  border: 1px solid var(--control);
+  border-radius: var(--radius-card);
   background: var(--surface);
   color: var(--text);
   box-shadow:
-    inset 0 0 0 1px var(--accent-ink),
-    var(--shadow-overlay);
+    0 1px 2px rgba(21, 24, 22, 0.07),
+    0 10px 28px -16px rgba(21, 24, 22, 0.34);
   font-family: var(--sans);
   font-size: var(--fs-body);
-  line-height: 1.2;
+  line-height: 1.35;
 }
 
-/* 同屏出现操作提示时，把短提示抬到更新条上方，两个浮层不互相压字。 */
+.sw-update-banner::before {
+  position: absolute;
+  top: 50%;
+  left: 8px;
+  width: 3px;
+  height: 16px;
+  border-radius: 1px;
+  background: var(--accent);
+  content: '';
+  transform: translateY(-50%);
+}
+
+.sw-update-banner > span:first-child {
+  min-width: 0;
+  text-wrap: pretty;
+}
+
+/* 操作提示仍居中；更新通知出现在右下角时，把短提示抬到它上方。 */
 .app-shell:has(.sw-update-banner) .toast {
-  bottom: calc(env(safe-area-inset-bottom, 0px) + 92px);
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 102px);
 }
 
 .sw-update-banner__actions {
   display: flex;
   flex: 0 0 auto;
   align-items: center;
-  gap: 6px;
-  margin-left: auto;
+  gap: 4px;
 }
 
-/* 更新提示条是临时浮层，桌面保持 30px 的紧凑高度不打扰编辑；
-   触摸设备上没有鼠标精度，两个按钮必须回到 44px 命中下限。 */
 .sw-update-banner__action {
   min-height: 30px;
-  padding: 0 12px;
-  border: 1px solid var(--control);
+  padding: 0 9px;
+  border: 1px solid transparent;
   border-radius: var(--radius-control);
-  background: var(--surface);
-  color: var(--text);
+  background: transparent;
+  color: var(--muted);
   font: inherit;
   font-size: 12.5px;
+  white-space: nowrap;
   cursor: pointer;
+  transition:
+    background-color var(--dur-quick) var(--ease-out),
+    border-color var(--dur-quick) var(--ease-out),
+    color var(--dur-quick) var(--ease-out);
 }
 
 .sw-update-banner__action--primary {
@@ -59,25 +77,99 @@
   font-weight: 600;
 }
 
+@media (hover: hover) and (pointer: fine) {
+  .sw-update-banner__action:hover {
+    border-color: var(--border);
+    background: var(--raised);
+    color: var(--text);
+  }
+
+  .sw-update-banner__action--primary:hover {
+    border-color: var(--accent-ink);
+    background: var(--accent-ink);
+    color: #fff;
+  }
+}
+
+.sw-update-banner__action:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.sw-update-banner[data-state='closing'] {
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .sw-update-banner[data-state='open'] {
+    animation: sw-update-banner-in var(--dur-base) var(--ease-out) both;
+  }
+
+  .sw-update-banner[data-state='closing'] {
+    animation: sw-update-banner-out var(--dur-quick) var(--ease-out) both;
+  }
+}
+
+@keyframes sw-update-banner-in {
+  from {
+    opacity: 0;
+    transform: translate3d(10px, 6px, 0);
+  }
+
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@keyframes sw-update-banner-out {
+  from {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+
+  to {
+    opacity: 0;
+    transform: translate3d(8px, 4px, 0);
+  }
+}
+
 @media (pointer: coarse) {
   .sw-update-banner {
-    min-height: 44px;
+    min-height: 56px;
   }
 
   .sw-update-banner__action {
     min-height: 44px;
-    padding-inline: 16px;
+    padding-inline: 12px;
   }
 }
 
 @media (max-width: 720px) {
   .sw-update-banner {
-    /* 手机底部依次是导航栏、状态栏和左下角咖啡浮标；提示条要停在浮标上方，
-       否则会盖住「请杯咖啡」的半个图标。 */
-    bottom: calc(env(safe-area-inset-bottom, 0px) + 154px);
+    right: calc(env(safe-area-inset-right, 0px) + 10px);
+    /* 手机底部依次是导航栏、状态栏和左下角咖啡浮标。300px 宽的卡片在
+       常见 390px 屏幕上与浮标保持 10px 间距；更窄的屏幕把它抬到浮标上方。 */
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 98px);
   }
 
   .app-shell:has(.sw-update-banner) .toast {
-    bottom: calc(env(safe-area-inset-bottom, 0px) + 206px);
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 166px);
+  }
+}
+
+@media (max-width: 389px) {
+  .sw-update-banner {
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 168px);
+  }
+
+  .app-shell:has(.sw-update-banner) .toast {
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 236px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sw-update-banner__action {
+    transition: none;
   }
 }
