@@ -1877,16 +1877,16 @@ export default function App() {
         ? Array.from(frame.querySelectorAll<HTMLElement>('.ll-rung'))
           .find((element) => element.dataset.rungId === activeRungId)
         : null
-      const header = rung?.querySelector<HTMLElement>(':scope > .ll-rung-header')
-      if (!rung || !header) {
+      if (!rung) {
         frame.style.removeProperty('--program-resizer-grip-top')
         return
       }
 
       const frameRect = frame.getBoundingClientRect()
-      const headerRect = header.getBoundingClientRect()
-      const gripHeight = 44
-      const centered = headerRect.top - frameRect.top + (headerRect.height - gripHeight) / 2
+      const rungRect = rung.getBoundingClientRect()
+      const grip = frame.querySelector<HTMLElement>('.wb-program-resizer-grip')
+      const gripHeight = grip?.getBoundingClientRect().height || 46
+      const centered = rungRect.top - frameRect.top + (rungRect.height - gripHeight) / 2
       const top = Math.max(0, Math.min(centered, Math.max(0, frame.offsetHeight - gripHeight)))
       frame.style.setProperty('--program-resizer-grip-top', `${Math.round(top)}px`)
     }
@@ -1898,9 +1898,7 @@ export default function App() {
       ? Array.from(frame.querySelectorAll<HTMLElement>('.ll-rung'))
         .find((element) => element.dataset.rungId === activeRungId)
       : null
-    const activeHeader = activeRung?.querySelector<HTMLElement>(':scope > .ll-rung-header')
     if (activeRung) observer.observe(activeRung)
-    if (activeHeader) observer.observe(activeHeader)
     window.addEventListener('resize', placeGrip)
 
     return () => {

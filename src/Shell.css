@@ -4170,6 +4170,8 @@ body[data-drag-kind] {
 
 @media (min-width: 1025px) {
   .wb-program-resizer {
+    --program-resizer-rail: color-mix(in srgb, var(--faint) 78%, var(--control));
+    --program-resizer-ink: color-mix(in srgb, var(--text) 58%, var(--faint));
     position: absolute;
     inset-block: 0;
     z-index: 4;
@@ -4178,7 +4180,7 @@ body[data-drag-kind] {
     padding: 0;
     border: 0;
     background: transparent;
-    color: var(--control);
+    color: var(--program-resizer-ink);
     cursor: col-resize;
     touch-action: none;
     outline: none;
@@ -4198,26 +4200,41 @@ body[data-drag-kind] {
     inset-block: 0;
     left: 50%;
     width: 1px;
-    background: color-mix(in srgb, var(--control) 72%, transparent);
+    background: var(--program-resizer-rail);
+    box-shadow: 1px 0 0 color-mix(in srgb, var(--surface) 58%, transparent);
     transform: translateX(-50%);
-    transition: width 120ms ease, background-color 120ms ease;
+    transition: width 120ms ease, background-color 120ms ease, box-shadow 120ms ease;
   }
 
   .wb-program-resizer-grip {
     position: absolute;
     top: var(--program-resizer-grip-top, 72px);
     left: 50%;
-    width: 9px;
-    height: 44px;
-    border: 1px solid var(--border);
+    width: 11px;
+    height: 46px;
+    border: 1px solid color-mix(in srgb, var(--program-resizer-rail) 76%, var(--muted));
     border-radius: 999px;
-    background-color: var(--surface);
-    background-image: radial-gradient(circle, currentColor 1.1px, transparent 1.3px);
+    background-color: color-mix(in srgb, var(--surface) 94%, var(--program-resizer-rail));
+    background-image:
+      radial-gradient(circle at 3px 3px, currentColor 1.15px, transparent 1.45px),
+      radial-gradient(circle at 7px 3px, currentColor 1.15px, transparent 1.45px),
+      radial-gradient(circle at 3px 8px, currentColor 1.15px, transparent 1.45px),
+      radial-gradient(circle at 7px 8px, currentColor 1.15px, transparent 1.45px),
+      radial-gradient(circle at 3px 13px, currentColor 1.15px, transparent 1.45px),
+      radial-gradient(circle at 7px 13px, currentColor 1.15px, transparent 1.45px);
     background-position: center;
-    background-size: 4px 6px;
+    background-repeat: no-repeat;
+    background-size: 10px 16px;
+    box-shadow:
+      0 1px 2px color-mix(in srgb, var(--text) 13%, transparent),
+      inset 0 1px 0 color-mix(in srgb, var(--surface) 88%, transparent);
     transform: translateX(-50%);
     pointer-events: none;
-    transition: border-color 120ms ease, color 120ms ease;
+    transition:
+      border-color 120ms ease,
+      background-color 120ms ease,
+      box-shadow 120ms ease,
+      color 120ms ease;
   }
 
   .wb-program-resizer-tip {
@@ -4225,13 +4242,13 @@ body[data-drag-kind] {
     top: calc(var(--program-resizer-grip-top, 72px) + 52px);
     z-index: 2;
     padding: 4px 8px;
-    border: 1px solid var(--border);
+    border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border));
     border-radius: 3px;
     background: var(--surface);
     box-shadow: var(--shadow-overlay);
-    color: var(--muted);
-    font-size: 11px;
-    font-weight: 500;
+    color: var(--text);
+    font-size: 11.5px;
+    font-weight: 600;
     line-height: 1.4;
     white-space: nowrap;
     opacity: 0;
@@ -4258,12 +4275,18 @@ body[data-drag-kind] {
   .wb-shell[data-program-sheet-resizing='true'] .wb-program-resizer::before {
     width: 2px;
     background: var(--accent);
+    box-shadow: 1px 0 0 color-mix(in srgb, var(--surface) 72%, transparent);
   }
 
   .wb-program-resizer:hover .wb-program-resizer-grip,
   .wb-program-resizer:focus-visible .wb-program-resizer-grip,
   .wb-program-resizer[data-resizing='true'] .wb-program-resizer-grip {
     border-color: var(--accent);
+    background-color: color-mix(in srgb, var(--accent-wash) 74%, var(--surface));
+    color: var(--accent-ink);
+    box-shadow:
+      0 2px 5px color-mix(in srgb, var(--accent) 18%, transparent),
+      inset 0 1px 0 color-mix(in srgb, var(--surface) 84%, transparent);
   }
 
   .wb-program-resizer:hover .wb-program-resizer-tip,

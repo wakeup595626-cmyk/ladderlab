@@ -6,21 +6,20 @@ async function expectGripsToFollowRung(page: Page, index: number): Promise<void>
   await page.locator('.ll-rung-drag').nth(index).click()
   await expect(rung).toHaveClass(/is-whole-selected/)
 
-  const header = rung.locator(':scope > .ll-rung-header')
   const grips = page.locator('.wb-program-resizer-grip')
   await expect(grips).toHaveCount(2)
 
   await expect.poll(async () => {
-    const [headerBox, leftBox, rightBox] = await Promise.all([
-      header.boundingBox(),
+    const [rungBox, leftBox, rightBox] = await Promise.all([
+      rung.boundingBox(),
       grips.nth(0).boundingBox(),
       grips.nth(1).boundingBox(),
     ])
-    if (!headerBox || !leftBox || !rightBox) return Number.POSITIVE_INFINITY
-    const headerCenter = headerBox.y + headerBox.height / 2
+    if (!rungBox || !leftBox || !rightBox) return Number.POSITIVE_INFINITY
+    const rungCenter = rungBox.y + rungBox.height / 2
     const leftCenter = leftBox.y + leftBox.height / 2
     const rightCenter = rightBox.y + rightBox.height / 2
-    return Math.max(Math.abs(leftCenter - headerCenter), Math.abs(rightCenter - headerCenter))
+    return Math.max(Math.abs(leftCenter - rungCenter), Math.abs(rightCenter - rungCenter))
   }).toBeLessThanOrEqual(1)
 }
 
