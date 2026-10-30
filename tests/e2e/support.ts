@@ -1,5 +1,8 @@
 import { readFile } from 'node:fs/promises'
-import { expect, type Page } from '@playwright/test'
+import { expect, type Locator, type Page } from '@playwright/test'
+
+export type ExportFormat = 'png' | 'svg'
+export type ExportContentName = '完整程序' | '纯梯形图' | '顺序功能图'
 
 /** 忽略浏览器扩展自己注入到页面里的报错，只收应用自身的错误。 */
 export function trackPageErrors(page: Page): string[] {
@@ -68,11 +71,24 @@ export async function openExportMenu(page: Page) {
   return menu
 }
 
-/** 点某个导出项，返回下载文件读出的原始字节。 */
-export async function downloadExport(page: Page, itemName: string) {
+/** 在已打开的导出菜单里选择一次图片格式；切换格式不会关闭菜单。 */
+export async function selectExportFormat(menu: Locator, format: ExportFormat) {
+  const radio = menu.getByRole('menuitemradio', { name: format.toUpperCase(), exact: true })
+  await radio.click()
+  await expect(radio).toHaveAttribute('aria-checked', 'true')
+  await expect(menu).toBeVisible()
+}
+
+/** 先选图片格式，再点导出内容，返回下载文件读出的原始字节。 */
+export async function downloadExport(
+  page: Page,
+  itemName: ExportContentName,
+  format: ExportFormat = 'png',
+) {
   const menu = await openExportMenu(page)
+  await selectExportFormat(menu, format)
   const downloadPromise = page.waitForEvent('download', { timeout: 30_000 })
-  await menu.getByRole('menuitem', { name: itemName }).click()
+  await menu.getByRole('menuitem', { name: itemName, exact: true }).click()
   const download = await downloadPromise
   expect(await download.failure()).toBeNull()
   const path = await download.path()

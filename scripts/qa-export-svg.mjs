@@ -51,9 +51,10 @@ async function waitForServer(url, timeoutMs = 30000) {
   throw new Error('预览服务没有在 ' + timeoutMs + 'ms 内就绪：' + url)
 }
 
-async function exportItem(page, label, filename) {
+async function exportItem(page, label, filename, format) {
   await page.click('.wb-export-trigger')
   await page.waitForSelector('#topbar-export-menu', { state: 'visible' })
+  await page.getByRole('menuitemradio', { name: format.toUpperCase(), exact: true }).click()
   const [download] = await Promise.all([
     page.waitForEvent('download', { timeout: 60000 }),
     page.getByRole('menuitem', { name: label, exact: true }).click(),
@@ -159,15 +160,16 @@ async function main() {
     await loadLab(page, '载入03 十字路口交通灯')
 
     const jobs = [
-      ['完整程序 SVG', 'complete.svg', 'svg'],
-      ['纯梯形图 SVG', 'plain.svg', 'svg'],
-      ['顺序功能图 SVG', 'sfc.svg', 'svg'],
-      ['完整程序 PNG', 'complete.png', 'png'],
-      ['纯梯形图 PNG', 'plain.png', 'png'],
-      ['顺序功能图 PNG', 'sfc.png', 'png'],
+      ['完整程序', 'complete.svg', 'svg'],
+      ['纯梯形图', 'plain.svg', 'svg'],
+      ['顺序功能图', 'sfc.svg', 'svg'],
+      ['完整程序', 'complete.png', 'png'],
+      ['纯梯形图', 'plain.png', 'png'],
+      ['顺序功能图', 'sfc.png', 'png'],
     ]
-    for (const [label, filename, kind] of jobs) {
-      const file = await exportItem(page, label, filename)
+    for (const [content, filename, kind] of jobs) {
+      const label = content + ' ' + kind.toUpperCase()
+      const file = await exportItem(page, content, filename, kind)
       if (kind === 'svg') {
         const text = await readFile(file, 'utf8')
         const inspected = { label, file, ...inspectSvg(text) }
@@ -196,7 +198,7 @@ async function main() {
     ]
     for (const [label, key] of otherLabs) {
       await loadLab(page, label)
-      const file = await exportItem(page, '顺序功能图 SVG', 'sfc-' + key + '.svg')
+      const file = await exportItem(page, '顺序功能图', 'sfc-' + key + '.svg', 'svg')
       const text = await readFile(file, 'utf8')
       const inspected = {
         label: '顺序功能图 SVG（' + key + '）',

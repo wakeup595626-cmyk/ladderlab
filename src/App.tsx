@@ -3702,9 +3702,12 @@ export default function App() {
                     return
                   }
                   setSelection(next)
-                  // 画布上选中谁，右边面板就跟到谁：否则会出现
-                  // 画布里选了 Motor、右侧却在显示变量表的割裂感。
-                  setInspectorTab('properties')
+                  // 画布上选中谁，右边面板就跟到谁。正在看变量表时，点程序段
+                  // 标题只切换当前段并让变量表跟随；点具体元件仍回到属性，
+                  // 避免“选了 Motor 却停在变量表”的割裂感。
+                  setInspectorTab((current) => (
+                    current === 'tags' && next.wholeRung ? 'tags' : 'properties'
+                  ))
                   // 参数框打开时点选另一个元件，直接切换编辑对象，不必先关掉面板。
                   setQuickEdit((current) => (
                     current && next.path && !(next.paths && next.paths.length > 1)

@@ -6,12 +6,9 @@ import {
 } from './support'
 
 const EXPORT_ITEMS = [
-  '顺序功能图 SVG',
-  '完整程序 SVG',
-  '纯梯形图 SVG',
-  '完整程序 PNG',
-  '纯梯形图 PNG',
-  '顺序功能图 PNG',
+  '完整程序',
+  '纯梯形图',
+  '顺序功能图',
 ]
 
 /** 卡住 SFC PNG 的图片解码，直到测试确认导出中的菜单状态后再放行。 */
@@ -38,24 +35,28 @@ async function releaseImageDecode(page: Page): Promise<void> {
 
 async function expectExportItemsDisabled(menu: Locator): Promise<void> {
   for (const item of EXPORT_ITEMS) {
-    await expect(menu.getByRole('menuitem', { name: item })).toBeDisabled()
+    await expect(menu.getByRole('menuitem', { name: item, exact: true })).toBeDisabled()
   }
+  // 格式只是导出目标，不触发主线程任务；导出期间仍可切换，下一张图按新格式生成。
+  await expect(menu.getByRole('menuitemradio', { name: 'PNG', exact: true })).toBeEnabled()
+  await expect(menu.getByRole('menuitemradio', { name: 'SVG', exact: true })).toBeEnabled()
 }
 
 async function expectExportItemsEnabled(menu: Locator): Promise<void> {
   for (const item of EXPORT_ITEMS) {
-    await expect(menu.getByRole('menuitem', { name: item })).toBeEnabled()
+    await expect(menu.getByRole('menuitem', { name: item, exact: true })).toBeEnabled()
   }
 }
 
-test('顺序功能图 PNG 生成期间，桌面导出菜单六项都不可重复触发', async ({ page }) => {
+test('顺序功能图 PNG 生成期间，桌面导出三项内容都不可重复触发', async ({ page }) => {
   await gateImageDecode(page)
   await openHome(page)
   await loadCourseExperiment(page, '03 十字路口交通灯')
 
   const downloadPromise = page.waitForEvent('download', { timeout: 30_000 })
   const menu = await openExportMenu(page)
-  await menu.getByRole('menuitem', { name: '顺序功能图 PNG' }).click()
+  await menu.getByRole('menuitemradio', { name: 'PNG', exact: true }).click()
+  await menu.getByRole('menuitem', { name: '顺序功能图', exact: true }).click()
   await expect(page.getByText(/正在生成顺序功能图 PNG/)).toBeVisible()
 
   const busyMenu = await openExportMenu(page)
@@ -71,7 +72,7 @@ test('顺序功能图 PNG 生成期间，桌面导出菜单六项都不可重复
   await expectExportItemsEnabled(recoveredMenu)
 })
 
-test('顺序功能图 PNG 生成期间，移动端文件菜单六项都不可重复触发', async ({ page }) => {
+test('顺序功能图 PNG 生成期间，移动端文件菜单三项内容都不可重复触发', async ({ page }) => {
   await gateImageDecode(page)
   await openHome(page)
   await loadCourseExperiment(page, '03 十字路口交通灯')
@@ -81,7 +82,8 @@ test('顺序功能图 PNG 生成期间，移动端文件菜单六项都不可重
   await page.getByRole('button', { name: '文件：新建、导入或导出' }).click()
   const fileMenu = page.getByRole('menu', { name: '文件操作' })
   await expect(fileMenu).toBeVisible()
-  await fileMenu.getByRole('menuitem', { name: '顺序功能图 PNG' }).click()
+  await fileMenu.getByRole('menuitemradio', { name: 'PNG', exact: true }).click()
+  await fileMenu.getByRole('menuitem', { name: '顺序功能图', exact: true }).click()
   await expect(page.getByText(/正在生成顺序功能图 PNG/)).toBeVisible()
 
   await page.getByRole('button', { name: '文件：新建、导入或导出' }).click()

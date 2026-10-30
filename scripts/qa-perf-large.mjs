@@ -269,8 +269,9 @@ function shortError(error) {
   return String(error && error.message ? error.message : error).split('\n')[0]
 }
 
-async function measureExport(page, itemName, timeoutMs = 45_000) {
+async function measureExport(page, itemName, format, timeoutMs = 45_000) {
   await openExportMenu(page)
+  await page.getByRole('menuitemradio', { name: format.toUpperCase(), exact: true }).click()
   const itemExists = await page.evaluate((name) => (
     [...document.querySelectorAll('[role="menuitem"]')]
       .some((element) => element.textContent?.trim() === name)
@@ -377,9 +378,9 @@ async function main() {
       ladderImport.domNodes,
     )
 
-    result.exports.completeSvg = await measureExport(ladderApp.page, '完整程序 SVG', 60_000)
+    result.exports.completeSvg = await measureExport(ladderApp.page, '完整程序', 'svg', 60_000)
     console.log('stage completeSvg', JSON.stringify(result.exports.completeSvg))
-    result.exports.plainSvg = await measureExport(ladderApp.page, '纯梯形图 SVG', 60_000)
+    result.exports.plainSvg = await measureExport(ladderApp.page, '纯梯形图', 'svg', 60_000)
     console.log('stage plainSvg', JSON.stringify(result.exports.plainSvg))
     await waitForPaint(ladderApp.page)
     result.pageErrors.push(...ladderApp.pageErrors)
@@ -390,7 +391,7 @@ async function main() {
     const sfcImport = await importProgram(sfcApp.page, sfcProgram, sfcProgram.name)
     result.sfcImport = sfcImport
     console.log('stage sfcImport', JSON.stringify(sfcImport))
-    const sfcExport = await measureExport(sfcApp.page, '顺序功能图 SVG', 45_000)
+    const sfcExport = await measureExport(sfcApp.page, '顺序功能图', 'svg', 45_000)
     if (sfcExport.failed && isSfcUnsupported(sfcExport)) {
       sfcExport.skipped = true
       sfcExport.skipReason = (sfcExport.alerts ?? []).join(' | ')

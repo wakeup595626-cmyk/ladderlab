@@ -259,14 +259,16 @@ function TagsPanel({
   const [tagQuery, setTagQuery] = useState('')
   // 默认按程序段分组：一段一格、可折叠；「全部」保留整表平铺。
   const [view, setView] = useState<'rungs' | 'list'>('rungs')
-  // 手风琴式分组：默认只展开当前选中的程序段（没有选中时展开第一段）。
-  // 用户选择绑定选择范围；换段后自动回到“跟随当前段”，无需 effect 重置。
-  const [groupChoice, setGroupChoice] = useState<{ scopeKey: string; group: string | null } | null>(null)
+  // null 表示还没手动开合过，使用“当前段或第一段”作为初始状态；一旦开始
+  // 操作就保存所有已展开的段。这样逐个点开时会累积，再点同一段才收起。
+  const [openGroupKeys, setOpenGroupKeys] = useState<string[] | null>(null)
   const [flashTagId, setFlashTagId] = useState<string | null>(null)
   const [announcement, setAnnouncement] = useState('')
   const flashTimer = useRef<number | null>(null)
   const scrollTimer = useRef<number | null>(null)
   const searchInput = useRef<HTMLInputElement | null>(null)
+  const groupHeadRefs = useRef(new Map<string, HTMLButtonElement>())
+  const lastFollowedRung = useRef<string | null>(null)
   useEffect(() => () => {
     if (flashTimer.current !== null) window.clearTimeout(flashTimer.current)
     if (scrollTimer.current !== null) window.clearTimeout(scrollTimer.current)
@@ -320,40 +322,39 @@ function TagsPanel({
     .filter((group) => group.local.length > 0 || group.shared.length > 0)
   const queryUnused = unusedTags.filter(matchesQuery)
   const selectedRungId = selection?.rungId ?? null
-  const selectedScopeKey = selection
-    ? `${selection.rungId}:${selection.wholeRung ? 'whole' : selection.path?.join('.') ?? ''}`
-    : ''
   const activeGroupKey = selectedRungId ? rungKey(selectedRungId) : null
-  const autoOpenKey = (activeGroupKey && rungGroups.some((group) => group.key === activeGroupKey)
+  const defaultOpenKey = (activeGroupKey && rungGroups.some((group) => group.key === activeGroupKey)
     ? activeGroupKey
     : rungGroups[0]?.key) ?? null
-  const scopedChoice = groupChoice?.scopeKey === selectedScopeKey ? groupChoice.group : undefined
-  const openGroupKey = scopedChoice === undefined ? autoOpenKey : scopedChoice
+  const openGroupSet = new Set(
+    openGroupKeys ?? (defaultOpenKey ? [defaultOpenKey] : []),
+  )
   const isSearching = normalizedQuery !== ''
   const isOpen = (key: string) => {
     // 搜索时结果全展开，命中的变量不会藏在收起的段里。
     if (isSearching) return true
-    return key === openGroupKey
+    return openGroupSet.has(key)
   }
-  const updateTagQuery = (value: string) => {
-    setTagQuery(value)
-    // 清空搜索后回到“当前段展开、其余收起”的默认状态。
-    setGroupChoice(null)
-  }
+  const updateTagQuery = (value: string) => setTagQuery(value)
   const clearTagQuery = () => {
     updateTagQuery('')
     window.requestAnimationFrame(() => searchInput.current?.focus())
   }
   const toggleGroup = (key: string) => {
     if (isSearching) return
-    setGroupChoice((current) => {
-      const currentGroup = current?.scopeKey === selectedScopeKey ? current.group : undefined
-      const openNow = currentGroup === undefined ? autoOpenKey : currentGroup
-      return { scopeKey: selectedScopeKey, group: openNow === key ? null : key }
+    setOpenGroupKeys((current) => {
+      const next = new Set(current ?? (defaultOpenKey ? [defaultOpenKey] : []))
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return [...next]
     })
   }
   const revealTag = (tag: TagDef, ownerKey: string) => {
-    setGroupChoice({ scopeKey: selectedScopeKey, group: ownerKey })
+    setOpenGroupKeys((current) => {
+      const next = new Set(current ?? (defaultOpenKey ? [defaultOpenKey] : []))
+      next.add(ownerKey)
+      return [...next]
+    })
     // 连续点同一个胶囊也要重新播放高亮动画。
     setFlashTagId(null)
     window.requestAnimationFrame(() => setFlashTagId(tag.id))
@@ -371,6 +372,31 @@ function TagsPanel({
       setAnnouncement(`已在${titleOf(ownerKey)}定位到变量 ${tag.name}`)
     }, 80)
   }
+
+  // 当前编辑段换到哪一段，变量表就跟到哪一段：保留用户已经展开的其它段，
+  // 再补开当前段并把它滚到可见位置。只看程序段 id，段内换选元件不会重复滚动。
+  useEffect(() => {
+    if (isSearching || !activeGroupKey) {
+      lastFollowedRung.current = null
+      return
+    }
+    if (activeGroupKey === lastFollowedRung.current) return
+    lastFollowedRung.current = activeGroupKey
+    setOpenGroupKeys((current) => {
+      const next = new Set(current ?? (defaultOpenKey ? [defaultOpenKey] : []))
+      next.add(activeGroupKey)
+      return [...next]
+    })
+    const frame = window.requestAnimationFrame(() => {
+      const head = groupHeadRefs.current.get(activeGroupKey)
+      if (!head) return
+      const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+      // 段头贴到变量区顶部，让当前段的变量行紧跟其后，而不是只把段头
+      // 挤在面板底边、变量仍藏在视口外。
+      head.scrollIntoView({ block: 'start', inline: 'nearest', behavior: reduceMotion ? 'auto' : 'smooth' })
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [activeGroupKey, defaultOpenKey, isSearching])
 
   const titleOf = (key: string) => rungGroups.find((group) => group.key === key)?.title ?? '前面的程序段'
 
@@ -620,6 +646,10 @@ function TagsPanel({
                   <button
                     type="button"
                     className="tag-group-head"
+                    ref={(element) => {
+                      if (element) groupHeadRefs.current.set(group.key, element)
+                      else groupHeadRefs.current.delete(group.key)
+                    }}
                     aria-expanded={open}
                     aria-controls={groupDomId(group.key)}
                     aria-label={`${group.title}${group.label !== '' ? '：' + group.label : ''}，${group.total} 个变量`}

@@ -9,7 +9,7 @@ test('课程实验可以导出真实的顺序功能图 PNG', async ({ page }) =>
 
   await expect(page.locator('#project-name')).toHaveValue('实验三 · 十字路口交通灯')
 
-  const { name, bytes } = await downloadExport(page, '顺序功能图 PNG')
+  const { name, bytes } = await downloadExport(page, '顺序功能图', 'png')
 
   expect(name).toMatch(/顺序功能图.*\.png$/)
   expect(bytes.subarray(0, PNG_SIGNATURE.length)).toEqual(PNG_SIGNATURE)

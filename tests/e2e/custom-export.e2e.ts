@@ -9,23 +9,21 @@ import {
   missingTexts,
 } from './custom-export.spec'
 
-/** 导出菜单固定 8 项：工程文件、分享链接、三种 SVG、三种 PNG。 */
-const EXPORT_MENU_ITEMS = [
+const EXPORT_FILE_ITEMS = [
   '工程文件（.json）',
   '复制分享链接',
-  '顺序功能图 SVG',
-  '完整程序 SVG',
-  '纯梯形图 SVG',
-  '完整程序 PNG',
-  '纯梯形图 PNG',
-  '顺序功能图 PNG',
 ]
+
+/** 导出内容只有三项；SVG / PNG 在菜单顶部选一次，不再复制整套动作。 */
+const EXPORT_CONTENT_ITEMS = ['完整程序', '纯梯形图', '顺序功能图']
+const EXPORT_MENU_ITEMS = [...EXPORT_FILE_ITEMS, ...EXPORT_CONTENT_ITEMS]
+const EXPORT_INTERACTIVE_ITEMS = [...EXPORT_FILE_ITEMS, 'PNG', 'SVG', ...EXPORT_CONTENT_ITEMS]
 
 type ExportKind = 'complete' | 'plain' | 'sfc'
 
 interface ExportCase {
   kind: ExportKind
-  item: string
+  item: '完整程序' | '纯梯形图' | '顺序功能图'
   /** 图上必须读到的文字（本工程独有）。 */
   expected: string[]
   /** 按 <text> 整段精确匹配（SFC 的步骤号是单个数字，不能用子串判断）。 */
@@ -62,11 +60,11 @@ test.describe('自定义工程导出验收', () => {
     )
 
     const cases: ExportCase[] = [
-      { kind: 'complete', item: '完整程序 SVG', expected: [...CUSTOM_TAGS] },
-      { kind: 'plain', item: '纯梯形图 SVG', expected: [...CUSTOM_TAGS] },
+      { kind: 'complete', item: '完整程序', expected: [...CUSTOM_TAGS] },
+      { kind: 'plain', item: '纯梯形图', expected: [...CUSTOM_TAGS] },
       {
         kind: 'sfc',
-        item: '顺序功能图 SVG',
+        item: '顺序功能图',
         // 顺序功能图只写步骤号与动作/转移条件，不写「第 N 步」字样，也不
         // 打印步骤位地址；两条转移信号按变量名出现：StartCycle、SkipRequest。
         expected: ['0', '1', '2', '3', 'ConveyorRun', 'M5.0=1', 'AlarmLamp', 'M6.0=1', 'StartCycle', 'SkipRequest'],
@@ -76,7 +74,7 @@ test.describe('自定义工程导出验收', () => {
 
     const evidence: string[] = []
     for (const spec of cases) {
-      const file = await downloadExport(page, spec.item)
+      const file = await downloadExport(page, spec.item, 'svg')
       const text = file.bytes.toString('utf8')
       if (text.length === 0) throw new Error(`${spec.item} 下载内容为空`)
 
@@ -134,7 +132,7 @@ test.describe('自定义工程导出验收', () => {
     console.log('--- 导出证据 ---\n' + evidence.join('\n'))
   })
 
-  test('导出菜单：8 项齐全、键盘可开关、触屏每项不低于 44px', async ({ page, browser }) => {
+  test('导出菜单：格式二选一、内容三项、键盘可开关、触屏每项不低于 44px', async ({ page, browser }) => {
     test.setTimeout(120_000)
     page.setDefaultTimeout(10_000)
     await openHome(page)
@@ -150,6 +148,22 @@ test.describe('自定义工程导出验收', () => {
     await expect(items).toHaveCount(EXPORT_MENU_ITEMS.length)
     expect(await items.allInnerTexts()).toEqual(EXPORT_MENU_ITEMS)
     await expect(items.first()).toBeFocused()
+
+    const pngFormat = menu.getByRole('menuitemradio', { name: 'PNG', exact: true })
+    const svgFormat = menu.getByRole('menuitemradio', { name: 'SVG', exact: true })
+    await expect(pngFormat).toHaveAttribute('aria-checked', 'true')
+    await expect(svgFormat).toHaveAttribute('aria-checked', 'false')
+
+    // 上下键仍按整份菜单移动；进入格式组后，左右键切换但菜单保持打开。
+    await page.keyboard.press('ArrowDown')
+    await page.keyboard.press('ArrowDown')
+    await expect(pngFormat).toBeFocused()
+    await page.keyboard.press('ArrowRight')
+    await expect(svgFormat).toHaveAttribute('aria-checked', 'true')
+    await expect(menu).toBeVisible()
+    await page.keyboard.press('ArrowLeft')
+    await expect(pngFormat).toHaveAttribute('aria-checked', 'true')
+    await expect(menu).toBeVisible()
 
     await page.keyboard.press('Escape')
     await expect(menu).toHaveCount(0)
@@ -173,7 +187,7 @@ test.describe('自定义工程导出验收', () => {
       const touchMenu = touchPage.getByRole('menu', { name: '导出' })
       await expect(touchMenu).toBeVisible()
       const measure = () =>
-        touchMenu.getByRole('menuitem').evaluateAll((nodes) =>
+        touchMenu.locator('[role="menuitem"], [role="menuitemradio"]').evaluateAll((nodes) =>
           nodes.map((node) => ({
             label: (node.textContent ?? '').trim(),
             height: node.getBoundingClientRect().height,
@@ -191,7 +205,7 @@ test.describe('自定义工程导出验收', () => {
         .toBeGreaterThanOrEqual(44 - 0.5)
 
       const boxes = await measure()
-      expect(boxes.map((box) => box.label)).toEqual(EXPORT_MENU_ITEMS)
+      expect(boxes.map((box) => box.label)).toEqual(EXPORT_INTERACTIVE_ITEMS)
       const tooSmall = boxes.filter((box) => box.height < 44 - 0.5)
       expect(tooSmall.map((box) => `${box.label}=${box.height}`).join('、')).toBe('')
       console.log(

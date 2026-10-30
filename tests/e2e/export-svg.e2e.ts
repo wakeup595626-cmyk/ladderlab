@@ -74,9 +74,9 @@ test('完整程序、纯梯形图、顺序功能图都能下载自包含的 SVG'
   await loadCourseExperiment(page, '03 十字路口交通灯')
   await expect(page.locator('#project-name')).toHaveValue('实验三 · 十字路口交通灯')
 
-  for (const item of ['完整程序 SVG', '纯梯形图 SVG', '顺序功能图 SVG']) {
+  for (const item of ['完整程序', '纯梯形图', '顺序功能图'] as const) {
     const before = new Date()
-    const { name, bytes } = await downloadExport(page, item)
+    const { name, bytes } = await downloadExport(page, item, 'svg')
     const after = new Date()
     expect(name.endsWith('.svg'), item + ' 文件名应以 .svg 结尾').toBe(true)
     // 文件名只带本地秒级时间戳，且不能混进 Windows 不接受的字符。
@@ -101,11 +101,11 @@ test('不同实验导出的顺序功能图内容不同', async ({ page }) => {
   await openHome(page)
 
   await loadCourseExperiment(page, '03 十字路口交通灯')
-  const lab03 = asText((await downloadExport(page, '顺序功能图 SVG')).bytes)
+  const lab03 = asText((await downloadExport(page, '顺序功能图', 'svg')).bytes)
 
   await loadCourseExperiment(page, '06 装配流水线')
   await expect(page.locator('#project-name')).toHaveValue('实验六 · 装配流水线移位控制')
-  const lab06 = asText((await downloadExport(page, '顺序功能图 SVG')).bytes)
+  const lab06 = asText((await downloadExport(page, '顺序功能图', 'svg')).bytes)
 
   expect(lab03).not.toBe(lab06)
   // 两张图都必须真的画出步骤框和白底，而不是空白占位。
@@ -134,8 +134,8 @@ test('变量名里的非法控制字符不会写进导出的 SVG', async ({ page
 
   await importProgram(page, program)
 
-  for (const item of ['完整程序 SVG', '纯梯形图 SVG']) {
-    const text = asText((await downloadExport(page, item)).bytes)
+  for (const item of ['完整程序', '纯梯形图'] as const) {
+    const text = asText((await downloadExport(page, item, 'svg')).bytes)
     expect(hasForbiddenControlChar(text), `${item} 仍残留非法控制字符`).toBe(false)
     expect(text).toContain('启AB动')
     const parserError = await page.evaluate((svgText) => {
@@ -173,10 +173,11 @@ test('超长工程导出 PNG 时提前拦下，并指路到不受画布限制的
   await importProgram(page, program)
 
   const menu = await openExportMenu(page)
-  await menu.getByRole('menuitem', { name: '完整程序 PNG' }).click()
+  await menu.getByRole('menuitemradio', { name: 'PNG', exact: true }).click()
+  await menu.getByRole('menuitem', { name: '完整程序', exact: true }).click()
   await expect(page.getByText(PNG_TOO_LARGE_MESSAGE, { exact: true })).toBeVisible({ timeout: 60_000 })
 
   // 同一个工程改走 SVG 仍然出得来，提示里的替代方案不是空话。
-  const svg = asText((await downloadExport(page, '完整程序 SVG')).bytes)
+  const svg = asText((await downloadExport(page, '完整程序', 'svg')).bytes)
   expectSelfContainedSvg(svg)
 })

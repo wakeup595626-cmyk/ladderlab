@@ -400,7 +400,9 @@ async function downloadSfcSvg(page, mobile, filename, steps) {
     menu = page.locator('#topbar-export-menu')
     await menu.waitFor({ state: 'visible', timeout: 10000 })
   }
-  const item = menu.getByRole('menuitem', { name: '顺序功能图 SVG', exact: true })
+  const format = menu.getByRole('menuitemradio', { name: 'SVG', exact: true })
+  await format.click()
+  const item = menu.getByRole('menuitem', { name: '顺序功能图', exact: true })
   const [download] = await Promise.all([
     page.waitForEvent('download', { timeout: 60000 }),
     item.click(),

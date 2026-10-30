@@ -160,7 +160,7 @@ async function openFileActions(mobile = false) {
   await sleep(180)
 }
 
-async function clickFileAction(label, mobile = false) {
+async function clickFileAction(label, mobile = false, format = 'png') {
   if (!mobile && (label === '新建' || label === '导入')) {
     const clicked = await evaluate(`(() => {
       const item = [...document.querySelectorAll('.wb-file-actions-desktop button')]
@@ -176,9 +176,20 @@ async function clickFileAction(label, mobile = false) {
 
   await openFileActions(mobile)
   const menuSelector = mobile ? '.wb-file-compact-menu' : '.wb-export-menu'
+  if (['完整程序', '纯梯形图', '顺序功能图'].includes(label)) {
+    const formatClicked = await evaluate(`(() => {
+      const button = [...document.querySelectorAll(${JSON.stringify(menuSelector)} + ' [role="menuitemradio"]')]
+        .find((item) => item.textContent?.trim().toUpperCase() === ${JSON.stringify(format.toUpperCase())})
+      if (!button) return false
+      button.click()
+      return true
+    })()`)
+    if (!formatClicked) throw new Error(`找不到图片格式：${format}`)
+    await sleep(80)
+  }
   const clicked = await evaluate(`(() => {
-    const item = [...document.querySelectorAll(${JSON.stringify(menuSelector)} + ' button')]
-      .find((button) => button.textContent?.includes(${JSON.stringify(label)}))
+    const item = [...document.querySelectorAll(${JSON.stringify(menuSelector)} + ' [role="menuitem"]')]
+      .find((button) => button.textContent?.trim() === ${JSON.stringify(label)})
     if (!item) return false
     item.click()
     return true
@@ -252,10 +263,10 @@ const exportUi = await evaluate(`(() => {
 await screenshot('docs/qa/io-topbar-export-desktop.png')
 checks['topbar/new-import-export-visible'] = ['新建', '导入', '导出']
   .every((label) => exportUi.actions.some((action) => action?.startsWith(label)))
-checks['topbar/export-menu-exposes-three-formats'] = exportUi.menuItems.length === 3
-  && exportUi.menuItems.some((label) => label?.includes('工程文件'))
-  && exportUi.menuItems.some((label) => label?.includes('完整程序 PNG'))
-  && exportUi.menuItems.some((label) => label?.includes('纯梯形图 PNG'))
+checks['topbar/export-menu-has-one-format-choice'] = exportUi.menuItems.length === 7
+  && exportUi.menuItems.filter((label) => label === 'PNG' || label === 'SVG').length === 2
+  && ['完整程序', '纯梯形图', '顺序功能图'].every((label) => exportUi.menuItems.includes(label))
+  && !exportUi.menuItems.some((label) => /(完整程序|纯梯形图|顺序功能图) (PNG|SVG)/.test(label ?? ''))
 checks['topbar/export-menu-fits'] = exportUi.menuInsideViewport && !exportUi.pageOverflow
 details['topbar/export-ui'] = exportUi
 await evaluate(`(() => {
@@ -356,13 +367,13 @@ async function inspectPng(path) {
 }
 
 const beforeComplete = await readdir(downloadDir)
-await clickFileAction('完整程序 PNG')
+await clickFileAction('完整程序', false, 'png')
 const completePng = await waitForDownload('.png', beforeComplete)
 const completeImage = await inspectPng(completePng)
 
 await sleep(700)
 const beforePlain = await readdir(downloadDir)
-await clickFileAction('纯梯形图 PNG')
+await clickFileAction('纯梯形图', false, 'png')
 const plainPng = await waitForDownload('.png', beforePlain)
 const plainImage = await inspectPng(plainPng)
 
@@ -404,13 +415,13 @@ checks['complex/move-and-addresses-rendered'] = complexProgram.hasMove
 details['complex/program'] = complexProgram
 
 const beforeComplexComplete = await readdir(downloadDir)
-await clickFileAction('完整程序 PNG')
+await clickFileAction('完整程序', false, 'png')
 const complexCompletePng = await waitForDownload('.png', beforeComplexComplete)
 const complexCompleteImage = await inspectPng(complexCompletePng)
 
 await sleep(700)
 const beforeComplexPlain = await readdir(downloadDir)
-await clickFileAction('纯梯形图 PNG')
+await clickFileAction('纯梯形图', false, 'png')
 const complexPlainPng = await waitForDownload('.png', beforeComplexPlain)
 const complexPlainImage = await inspectPng(complexPlainPng)
 
@@ -499,11 +510,11 @@ const mobileFileUi = await evaluate(`(() => {
   }
 })()`)
 await screenshot('docs/qa/io-topbar-file-mobile.png')
-checks['mobile/file-menu-exposes-all-actions'] = mobileFileUi.labels.length === 6
+checks['mobile/file-menu-exposes-all-actions'] = mobileFileUi.labels.length === 10
   && mobileFileUi.labels.some((label) => label?.includes('新建空白工程'))
   && mobileFileUi.labels.some((label) => label?.includes('导入工程文件'))
-  && mobileFileUi.labels.some((label) => label?.includes('完整程序 PNG'))
-  && mobileFileUi.labels.some((label) => label?.includes('纯梯形图 PNG'))
+  && ['PNG', 'SVG', '完整程序', '纯梯形图', '顺序功能图']
+    .every((label) => mobileFileUi.labels.includes(label))
 checks['mobile/topbar-and-menu-fit'] = mobileFileUi.controlsInsideViewport
   && !mobileFileUi.pageOverflow
   && !!mobileFileUi.menu

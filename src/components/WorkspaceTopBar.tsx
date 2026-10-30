@@ -96,6 +96,9 @@ export default function WorkspaceTopBar({
   const [menuOpen, setMenuOpen] = useState(false)
   const [fileMenuOpen, setFileMenuOpen] = useState(false)
   const [fileMenuKind, setFileMenuKind] = useState<'export' | 'file'>('export')
+  // 图片格式是导出菜单的一次性选择，不是内容类型。默认 PNG 让偶尔导图的
+  // 用户直接完成操作，需要无损缩放时再切到 SVG。
+  const [exportFormat, setExportFormat] = useState<'png' | 'svg'>('png')
   const [themeMenuOpen, setThemeMenuOpen] = useState(false)
   const [themeMenuStyle, setThemeMenuStyle] = useState<CSSProperties | null>(null)
   const [fileMenuStyle, setFileMenuStyle] = useState<CSSProperties | null>(null)
@@ -130,6 +133,9 @@ export default function WorkspaceTopBar({
   )
   const fileMenuItems = () => Array.from(
     fileMenuRef.current?.querySelectorAll<HTMLButtonElement>('[role^="menuitem"]:not([disabled])') ?? [],
+  )
+  const exportFormatRadios = () => Array.from(
+    fileMenuRef.current?.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]') ?? [],
   )
   const themeRadios = () => Array.from(
     themeMenuRef.current?.querySelectorAll<HTMLButtonElement>('[role="radio"]') ?? [],
@@ -304,6 +310,28 @@ export default function WorkspaceTopBar({
   }
 
   const handleFileMenuKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    // 格式是一组二选一选项：左右键只在这一组里换值，不关闭菜单。
+    const active = document.activeElement
+    const radios = exportFormatRadios()
+    if (
+      active instanceof HTMLButtonElement
+      && radios.includes(active)
+      && ['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)
+    ) {
+      event.preventDefault()
+      const index = radios.indexOf(active)
+      const next = event.key === 'Home'
+        ? 0
+        : event.key === 'End'
+          ? radios.length - 1
+          : event.key === 'ArrowLeft'
+            ? (index - 1 + radios.length) % radios.length
+            : (index + 1) % radios.length
+      const radio = radios[next]
+      radio?.focus()
+      radio?.click()
+      return
+    }
     if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return
     const items = fileMenuItems()
     if (items.length === 0) return
@@ -356,6 +384,45 @@ export default function WorkspaceTopBar({
   const exportGuard = exporting
     ? { disabled: true, title: '正在导出，请稍候…' }
     : {}
+
+  const exportFormatPicker = (
+    <div className="wb-menu-group wb-export-format" role="group" aria-label="图片格式">
+      <span className="wb-menu-label">图片格式</span>
+      <div className="wb-export-format-switch">
+        {(['png', 'svg'] as const).map((format) => (
+          <button
+            type="button"
+            role="menuitemradio"
+            aria-checked={exportFormat === format}
+            className={exportFormat === format ? 'is-active' : ''}
+            key={format}
+            onClick={() => setExportFormat(format)}
+            title={format === 'png' ? 'PNG 位图，适合分享和插入文档' : 'SVG 矢量图，放大不模糊'}
+          >
+            <span>{format.toUpperCase()}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+
+  const exportActions = (
+    <div className="wb-menu-group wb-export-actions" role="group" aria-label="导出内容">
+      <span className="wb-menu-label">导出内容</span>
+      <button type="button" role="menuitem" {...exportGuard} onClick={() => chooseFileMenuAction(() => onExportImage('complete', exportFormat))}>
+        <ImageIcon size={16} />
+        <span>完整程序</span>
+      </button>
+      <button type="button" role="menuitem" {...exportGuard} onClick={() => chooseFileMenuAction(() => onExportImage('plain', exportFormat))}>
+        <ImageIcon size={16} />
+        <span>纯梯形图</span>
+      </button>
+      <button type="button" role="menuitem" {...exportGuard} onClick={() => chooseFileMenuAction(() => onExportSfc(exportFormat))}>
+        <StepIcon size={16} />
+        <span>顺序功能图</span>
+      </button>
+    </div>
+  )
 
 
   return (
@@ -522,36 +589,8 @@ export default function WorkspaceTopBar({
                   <span>复制分享链接</span>
                 </button>
               </div>
-              <div className="wb-menu-group" role="group" aria-label="矢量图 SVG">
-                <span className="wb-menu-label">矢量图 SVG</span>
-                <button type="button" role="menuitem" {...exportGuard} onClick={() => chooseFileMenuAction(() => onExportSfc('svg'))}>
-                  <StepIcon size={16} />
-                  <span>顺序功能图 SVG</span>
-                </button>
-                <button type="button" role="menuitem" {...exportGuard} onClick={() => chooseFileMenuAction(() => onExportImage('complete', 'svg'))}>
-                  <ImageIcon size={16} />
-                  <span>完整程序 SVG</span>
-                </button>
-                <button type="button" role="menuitem" {...exportGuard} onClick={() => chooseFileMenuAction(() => onExportImage('plain', 'svg'))}>
-                  <ImageIcon size={16} />
-                  <span>纯梯形图 SVG</span>
-                </button>
-              </div>
-              <div className="wb-menu-group" role="group" aria-label="位图 PNG">
-                <span className="wb-menu-label">位图 PNG</span>
-                <button type="button" role="menuitem" {...exportGuard} onClick={() => chooseFileMenuAction(() => onExportImage('complete', 'png'))}>
-                  <ImageIcon size={16} />
-                  <span>完整程序 PNG</span>
-                </button>
-                <button type="button" role="menuitem" {...exportGuard} onClick={() => chooseFileMenuAction(() => onExportImage('plain', 'png'))}>
-                  <ImageIcon size={16} />
-                  <span>纯梯形图 PNG</span>
-                </button>
-                <button type="button" role="menuitem" {...exportGuard} onClick={() => chooseFileMenuAction(() => onExportSfc('png'))}>
-                  <StepIcon size={16} />
-                  <span>顺序功能图 PNG</span>
-                </button>
-              </div>
+              {exportFormatPicker}
+              {exportActions}
             </div>
           )}
 
@@ -590,36 +629,8 @@ export default function WorkspaceTopBar({
                   <span>复制分享链接</span>
                 </button>
               </div>
-              <div className="wb-menu-group" role="group" aria-label="矢量图 SVG">
-                <span className="wb-menu-label">矢量图 SVG</span>
-                <button type="button" role="menuitem" {...exportGuard} onClick={() => chooseFileMenuAction(() => onExportSfc('svg'))}>
-                  <StepIcon size={16} />
-                  <span>顺序功能图 SVG</span>
-                </button>
-                <button type="button" role="menuitem" {...exportGuard} onClick={() => chooseFileMenuAction(() => onExportImage('complete', 'svg'))}>
-                  <ImageIcon size={16} />
-                  <span>完整程序 SVG</span>
-                </button>
-                <button type="button" role="menuitem" {...exportGuard} onClick={() => chooseFileMenuAction(() => onExportImage('plain', 'svg'))}>
-                  <ImageIcon size={16} />
-                  <span>纯梯形图 SVG</span>
-                </button>
-              </div>
-              <div className="wb-menu-group" role="group" aria-label="位图 PNG">
-                <span className="wb-menu-label">位图 PNG</span>
-                <button type="button" role="menuitem" {...exportGuard} onClick={() => chooseFileMenuAction(() => onExportImage('complete', 'png'))}>
-                  <ImageIcon size={16} />
-                  <span>完整程序 PNG</span>
-                </button>
-                <button type="button" role="menuitem" {...exportGuard} onClick={() => chooseFileMenuAction(() => onExportImage('plain', 'png'))}>
-                  <ImageIcon size={16} />
-                  <span>纯梯形图 PNG</span>
-                </button>
-                <button type="button" role="menuitem" {...exportGuard} onClick={() => chooseFileMenuAction(() => onExportSfc('png'))}>
-                  <StepIcon size={16} />
-                  <span>顺序功能图 PNG</span>
-                </button>
-              </div>
+              {exportFormatPicker}
+              {exportActions}
             </div>
           )}
         </div>
