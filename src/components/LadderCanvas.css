@@ -1094,6 +1094,14 @@
   outline: none;
 }
 
+/* Chrome 会给可聚焦的 SVG <g> 在鼠标点击后画一圈 5px 的黑色原生轮廓；
+   :focus-visible 匹配不到，拦不住。键盘焦点仍由各自的 :focus-visible
+   规则给出反馈，所以这里直接关掉 :focus 的 UA 轮廓。 */
+.ll-merge-chip:focus,
+.ll-parallel-select:focus {
+  outline: none;
+}
+
 .ll-merge-chip-text {
   fill: var(--accent);
   font-family: var(--sans);
@@ -1186,7 +1194,7 @@
   stroke-width: 3;
 }
 
-.ll-slot-plus:focus-visible {
+.ll-slot-plus:focus {
   outline: none;
 }
 

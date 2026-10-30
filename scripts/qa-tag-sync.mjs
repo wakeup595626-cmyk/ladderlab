@@ -189,7 +189,7 @@ check(
   flat.cards.map((tag) => tag.name),
 )
 
-/* 回到默认的分组视图：每段一格，默认全部展开，可单独收起。 */
+/* 回到默认的分组视图：每段一格，默认只展开当前段，其余保持收起。 */
 await evaluate("(() => { const button = [...document.querySelectorAll('.tags-toolbar button')].find((item) => item.textContent?.trim() === '按程序段'); button?.click() })()")
 await sleep(360)
 const readGroups = async () => evaluate(`(() => ({
@@ -213,6 +213,11 @@ check(
     && rungGroups.length >= 1
     && grouped.groups.every((group) => group.title.startsWith('程序段') || group.title === '未引用'),
   grouped.groups.map((group) => group.title + ':' + group.cards.join('|')),
+)
+check(
+  'tags/default-accordion',
+  rungGroups.filter((group) => group.expanded === 'true').length === 1,
+  rungGroups.map((group) => ({ title: group.title, expanded: group.expanded })),
 )
 check(
   'tags/unused-group-holds-orphan',
@@ -299,11 +304,29 @@ const chipPreparation = await evaluate(`(() => {
   if (!owner) return { name, ownerFound: false }
   const head = owner.querySelector('.tag-group-head')
   const expandedBefore = head?.getAttribute('aria-expanded') ?? null
-  head?.click()
+  // 手风琴默认只展开当前段：owner 可能已经收起，先确保它能执行“展开态点击收起”。
+  if (expandedBefore !== 'true') head?.click()
   return { name, ownerFound: true, expandedBefore }
 })()`)
-await sleep(560)
+await sleep(240)
 const sharedChipName = chipPreparation?.name ?? ''
+const ownerPrepared = await evaluate(`(() => {
+  const name = ${JSON.stringify(sharedChipName)}
+  const owner = [...document.querySelectorAll('.tag-group')].find((group) =>
+    [...group.querySelectorAll('.tag-card .tag-name-input')].some((input) => input.value === name),
+  )
+  return {
+    expanded: owner?.querySelector('.tag-group-head')?.getAttribute('aria-expanded') ?? null,
+  }
+})()`)
+await evaluate(`(() => {
+  const name = ${JSON.stringify(sharedChipName)}
+  const owner = [...document.querySelectorAll('.tag-group')].find((group) =>
+    [...group.querySelectorAll('.tag-card .tag-name-input')].some((input) => input.value === name),
+  )
+  owner?.querySelector('.tag-group-head')?.click()
+})()`)
+await sleep(560)
 const ownerCollapsed = await evaluate(`(() => {
   const name = ${JSON.stringify(sharedChipName)}
   const owner = [...document.querySelectorAll('.tag-group')].find((group) =>
@@ -334,13 +357,13 @@ const revealed = await evaluate(`(() => {
 check(
   'tags/shared-chip-reveals-owner',
   Boolean(chipPreparation?.ownerFound)
-    && chipPreparation?.expandedBefore === 'true'
+    && ownerPrepared.expanded === 'true'
     && ownerCollapsed.expanded === 'false'
     && ownerCollapsed.bodyCollapsed === 'true'
     && chipTouched === true
     && revealed.ownerExpanded === 'true'
     && revealed.flashedName === sharedChipName,
-  { chipPreparation, ownerCollapsed, chipTouched, revealed },
+  { chipPreparation, ownerPrepared, ownerCollapsed, chipTouched, revealed },
 )
 
 /* ---------- 场景二：用户改过的变量不再被自动回收 ---------- */

@@ -262,7 +262,7 @@ const editResult = await evaluate(`(() => {
   // comment is its own full-width row now and must not be mistaken for the
   // address field when the card layout changes again.
   set(card.querySelector('.tag-name-input'), 'QaTag')
-  set(card.querySelector('.address-input'), '%M9.9')
+  set(card.querySelector('.address-input'), '%M9.7')
   set(card.querySelector('.comment-input'), 'QA 变量')
   return { added: true }
 })()`)
@@ -281,7 +281,7 @@ check(
   editResult.added
     && edited.name === 'QaTag'
     && edited.comment === 'QA 变量'
-    && edited.address === '%M9.9'
+    && edited.address === '%M9.7'
     && edited.total === 4,
   edited,
 )

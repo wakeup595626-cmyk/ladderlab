@@ -3959,7 +3959,6 @@ body[data-drag-kind] {
 .wb-shell .toast {
   padding: 8px 12px;
   border: 1px solid var(--control);
-  border-left: 3px solid var(--accent);
   border-radius: 2px;
   background: var(--surface);
   box-shadow: 0 4px 12px rgba(21, 24, 22, 0.12);
@@ -3970,9 +3969,12 @@ body[data-drag-kind] {
 
 .wb-shell .toast.is-error {
   border-color: var(--control);
-  border-left-color: var(--negative);
   background: var(--surface);
   color: var(--text);
+}
+
+.wb-shell .toast.is-error::before {
+  background: var(--negative);
 }
 
 .wb-shell .toast-action {
@@ -5358,6 +5360,254 @@ body[data-drag-kind] {
     align-self: end;
   }
 }
+
+/* ==================================== program-group ledger, last word ===
+   变量表最终形态：程序段是一条可以一眼扫过的账目，默认只展开当前段；
+   段头用序号徽标 + 左侧色条区分，变量行去掉卡片外框，输入控件平时是
+   纯文本，悬停或聚焦才浮出边框。四列仍在同一水平线上，但视线先落在
+   变量名和地址上，而不是一排灰色小方块。 */
+
+.tag-list[data-view='rungs'] {
+  gap: 2px;
+}
+
+.tag-group {
+  position: relative;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+}
+
+.tag-group::before {
+  position: absolute;
+  inset: 5px auto 5px 0;
+  width: 2px;
+  border-radius: 2px;
+  background: transparent;
+  content: '';
+  transition: background-color var(--dur-quick) var(--ease-out);
+}
+
+.tag-group[data-open='true']::before,
+.tag-group[data-active='true']::before {
+  background: var(--accent);
+}
+
+.tag-group[data-open='true'] {
+  background: color-mix(in srgb, var(--raised) 55%, transparent);
+}
+
+.tag-group[data-active='true'] {
+  background: color-mix(in srgb, var(--accent-wash) 62%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 26%, transparent);
+}
+
+.tag-group:hover {
+  border-color: transparent;
+}
+
+.tag-group-head {
+  min-height: 36px;
+  gap: 6px;
+  padding: 0 8px 0 10px;
+  border-radius: 7px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.tag-group[data-open='true'] .tag-group-head,
+.tag-group[data-active='true'] .tag-group-head {
+  color: var(--text);
+}
+
+.tag-group-head:hover {
+  background: color-mix(in srgb, var(--surface) 70%, transparent);
+  color: var(--text);
+}
+
+.tag-group-index {
+  min-width: 21px;
+  flex: 0 0 21px;
+  padding: 0 3px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--control) 22%, transparent);
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 9.5px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 17px;
+  text-align: center;
+}
+
+.tag-group[data-open='true'] .tag-group-index,
+.tag-group[data-active='true'] .tag-group-index {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+.tag-group-title {
+  flex: 0 0 auto;
+  color: inherit;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.tag-group-label {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.tag-group-count {
+  padding: 0 2px;
+  background: transparent;
+  color: var(--faint);
+  font-size: 10px;
+}
+
+.tag-group-inner {
+  gap: 0;
+  padding: 0 9px;
+}
+
+.tag-group[data-open='true'] .tag-group-inner {
+  padding-bottom: 6px;
+}
+
+.tag-chip-row {
+  padding: 1px 0 6px;
+  border-bottom: 1px solid color-mix(in srgb, var(--rule) 55%, transparent);
+}
+
+.tag-card {
+  padding: 4px 0;
+  border: 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--rule) 55%, transparent);
+  border-radius: 0;
+  background: transparent;
+}
+
+.tag-card:last-child {
+  border-bottom: 0;
+}
+
+.tag-card:hover {
+  border-bottom-color: transparent;
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--surface) 72%, transparent);
+}
+
+.tag-table-head,
+.tag-card-head {
+  grid-template-columns:
+    minmax(0, 1.62fr)
+    minmax(0, 1.1fr)
+    minmax(0, 0.84fr)
+    minmax(0, 0.88fr)
+    24px;
+  gap: 4px;
+}
+
+.tag-table-head {
+  padding: 0 1px 4px;
+  color: var(--faint);
+  font-size: 9.5px;
+  letter-spacing: 0.05em;
+}
+
+.tag-name-cell {
+  gap: 4px;
+}
+
+.tag-name-cell .type-pill {
+  width: 31px;
+  height: 17px;
+  flex-basis: 31px;
+  border-color: transparent;
+  background: color-mix(in srgb, var(--control) 18%, transparent);
+  color: var(--faint);
+  font-size: 8.5px;
+  line-height: 15px;
+  letter-spacing: 0.02em;
+}
+
+.tag-card .tag-name-input {
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.tag-card .table-input,
+.tag-card .live-value {
+  height: 30px;
+  min-height: 30px;
+  padding-inline: 3px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+}
+
+.tag-card .table-input:hover,
+.tag-card .live-value:hover {
+  border-color: var(--rule);
+  background: var(--surface);
+}
+
+.tag-card .address-input {
+  color: var(--accent-ink);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.tag-card select.table-input {
+  color: var(--muted);
+  font-size: 10.5px;
+}
+
+.tag-card .live-value {
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--raised) 85%, transparent);
+  font-size: 10.5px;
+  font-weight: 600;
+}
+
+.tag-card .live-value.on {
+  border-color: color-mix(in srgb, var(--positive) 52%, var(--rule));
+  background: color-mix(in srgb, var(--positive-wash) 88%, transparent);
+}
+
+.tag-card .delete-mini {
+  width: 22px;
+  height: 22px;
+  opacity: 0.3;
+}
+
+.tag-card:hover .delete-mini,
+.tag-card:focus-within .delete-mini {
+  opacity: 1;
+}
+
+.tag-card > .comment-input {
+  height: 19px;
+  padding-inline: 3px;
+  color: var(--faint);
+  font-size: 9.5px;
+  letter-spacing: 0.01em;
+}
+
+.tag-card > .comment-input:hover {
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
+}
+
+.tag-card > .comment-input:focus {
+  border-color: var(--accent);
+  background: var(--surface);
+  color: var(--text);
+}
+
 
 /* ============================================ touch floor, last word =====
    前面几段 @media (max-width: …) 会把工程名输入框和教练条按钮压回 40px，

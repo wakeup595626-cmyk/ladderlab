@@ -259,7 +259,9 @@ function TagsPanel({
   const [tagQuery, setTagQuery] = useState('')
   // 默认按程序段分组：一段一格、可折叠；「全部」保留整表平铺。
   const [view, setView] = useState<'rungs' | 'list'>('rungs')
-  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => new Set())
+  // 手风琴式分组：默认只展开当前选中的程序段（没有选中时展开第一段）。
+  // 用户选择绑定选择范围；换段后自动回到“跟随当前段”，无需 effect 重置。
+  const [groupChoice, setGroupChoice] = useState<{ scopeKey: string; group: string | null } | null>(null)
   const [flashTagId, setFlashTagId] = useState<string | null>(null)
   const [announcement, setAnnouncement] = useState('')
   const flashTimer = useRef<number | null>(null)
@@ -299,6 +301,7 @@ function TagsPanel({
       return {
         id: rung.id,
         key: rungKey(rung.id),
+        index: index + 1,
         title: `程序段 ${index + 1}`,
         label: rung.label.trim(),
         total: tags.length,
@@ -316,31 +319,41 @@ function TagsPanel({
     }))
     .filter((group) => group.local.length > 0 || group.shared.length > 0)
   const queryUnused = unusedTags.filter(matchesQuery)
-  const isOpen = (key: string) => !collapsedGroups.has(key)
-  // 开始搜索时默认全展开，搜索结果不会藏在前一次收起的段里；搜索后仍可手动收起。
+  const selectedRungId = selection?.rungId ?? null
+  const selectedScopeKey = selection
+    ? `${selection.rungId}:${selection.wholeRung ? 'whole' : selection.path?.join('.') ?? ''}`
+    : ''
+  const activeGroupKey = selectedRungId ? rungKey(selectedRungId) : null
+  const autoOpenKey = (activeGroupKey && rungGroups.some((group) => group.key === activeGroupKey)
+    ? activeGroupKey
+    : rungGroups[0]?.key) ?? null
+  const scopedChoice = groupChoice?.scopeKey === selectedScopeKey ? groupChoice.group : undefined
+  const openGroupKey = scopedChoice === undefined ? autoOpenKey : scopedChoice
+  const isSearching = normalizedQuery !== ''
+  const isOpen = (key: string) => {
+    // 搜索时结果全展开，命中的变量不会藏在收起的段里。
+    if (isSearching) return true
+    return key === openGroupKey
+  }
   const updateTagQuery = (value: string) => {
     setTagQuery(value)
-    setCollapsedGroups((current) => (
-      value.trim() === '' || current.size === 0 ? current : new Set()
-    ))
+    // 清空搜索后回到“当前段展开、其余收起”的默认状态。
+    setGroupChoice(null)
   }
   const clearTagQuery = () => {
     updateTagQuery('')
     window.requestAnimationFrame(() => searchInput.current?.focus())
   }
-  const toggleGroup = (key: string) => setCollapsedGroups((current) => {
-    const next = new Set(current)
-    if (next.has(key)) next.delete(key)
-    else next.add(key)
-    return next
-  })
-  const revealTag = (tag: TagDef, ownerKey: string) => {
-    setCollapsedGroups((current) => {
-      if (!current.has(ownerKey)) return current
-      const next = new Set(current)
-      next.delete(ownerKey)
-      return next
+  const toggleGroup = (key: string) => {
+    if (isSearching) return
+    setGroupChoice((current) => {
+      const currentGroup = current?.scopeKey === selectedScopeKey ? current.group : undefined
+      const openNow = currentGroup === undefined ? autoOpenKey : currentGroup
+      return { scopeKey: selectedScopeKey, group: openNow === key ? null : key }
     })
+  }
+  const revealTag = (tag: TagDef, ownerKey: string) => {
+    setGroupChoice({ scopeKey: selectedScopeKey, group: ownerKey })
     // 连续点同一个胶囊也要重新播放高亮动画。
     setFlashTagId(null)
     window.requestAnimationFrame(() => setFlashTagId(tag.id))
@@ -609,10 +622,12 @@ function TagsPanel({
                     className="tag-group-head"
                     aria-expanded={open}
                     aria-controls={groupDomId(group.key)}
+                    aria-label={`${group.title}${group.label !== '' ? '：' + group.label : ''}，${group.total} 个变量`}
                     onClick={() => toggleGroup(group.key)}
                   >
                     <ChevronRightIcon className="tag-group-chevron" size={14} />
-                    <span className="tag-group-title">{group.title}</span>
+                    <span className="tag-group-index" aria-hidden="true">{String(group.index).padStart(2, '0')}</span>
+                    <span className="tag-group-title">程序段</span>
                     {group.label !== '' && <span className="tag-group-label">{group.label}</span>}
                     <span className="tag-group-count">
                       {normalizedQuery === '' ? group.total : `${shown}/${group.total}`}

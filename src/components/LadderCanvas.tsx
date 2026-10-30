@@ -1864,7 +1864,10 @@ function RungSection({
     const target = addedId ? nodes.find((node) => node.dataset.nodeId === addedId) : null
     const focus = target ?? (outputChanged ? output : null)
     if (!focus) return
-    pulseInsertedNode(focus)
+    // 并联分支是一次结构变化：画布上会立刻多出一整块草稿支路，再叠一次
+    // 缩放弹跳和扩散圈会显得突兀。这里只把它带入视野，不加落点动效。
+    const isParallelBranch = focus.classList.contains('ll-parallel')
+    if (!isParallelBranch) pulseInsertedNode(focus)
     revealInserted(container, focus, output && focus !== output ? output : null)
   }, [rung.nodes, rung.output.id])
 

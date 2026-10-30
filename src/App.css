@@ -2882,20 +2882,34 @@
   width: max-content;
   max-width: min(440px, calc(100vw - 32px));
   padding: 8px 13px;
-  border: 1px solid var(--frame-ink);
+  border: 1px solid var(--control);
   border-radius: var(--radius-control);
-  background: var(--frame-ink);
-  color: var(--surface);
+  background: var(--surface);
+  box-shadow: 0 6px 20px rgba(21, 24, 22, 0.12);
+  color: var(--text);
   font-size: 11.5px;
   line-height: 1.45;
   text-align: center;
   transform: translateX(-50%);
 }
 
+.toast::before {
+  content: '';
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
 .toast.is-error {
   border-color: var(--warning);
   background: var(--warning-wash);
   color: var(--warning);
+}
+
+.toast.is-error::before {
+  background: var(--warning);
 }
 
 .toast-message {
