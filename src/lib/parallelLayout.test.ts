@@ -21,16 +21,16 @@ describe('parallelBranchOffsets', () => {
     expect(offsets).toEqual([0, 67, 134])
   })
 
-  it('measures mixed layouts from the previous branch height', () => {
+  it('uses one pitch across a mixed-height parallel group', () => {
     const offsets = parallelBranchOffsets(
       [{ height: 92 }, { height: 176 }, { height: 92 }],
       metrics,
     )
 
-    expect(offsets).toEqual([0, 100, 284])
+    expect(offsets).toEqual([0, 184, 368])
   })
 
-  it('does not collapse a tall first branch into the next branch', () => {
+  it('keeps the same pitch when the tallest branch comes first', () => {
     const offsets = parallelBranchOffsets(
       [{ height: 176 }, { height: 92 }],
       metrics,

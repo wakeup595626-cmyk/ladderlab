@@ -25,23 +25,21 @@ export function compactContactHitHeight(metrics: ParallelSpacingMetrics): number
 }
 
 /**
- * 并联支路只按“上一支路的真实高度 + 间距”自然排布；所有支路都是标准
- * 触点高度时改用紧凑节距。自然排布必须读取上一支路，不能读取正在落位
- * 的这一条，否则含指令框的混合组会在其后突然回缩。
+ * 并联支路统一用同一个节距。全是标准触点时取紧凑节距；混有更高的嵌套
+ * 分支时，所有相邻行都按最高支路 + 间距落位，不能忽宽忽窄。
  */
 export function parallelBranchOffsets(
   branches: readonly ParallelBranchHeight[],
   metrics: ParallelSpacingMetrics,
 ): number[] {
   const compact = hasCompactParallelPitch(branches, metrics)
+  const pitch = compact
+    ? metrics.parallelPitch
+    : Math.max(0, ...branches.map((branch) => branch.height)) + metrics.parallelGap
   const offsets: number[] = []
   let y = 0
   branches.forEach((_, index) => {
-    if (index > 0) {
-      y += compact
-        ? metrics.parallelPitch
-        : branches[index - 1].height + metrics.parallelGap
-    }
+    if (index > 0) y += pitch
     offsets.push(y)
   })
   return offsets

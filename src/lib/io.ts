@@ -8,6 +8,7 @@ import type {
 } from '../engine/types'
 import { contentRungs, ensureTrailingBlankRung } from '../engine/rungInvariant'
 import { normalizeBitAddress, normalizeByteAddress, splitReference } from '../engine/references'
+import { normalizeLadderChain } from '../engine/ladderStructure'
 import { FIELD_LIMITS, programTextFieldIssues, utf8ByteLength } from './limits'
 
 const CONTACT_KINDS: ContactKind[] = ['NO', 'NC', 'P', 'N', 'CMP']
@@ -484,7 +485,7 @@ function parseProgramValue(input: unknown, strict: boolean): ParsedProgramStruct
       : '未命名项目',
     profile,
     tags: parsedTags,
-    rungs: parsedRungs,
+    rungs: parsedRungs.map((rung) => ({ ...rung, nodes: normalizeLadderChain(rung.nodes) })),
   })
   const content = contentRungs(normalized)
   if (content.length > MAX_RUNGS) fail(RUNG_LIMIT_MESSAGE)

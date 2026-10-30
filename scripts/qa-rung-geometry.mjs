@@ -29,7 +29,7 @@ const PROGRAM = {
   schema: 1,
   name: '几何验收',
   profile: 'v14',
-  tags: ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'T1', 'T2', 'T3', 'Start', 'Lane1', 'Lane2', 'Lane3', 'Lane4', 'Lane5', 'Lane6', 'Q1', 'Q2', 'Q3', 'Q4', 'Q5', 'Q6']
+  tags: ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'T1', 'T2', 'T3', 'N1', 'N2', 'N3', 'N4', 'N5', 'Start', 'Lane1', 'Lane2', 'Lane3', 'Lane4', 'Lane5', 'Lane6', 'Q1', 'Q2', 'Q3', 'Q4', 'Q5', 'Q6', 'Q7']
     .map((name, index) => tag(name, `%M${index}.0`, name)),
   rungs: [
     rung('r1', [no('A'), no('B')], coil('Q1')),
@@ -47,6 +47,15 @@ const PROGRAM = {
       ],
     }], coil('Q5')),
     rung('r6', [no('T1'), cmp('T2'), nc('T3')], coil('Q6')),
+    rung('r7', [{
+      type: 'parallel',
+      id: 'p-nested',
+      branches: [
+        [no('N1'), no('N2')],
+        [{ type: 'parallel', id: 'p-inner', branches: [[no('N3')], [nc('N4')]] }],
+        [no('N5')],
+      ],
+    }], coil('Q7')),
   ],
 }
 
@@ -197,6 +206,31 @@ check(
   parallelColumns.every((centers) => Math.max(...centers) - Math.min(...centers) <= PITCH_TOLERANCE),
   '并联各支路同序号元件应落在同一列',
   { parallelColumns },
+)
+
+const nested = byId.r7.contacts
+const nestedFirstColumn = [nested[0], nested[2], nested[3], nested[4]]
+const nestedFirstColumnLefts = nestedFirstColumn
+  .map((contact) => contact?.left)
+  .filter(Number.isFinite)
+const nestedRowYs = nestedFirstColumn
+  .map((contact) => contact?.centerY)
+  .filter(Number.isFinite)
+check(
+  'nested-columns',
+  nestedFirstColumnLefts.length === 4
+    && Math.max(...nestedFirstColumnLefts) - Math.min(...nestedFirstColumnLefts) <= PITCH_TOLERANCE,
+  '只包着一层并联的冗余嵌套应摊平到同一级，首列不能左右缩进',
+  { nestedFirstColumnLefts },
+)
+const nestedSpacing = stats(nestedRowYs)
+check(
+  'nested-row-pitch',
+  nestedRowYs.length === 4
+    && nestedSpacing.gaps.length >= 2
+    && nestedSpacing.spread <= PITCH_TOLERANCE,
+  '嵌套摊平后的所有支路应使用同一纵向节距',
+  { nestedRowYs, gaps: nestedSpacing.gaps },
 )
 
 const report = {

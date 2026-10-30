@@ -13,6 +13,7 @@ import type {
 import { uid } from '../lib/uid'
 import { FIELD_LIMITS, withinFieldLimit } from '../lib/limits'
 import { isBlankRung } from '../engine/rungInvariant'
+import { normalizeLadderChain } from '../engine/ladderStructure'
 import {
   byteAddressLength,
   normalizeBitAddress,
@@ -402,28 +403,7 @@ function withRung(program: Program, rungId: string, update: (rung: Rung) => Rung
 }
 
 function sanitizeChain(chain: LadderNode[]): LadderNode[] {
-  const next: LadderNode[] = []
-  for (const node of chain) {
-    if (node.type === 'parallel') {
-      const branches = node.branches.map(sanitizeChain)
-      if (node.open === true) {
-        // 未闭合分支是「还在画」的状态：空支路必须保留，否则草稿支路会
-        // 在每次插入后被清掉，右侧的「合并分支」也就没有落点了。
-        next.push({ ...node, branches: branches.length >= 2 ? branches : [...branches, []] })
-        continue
-      }
-      const kept = branches.filter((branch) => branch.length > 0)
-      if (kept.length === 0) continue
-      if (kept.length === 1) {
-        next.push(...kept[0])
-        continue
-      }
-      next.push({ ...node, branches: kept })
-    } else {
-      next.push(node)
-    }
-  }
-  return next
+  return normalizeLadderChain(chain)
 }
 
 function isChainPath(path: number[]): boolean {
