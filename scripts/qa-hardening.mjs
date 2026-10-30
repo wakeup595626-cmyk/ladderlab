@@ -326,6 +326,7 @@ try {
     recovery: Boolean(document.querySelector('.recovery-banner')),
     contacts: document.querySelectorAll('.ll-contact').length,
     parallels: document.querySelectorAll('.ll-parallel').length,
+    branches: document.querySelectorAll('[data-parallel-branch-side="right"]').length,
     width: document.querySelector('.ll-rung')?.getBoundingClientRect().width ?? 0,
   }))()`)
   check('deep/32-valid-mounts', depth32Render.name === depth32.name && !depth32Render.recovery, {
@@ -333,7 +334,12 @@ try {
     ...depth32Render,
   })
   check('deep/32-valid-within-3s', depth32Open.elapsedMs < 3000, { elapsedMs: depth32Open.elapsedMs })
-  check('deep/32-renders-full-tree', depth32Render.contacts === 33 && depth32Render.parallels === 32, depth32Render)
+  // 32 层“并联套并联”是等价的大 OR，渲染层会主动摊平成 1 组 33 条支路。
+  check(
+    'deep/32-renders-full-tree',
+    depth32Render.contacts === 33 && depth32Render.parallels === 1 && depth32Render.branches === 33,
+    depth32Render,
+  )
 
   const depth33 = deepParallelProgram(33, '深度 33 层非法工程')
   const depth33Open = await page.injectAndOpen(depth33, 'depth-33')

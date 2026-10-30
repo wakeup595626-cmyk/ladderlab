@@ -936,7 +936,7 @@ check(
 )
 
 // 博途式并联：每条支路有自己的水平线，末端进入同一根汇合竖线。
-// 嵌套在最外层支路首尾的并联，必须与外层共用同一根左侧分叉竖线和右侧汇合竖线。
+// 基础并联布线在这里覆盖；嵌套列对齐由 qa:rung-geometry 的注入工程单独覆盖。
 const parallelGeometry = await evaluate(`(() => {
   const groups = [...document.querySelectorAll('.ll-parallel')]
   return groups.map((group) => {
@@ -1010,7 +1010,7 @@ const parallelGeometry = await evaluate(`(() => {
 const parallelLayers = parallelGeometry.filter((group) => group.branches >= 2)
 check(
   'desktop/parallel-has-separate-branch-lanes',
-  parallelLayers.length >= 2
+  parallelLayers.length >= 1
     && parallelLayers.every((group) => new Set(group.ys).size === group.branches)
     && parallelLayers.every((group) => group.spans.every((span) => span > 4))
     && parallelLayers.every((group) => group.splitXSpread !== null && group.splitXSpread < 1)
@@ -1019,40 +1019,20 @@ check(
 )
 check(
   'desktop/parallel-columns-share-same-x',
-  parallelLayers.length >= 2
+  parallelLayers.length >= 1
     && parallelLayers.every((group) => group.columnSpreads.every((spread) => spread < 1.5))
     && parallelLayers.some((group) => group.columnSpreads.length > 0),
   parallelGeometry,
 )
 check(
-  'desktop/nested-parallel-shares-outer-left-split-column',
-  parallelLayers.some((group) => group.splitInherited)
-    && parallelLayers
-      .filter((group) => group.splitInherited)
-      .every((group) => group.parentSplitX !== null
-        && group.splitX !== null
-        && Math.abs(group.splitX - group.parentSplitX) <= 1.5),
-  parallelGeometry,
-)
-check(
-  'desktop/nested-parallel-first-column-aligns-with-outer-branch',
-  parallelLayers.some((group) => group.splitInherited
-    && group.firstColumnX !== null
-    && group.parentFirstColumnX !== null)
-    && parallelLayers
-      .filter((group) => group.splitInherited)
-      .every((group) => group.firstColumnX === null
-        || group.parentFirstColumnX === null
-        || Math.abs(group.firstColumnX - group.parentFirstColumnX) <= 1.5),
-  parallelGeometry,
-)
-check(
-  'desktop/nested-parallel-shares-outer-merge-column',
-  parallelLayers.some((group) => group.mergeInherited)
-    && parallelLayers
-      .filter((group) => group.mergeInherited)
-      .every((group) => group.parentJoinX !== null
-        && Math.abs(group.joinX - group.parentJoinX) <= 1.5),
+  'desktop/parallel-branch-row-pitch-is-even',
+  parallelLayers.length >= 1 && parallelLayers.every((group) => {
+    const sorted = [...group.ys].sort((a, b) => a - b)
+    if (sorted.length < 2) return false
+    const pitch = sorted[1] - sorted[0]
+    return pitch > 0
+      && sorted.slice(2).every((y, index) => Math.abs((y - sorted[index + 1]) - pitch) < 1.5)
+  }),
   parallelGeometry,
 )
 await screenshot('docs/qa/desktop-parallel-standard.png')
@@ -1066,6 +1046,7 @@ await pressEscape()
 const parallelBeforeDelete = await evaluate(`({
   nodes: document.querySelectorAll('.ll-node[data-node-id]').length,
   parallels: document.querySelectorAll('.ll-parallel').length,
+  branches: document.querySelectorAll('[data-parallel-branch-side="right"]').length,
 })`)
 await evaluate(`document.querySelector('.ll-parallel .ll-contact')
   ?.dispatchEvent(new MouseEvent('click', { bubbles: true }))`)
@@ -1076,13 +1057,16 @@ await sleep(440)
 const collapsedParallel = await evaluate(`({
   nodes: document.querySelectorAll('.ll-node[data-node-id]').length,
   parallels: document.querySelectorAll('.ll-parallel').length,
+  branches: document.querySelectorAll('[data-parallel-branch-side="right"]').length,
   undo: !!document.querySelector('.toast-action'),
 })`)
 check(
   'desktop/parallel-collapse-delete',
   parallelBeforeDelete.parallels >= 1
-    && collapsedParallel.parallels === parallelBeforeDelete.parallels - 1
-    && collapsedParallel.nodes < parallelBeforeDelete.nodes
+    && parallelBeforeDelete.branches >= 3
+    && collapsedParallel.parallels === parallelBeforeDelete.parallels
+    && collapsedParallel.branches === parallelBeforeDelete.branches - 1
+    && collapsedParallel.nodes === parallelBeforeDelete.nodes - 1
     && collapsedParallel.undo,
   { parallelBeforeDelete, collapsedParallel },
 )
@@ -1091,6 +1075,7 @@ await sleep(440)
 const restoredParallel = await evaluate(`({
   nodes: document.querySelectorAll('.ll-node[data-node-id]').length,
   parallels: document.querySelectorAll('.ll-parallel').length,
+  branches: document.querySelectorAll('[data-parallel-branch-side="right"]').length,
   selected: document.querySelectorAll('.ll-contact.is-selected').length,
   toast: document.querySelector('.toast-message')?.textContent?.trim() ?? null,
 })`)
@@ -1098,6 +1083,7 @@ check(
   'desktop/parallel-collapse-undo-restores',
   restoredParallel.nodes === parallelBeforeDelete.nodes
     && restoredParallel.parallels === parallelBeforeDelete.parallels
+    && restoredParallel.branches === parallelBeforeDelete.branches
     && restoredParallel.selected === 1
     && String(restoredParallel.toast ?? '').includes('已恢复'),
   restoredParallel,

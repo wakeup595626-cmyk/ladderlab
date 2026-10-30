@@ -342,7 +342,7 @@ describe('SFC 结构不变量 · 已知缺陷台账（只允许减少，不允�
     expect(offenders.filter((entry) => !INITIAL_LEDGER.has(entry))).toEqual([])
   })
 
-  // TODO(护栏转正)：台账清空后把下面两个 skip 打开，strict 规则才真正生效。
+  // 严格规则已转正并直接执行；台账仅用于把新出现的违规精确归因到工程。
   it('【严格】任何一张图都不许出现自环', () => {
     const offenders = CORPUS.flatMap((item) => {
       const chart = buildSfc(item.program)

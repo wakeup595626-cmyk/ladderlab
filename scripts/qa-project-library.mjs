@@ -287,9 +287,19 @@ check(
 
 await click('.wb-file-button[aria-label="新建空白工程"]')
 await sleep(260)
-await click('.confirm-ok')
-await sleep(500)
-await sleep(800)
+const newProjectPrompt = await evaluate(`({
+  open: !!document.querySelector('#new-project-name'),
+  defaultName: document.querySelector('#new-project-name')?.value ?? null,
+})`)
+check(
+  'desktop/new-project-dialog-defaults',
+  newProjectPrompt.open && newProjectPrompt.defaultName === '未命名工程',
+  newProjectPrompt,
+)
+await fill('#new-project-name', '质检新建工程')
+await sleep(100)
+await click('.project-import-confirm')
+await sleep(900)
 const newProjectState = await evaluate(`({
   name: document.querySelector('#project-name')?.value ?? null,
   active: sessionStorage.getItem('ladderlab.library.v1.active'),
@@ -297,7 +307,9 @@ const newProjectState = await evaluate(`({
 })`)
 check(
   'desktop/new-project-available',
-  newProjectState.name === '未命名项目' && !newProjectState.active,
+  newProjectState.name === '质检新建工程'
+    && !newProjectState.active
+    && String(newProjectState.toast ?? '').includes('质检新建工程'),
   newProjectState,
 )
 await click('.wb-save-button')
@@ -308,7 +320,7 @@ const newProjectDialog = await evaluate(`({
 })`)
 check(
   'desktop/new-project-save-dialog-uses-blank-name',
-  newProjectDialog.open && newProjectDialog.suggestedName === '未命名项目',
+  newProjectDialog.open && newProjectDialog.suggestedName === '质检新建工程',
   newProjectDialog,
 )
 await click('.project-import-back')

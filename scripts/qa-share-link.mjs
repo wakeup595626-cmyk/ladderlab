@@ -88,7 +88,7 @@ try {
   const beforeName = await evaluate(`document.querySelector('#project-name')?.value ?? null`)
   check(beforeName !== program.name, '起始工程不应已经是分享的那份', beforeName)
 
-  // 1. 带分享链接打开：应当先弹窗，地址栏里的载荷已经被抹掉。
+  // 1. 带分享链接打开：确认前保留载荷，刷新时还能再次看到同一个确认窗。
   await send('Page.navigate', { url: 'about:blank' })
   await send('Page.navigate', { url: shareUrl })
   await waitFor('!!document.querySelector(".wb-topbar")', '页面加载')
@@ -98,7 +98,7 @@ try {
   check(first.title.includes(program.name), '弹窗标题应提到工程名', first.title)
   check(first.description.includes('段梯形图'), '弹窗应说明程序段数量', first.description)
   check(first.confirm === '导入' && first.cancel === '先不导入', '按钮文案', first)
-  check(afterOpen.hash === '', '打开后应清掉地址里的载荷', afterOpen.hash)
+  check(afterOpen.hash === shareHash, '确认前应保留地址里的载荷', afterOpen.hash)
   steps.push({ step: '打开分享链接', dialog: first.title, hash: afterOpen.hash })
 
   // 需要截图时（LADDERLAB_QA_SHOT=文件路径）顺手存一张，方便贴到说明或文档里。
@@ -112,6 +112,7 @@ try {
   await waitFor('!document.querySelector(".confirm-dialog")', '弹窗关闭')
   const afterCancel = await evaluate(appState)
   check(afterCancel.projectName === beforeName, '取消后工程应保持原样', { beforeName, after: afterCancel.projectName })
+  check(afterCancel.hash === '', '取消后才清掉地址里的载荷', afterCancel.hash)
   steps.push({ step: '点击先不导入', projectName: afterCancel.projectName })
 
   // 3. 再次打开并确认：工程真的进来了。
@@ -123,6 +124,7 @@ try {
   const afterImport = await evaluate(appState)
   check(afterImport.projectName === program.name, '确认后应导入分享的工程', afterImport.projectName)
   check((afterImport.toast ?? '').includes(program.name), '导入后应有提示', afterImport.toast)
+  check(afterImport.hash === '', '导入完成后应清掉地址里的载荷', afterImport.hash)
   steps.push({ step: '点击导入', projectName: afterImport.projectName, toast: afterImport.toast })
 
   // 导入完成后的成品画面（LADDERLAB_QA_SHOT_IMPORTED=文件路径），用来做交付截图。
@@ -140,6 +142,7 @@ try {
   check(badDialog === null, '坏链接不应弹出导入窗', badDialog)
   check(bad.projectName === program.name, '坏链接不应改动当前工程', bad.projectName)
   check(typeof bad.toast === 'string' && bad.toast.length > 0, '坏链接应有提示', bad.toast)
+  check(String(bad.hash).startsWith('#p=1.'), '坏链接应保留载荷，便于用户重新复制或修正', bad.hash)
   steps.push({ step: '打开损坏的链接', projectName: bad.projectName, toast: bad.toast })
 
   // 5. 反向：导出菜单里的“复制分享链接”要能拿到当前工程的地址。

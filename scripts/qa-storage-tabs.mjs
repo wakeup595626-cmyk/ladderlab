@@ -645,9 +645,9 @@ try {
 
   // 8. 未命名草稿 projectId=null，也不能覆盖一个命名项目。
   await pageA.click('.wb-file-button[aria-label="新建空白工程"]')
-  await pageA.waitFor("!!document.querySelector('.confirm-dialog')", 'A 新建确认')
-  await pageA.click('.confirm-ok')
-  await pageA.waitFor("!document.querySelector('.confirm-dialog')", 'A 新建完成')
+  await pageA.waitFor("!!document.querySelector('#new-project-name')", 'A 新建工程对话框')
+  await pageA.click('.project-import-confirm')
+  await pageA.waitFor("!document.querySelector('#new-project-name')", 'A 新建完成')
   await pageA.rename('未命名草稿不能串稿')
   await pageA.evaluate("window.dispatchEvent(new PageTransitionEvent('pagehide')); true")
   await sleep(350)

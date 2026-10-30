@@ -280,15 +280,25 @@ await clickSelector('.wb-save-button')
 const corruptDialogOpen = await waitUntil(() => evaluate("Boolean(document.querySelector('.save-project-dialog'))"), 2500)
 const corruptResult = await evaluate(`(() => ({
   dialogOpen: Boolean(document.querySelector('.save-project-dialog')),
-  exportText: document.querySelector('.save-project-confirm')?.textContent?.trim() ?? '',
-  exportDisabled: Boolean(document.querySelector('.save-project-confirm')?.disabled),
+  exportText: [...document.querySelectorAll('.save-project-dialog button')]
+    .find((button) => button.textContent?.includes('导出工程 JSON'))?.textContent?.trim() ?? '',
+  exportDisabled: Boolean([...document.querySelectorAll('.save-project-dialog button')]
+    .find((button) => button.textContent?.includes('导出工程 JSON'))?.disabled),
+  mainText: document.querySelector('.save-project-confirm')?.textContent?.trim() ?? '',
+  mainDisabled: Boolean(document.querySelector('.save-project-confirm')?.disabled),
   inputDisabled: Boolean(document.querySelector('#save-project-name')?.disabled),
+  warning: document.querySelector('.save-project-warning')?.textContent?.replace(/\\s+/g, ' ').trim() ?? '',
   message: document.querySelector('.save-project-dialog')?.textContent ?? '',
 }))()`)
 check('corrupt/click-opens-recovery-dialog', corruptDialogOpen, corruptResult)
 check(
   'corrupt/export-action-is-available',
-  corruptResult.exportText.includes('导出工程 JSON') && !corruptResult.exportDisabled && corruptResult.inputDisabled,
+  corruptResult.exportText.includes('导出工程 JSON')
+    && !corruptResult.exportDisabled
+    && corruptResult.warning.includes('导出工程 JSON')
+    && !corruptResult.inputDisabled
+    && corruptResult.mainText === '保存到项目库'
+    && !corruptResult.mainDisabled,
   corruptResult,
 )
 await screenshot('docs/qa/save-button-corrupt-library.png')
