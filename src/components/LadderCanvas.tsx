@@ -148,6 +148,8 @@ interface LadderMetrics {
   contactH: number
   contactLineY: number
   compareW: number
+  /** 触点栅格的单列宽度。常开、常闭和比较触点都占同一列，中心节距才稳定。 */
+  contactColumnW: number
   coilW: number
   coilH: number
   coilLineY: number
@@ -187,6 +189,7 @@ const DEFAULT_METRICS: LadderMetrics = {
   contactH: 92,
   contactLineY: 50,
   compareW: 180,
+  contactColumnW: 180,
   coilW: 112,
   coilH: 92,
   coilLineY: 50,
@@ -220,6 +223,7 @@ const COMPACT_METRICS: LadderMetrics = {
   contactH: 92,
   contactLineY: 50,
   compareW: 128,
+  contactColumnW: 128,
   coilW: 74,
   coilH: 92,
   coilLineY: 50,
@@ -322,6 +326,17 @@ function outputSize(output: OutputElement, m: LadderMetrics): Size {
     : { width: m.boxW, height: m.boxH, lineY: m.boxLineY }
 }
 
+/** 触点共用一个固定列宽；比较触点更宽，也不会把后续元件推远。 */
+function nodeLayoutWidth(
+  node: LadderNode,
+  m: LadderMetrics,
+  memo: LayoutMemo,
+): number {
+  return node.type === 'contact'
+    ? m.contactColumnW
+    : measureNode(node, m, memo).width
+}
+
 /** 同一并联组内按列取最宽元件，保证每条支路的同序号元件落在同一 X 上。 */
 function chainColumnWidths(
   chains: LadderNode[][],
@@ -331,7 +346,7 @@ function chainColumnWidths(
   const depth = Math.max(0, ...chains.map((chain) => chain.length))
   return Array.from({ length: depth }, (_, index) => Math.max(
     0,
-    ...chains.map((chain) => chain[index] ? measureNode(chain[index], m, memo).width : 0),
+    ...chains.map((chain) => chain[index] ? nodeLayoutWidth(chain[index], m, memo) : 0),
   ))
 }
 
@@ -354,7 +369,7 @@ function measureChain(
   let bottom = 0
   for (const [index, node] of chain.entries()) {
     const size = measureNode(node, m, memo)
-    nodeWidth += columnWidths?.[index] ?? size.width
+    nodeWidth += columnWidths?.[index] ?? nodeLayoutWidth(node, m, memo)
     top = Math.max(top, size.lineY)
     bottom = Math.max(bottom, size.height - size.lineY)
   }
@@ -1024,7 +1039,8 @@ function renderChain(
     cursorX += m.slotW
 
     const nodeSize = measureNode(node, m, measureMemo)
-    const columnWidth = columnWidths?.[index] ?? nodeSize.width
+    const columnWidth = columnWidths?.[index] ?? nodeLayoutWidth(node, m, measureMemo)
+    const nodeOffsetX = (columnWidth - nodeSize.width) / 2
     const nodeY = size.lineY - nodeSize.lineY
     const inheritedMerge = index === chain.length - 1 && node.type === 'parallel'
       ? mergeColumn
@@ -1038,18 +1054,26 @@ function renderChain(
         data-chain-node-index={index}
         transform={'translate(' + cursorX + ', ' + nodeY + ')'}
       >
-        {renderNode(
-          node,
-          context,
-          [...chainPath, index],
-          currentPower,
-          inheritedMerge === undefined ? undefined : inheritedMerge - cursorX,
-          inheritedSplit === undefined ? undefined : inheritedSplit - cursorX,
+        {nodeOffsetX > 0 && (
+          <path
+            className={'ll-wire' + (currentPower ? ' is-on' : '')}
+            d={'M 0 ' + nodeSize.lineY + ' H ' + nodeOffsetX}
+          />
         )}
+        <g transform={'translate(' + nodeOffsetX + ', 0)'}>
+          {renderNode(
+            node,
+            context,
+            [...chainPath, index],
+            currentPower,
+            inheritedMerge === undefined ? undefined : inheritedMerge - cursorX - nodeOffsetX,
+            inheritedSplit === undefined ? undefined : inheritedSplit - cursorX - nodeOffsetX,
+          )}
+        </g>
         {columnWidth > nodeSize.width && (
           <path
             className={'ll-wire' + (context.runtime.nodePower[node.id] === true ? ' is-on' : '')}
-            d={'M ' + nodeSize.width + ' ' + nodeSize.lineY
+            d={'M ' + (nodeOffsetX + nodeSize.width) + ' ' + nodeSize.lineY
               + ' H ' + columnWidth}
           />
         )}
@@ -1635,7 +1659,9 @@ function measureRung(
     : chainX + chain.width + m.chainToOutput
       + output.width + m.outputToRail + m.railRight
   const width = Math.max(m.minWidth, naturalWidth, Math.ceil(availableWidth))
-  const top = Math.max(chain.lineY, output.lineY)
+  // 主线路固定在图框内的同一高度：含指令框的程序段不会把整段触点压低，
+  // 相邻程序段的元件才能落在同一条水平线上。
+  const top = Math.max(m.contactLineY, m.coilLineY, m.boxLineY)
   const bottom = Math.max(chain.height - chain.lineY, output.height - output.lineY)
   const height = top + bottom + 22
   const centerY = top + 11

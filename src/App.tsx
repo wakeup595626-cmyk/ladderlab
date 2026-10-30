@@ -1856,20 +1856,24 @@ export default function App() {
     () => resolveSlotInsertTarget(program, insertCursor),
     [insertCursor, program],
   )
-  const fallbackInsertTarget = useMemo(
+  // 只用于「定位」预览：把图纸滚到某一段并标出段末，不授予插入权限。
+  // 收藏指令的落点必须来自图纸上点过的「+」，否则会悄悄插进别的程序段。
+  const suggestedInsertTarget = useMemo(
     () => resolveFavoriteInsertTarget(program, selection, favoriteTargetRungId),
     [favoriteTargetRungId, program, selection],
   )
-  const insertTarget = cursorInsertTarget ?? fallbackInsertTarget
-  const activeRungId = insertTarget?.rungId ?? null
+  const insertTarget = cursorInsertTarget
+  const activeRungId = insertTarget?.rungId ?? selection?.rungId ?? null
   const targetAnchorLabel = useMemo(
-    () => describeFavoriteInsertTarget(program, insertTarget),
+    () => (insertTarget
+      ? describeFavoriteInsertTarget(program, insertTarget)
+      : '未选插入位 · 先在图纸点 +'),
     [insertTarget, program],
   )
   // 落点标记只在切换程序段或点「定位」后短暂出现；平时线路保持干净。
   // 顶部“· 段末 / 某个触点后”的文字始终保留，不靠高亮也能确认落点。
   const visibleInsertTarget = cursorInsertTarget
-    ?? (favoriteTargetPreview ? fallbackInsertTarget : null)
+    ?? (favoriteTargetPreview ? suggestedInsertTarget : null)
 
   const scrollFavoriteTargetIntoView = useCallback((rungId: string) => {
     window.requestAnimationFrame(() => {
@@ -1926,22 +1930,24 @@ export default function App() {
   const selectFavoriteTargetRung = useCallback((rungId: string) => {
     const rung = program.rungs.find((item) => item.id === rungId)
     if (!rung) return
-    // 换程序段时清掉元件选择，收藏触点就落在该段段末；
-    // 高亮只闪一下，之后顶部仍保留目标文字，不妨碍看线路。
+    // 下拉只负责“带我看看这一段”：清掉之前的落点，滚到该段并闪一下段末。
+    // 真正的插入权限仍然只来自图纸上点过的 +，避免收藏指令落到没看过的地方。
     setSelection(null)
     setInsertCursor(null)
     setFavoriteTargetRungId(rungId)
     setQuickEdit(null)
     revealFavoriteInsertTarget(rungId)
-  }, [program, revealFavoriteInsertTarget])
+    notify('已定位到' + rungSegmentLabel(program, rungId) + '：点图纸上的 + 选择插入位')
+  }, [notify, program, revealFavoriteInsertTarget])
 
   const locateFavoriteTarget = useCallback(() => {
-    if (!insertTarget) return
+    const target = insertTarget ?? suggestedInsertTarget
+    if (!target) return
     // 抽屉（手机全屏、桌面居中模态）会盖住线路：先收起它，再滚动并高亮落点，
     // 否则用户点完「定位」只看到抽屉，提示在背后两秒就消失了。
     setMobilePanel('none')
-    revealFavoriteInsertTarget(insertTarget.rungId)
-  }, [insertTarget, revealFavoriteInsertTarget])
+    revealFavoriteInsertTarget(target.rungId)
+  }, [insertTarget, revealFavoriteInsertTarget, suggestedInsertTarget])
 
   const openInspector = (tab: InspectorTab) => {
     setInspectorTab(tab)
@@ -2033,7 +2039,7 @@ export default function App() {
     }
 
     if (!insertTarget) {
-      notify('请先选择一个程序段，再插入触点')
+      notify('请先在图纸上点 + 选择插入位，再点收藏指令')
       return
     }
 
@@ -2133,10 +2139,10 @@ export default function App() {
     notify('并联分支已闭合')
   }, [commit, notify, program])
 
-  /** 收藏条上的「分支」：以当前游标（或选择推算出的落点）作为分叉点。 */
+  /** 收藏条上的「分支」：只认图纸上点过的 +，不再按选择猜落点。 */
   const openBranchFromBar = useCallback(() => {
     if (!insertTarget) {
-      notify('请先选择一个程序段和插入位置')
+      notify('请先在图纸上点 + 选择分叉位置，再点「分支」')
       return
     }
     openBranchAt({
@@ -2148,17 +2154,19 @@ export default function App() {
 
   /** 收藏条上的「合并」：让画布进入主线取点状态，点「合」完成闭合。 */
   const mergeBranchFromBar = useCallback(() => {
-    const rungId = insertTarget?.rungId ?? selection?.rungId ?? null
-    const rung = rungId ? program.rungs.find((item) => item.id === rungId) : null
-    if (!rung) {
-      notify('请先选择要闭合分支的程序段')
+    if (!insertTarget) {
+      notify('请先在图纸上点 + 选择要合并的程序段，再点「合并」')
       return
     }
-    // 嵌套分支时优先闭合包含当前游标的那一层；游标不在任何未闭合
-    // 分支里（或还没设落点）才退回第一条，保持原来的行为。
-    const parallelPath = (insertTarget && insertTarget.rungId === rung.id
-      ? findOpenBranchPathForChain(rung.nodes, insertTarget.chain)
-      : null) ?? findOpenBranchPath(rung.nodes)
+    const rung = program.rungs.find((item) => item.id === insertTarget.rungId) ?? null
+    if (!rung) {
+      notify('目标程序段已经不存在，请重新点 + 选择')
+      return
+    }
+    // 嵌套分支时优先闭合包含当前游标的那一层；游标落在主线上时
+    // 才退回该程序段的第一条未闭合分支。
+    const parallelPath = findOpenBranchPathForChain(rung.nodes, insertTarget.chain)
+      ?? findOpenBranchPath(rung.nodes)
     if (!parallelPath) {
       notify('这一段没有待合并的分支：先点元件旁的 +，选择「打开分支」')
       return
@@ -2166,7 +2174,7 @@ export default function App() {
     setMergeArmed({ rungId: rung.id, parallelPath })
     setMobilePanel('none')
     notify('请点主线上标「合」的 + 选择合并位置')
-  }, [insertTarget, notify, program, selection])
+  }, [insertTarget, notify, program])
 
   const removeNode = useCallback((rungId: string, path: number[]) => {
     const rung = program.rungs.find((item) => item.id === rungId)
@@ -2238,7 +2246,7 @@ export default function App() {
 
   const changeOutput = (kind: OutputKind, targetRungId = insertTarget?.rungId ?? null) => {
     if (!targetRungId) {
-      notify('请先选择一个程序段，再选择输出指令')
+      notify('请先在图纸上点 + 选择程序段，再选输出指令')
       return
     }
 

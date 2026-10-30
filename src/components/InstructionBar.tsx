@@ -108,9 +108,7 @@ export default function InstructionBar({
     .map((id) => favoriteInstructionEntry(id))
     .filter((entry) => entry !== undefined)
   const favoriteKeys = favorites.map((entry) => favoriteInstructionId(entry.family, entry.kind))
-  const segmentLabel = insertTarget
-    ? favoriteTargetSegmentLabel(insertTarget)
-    : '目标程序段'
+  const segmentLabel = insertTarget ? favoriteTargetSegmentLabel(insertTarget) : ''
 
   const favoriteKey = favoriteIds.join('|')
 
@@ -286,8 +284,12 @@ export default function InstructionBar({
             const shortLabel = SHORT_LABELS[id] ?? entry.label
             const allowed = isInstructionAllowed(profile, entry)
             const placement = entry.family === 'output'
-              ? '点击替换' + segmentLabel + '的输出，也可拖动'
-              : '点击插入到' + segmentLabel + '，' + targetAnchorLabel + '，也可拖动'
+              ? (insertTarget
+                  ? '点击替换' + segmentLabel + '的输出，也可拖动'
+                  : '请先在图纸上点 + 选择程序段，再替换输出')
+              : (insertTarget
+                  ? '点击插入到' + segmentLabel + '，' + targetAnchorLabel + '，也可拖动'
+                  : '请先在图纸上点 + 选择插入位，再点这里')
             return (
               <div
                 className={[

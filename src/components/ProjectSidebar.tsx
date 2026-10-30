@@ -65,7 +65,7 @@ export default function ProjectSidebar({
 }: ProjectSidebarProps) {
   const [query, setQuery] = useState('')
   const activeProfile = getProfile(profile)
-  const segmentLabel = insertTarget ? favoriteTargetSegmentLabel(insertTarget) : '目标程序段'
+  const segmentLabel = insertTarget ? favoriteTargetSegmentLabel(insertTarget) : ''
   const normalizedQuery = query.trim().toLocaleLowerCase()
   const visibleInstructions = normalizedQuery
     ? INSTRUCTIONS.filter((entry) =>
@@ -180,8 +180,12 @@ export default function ProjectSidebar({
               const id = favoriteInstructionId(entry.family, entry.kind)
               const isFavorite = favoriteIds.includes(id)
               const placement = entry.family === 'output'
-                ? '点击替换' + segmentLabel + '的输出'
-                : '点击插入到' + segmentLabel + ' · ' + targetAnchorLabel
+                ? (insertTarget
+                    ? '点击替换' + segmentLabel + '的输出'
+                    : '请先在图纸上点 + 选择程序段，再替换输出')
+                : (insertTarget
+                    ? '点击插入到' + segmentLabel + ' · ' + targetAnchorLabel
+                    : '请先在图纸上点 + 选择插入位，再点这里')
               const title = allowed
                 ? entry.detail + '。' + placement + '，也可拖动'
                 : `${entry.label}在 ${activeProfile.shortName} 指令集中不可用`

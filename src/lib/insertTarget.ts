@@ -71,10 +71,10 @@ function branchPrefix(chain: number[]): string {
 }
 
 /**
- * 把当前选择翻译成收藏指令的落点。
+ * 把当前选择翻译成「定位」预览的目标，不授予收藏指令插入权限。
  *
  * 选择里的程序段优先，其次保留用户刚在下拉里选过的程序段；
- * 选中元件时插在它后面，选中线路时插到该线路上，其余情况落在段末输出之前。
+ * 只用来滚动到该段并标出建议落点。真正插入必须由图纸上的「+」固定。
  */
 export function resolveFavoriteInsertTarget(
   program: Program,

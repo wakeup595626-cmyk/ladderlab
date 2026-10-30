@@ -26,6 +26,8 @@
     "qa:touch": "node scripts/qa-responsive-touch.mjs",
     "qa:tags": "node scripts/qa-tags.mjs",
     "qa:tagsync": "node scripts/qa-tag-sync.mjs",
+    "qa:geometry": "node scripts/qa-rung-geometry.mjs",
+    "qa:insert-gate": "node scripts/qa-insert-gate.mjs",
     "qa:save": "node scripts/qa-save-button.mjs",
     "qa:share": "node scripts/qa-share-link.mjs",
     "qa:a11y": "node scripts/qa-a11y.mjs",

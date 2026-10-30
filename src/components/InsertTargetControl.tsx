@@ -33,7 +33,11 @@ export default function InsertTargetControl({
 
   return (
     <span
-      className={['wb-insert-target', className].filter(Boolean).join(' ')}
+      className={[
+        'wb-insert-target',
+        insertTarget ? '' : 'is-empty',
+        className,
+      ].filter(Boolean).join(' ')}
       data-keep-insert-cursor="true"
     >
       <span className="wb-insert-target-kicker">插入</span>
@@ -44,6 +48,8 @@ export default function InsertTargetControl({
           value={insertTarget?.rungId ?? ''}
           onChange={(event) => onSelectRung(event.target.value)}
         >
+          {/* 没有落点时只显示引导语：下拉只负责定位，不授予插入权限。 */}
+          {!insertTarget && <option value="">点 + 选位置</option>}
           {options.map(({ rung, label }) => (
             <option key={rung.id} value={rung.id}>{label}</option>
           ))}
@@ -55,6 +61,7 @@ export default function InsertTargetControl({
         type="button"
         className="wb-insert-target-locate"
         onClick={onLocate}
+        disabled={!insertTarget}
         title={`定位：${targetAnchorLabel}`}
         aria-label={`在图纸上标出落点：${targetAnchorLabel}`}
       >
