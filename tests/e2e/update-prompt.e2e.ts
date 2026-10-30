@@ -203,6 +203,14 @@ test('375px 顶栏折行时更新提示不挡住文件菜单', async ({ page }) 
   expect(bannerBox.y).toBeGreaterThanOrEqual(topbarBox.y + topbarBox.height + 8)
   expect(fileBox.y + fileBox.height).toBeLessThanOrEqual(bannerBox.y)
 
+  const badgeBox = await page.locator('.support-badge').boundingBox()
+  if (!badgeBox) throw new Error('咖啡浮标没有布局尺寸')
+  const overlapsBadge = bannerBox.x < badgeBox.x + badgeBox.width
+    && bannerBox.x + bannerBox.width > badgeBox.x
+    && bannerBox.y < badgeBox.y + badgeBox.height
+    && bannerBox.y + bannerBox.height > badgeBox.y
+  expect(overlapsBadge).toBe(false)
+
   await fileButton.click()
   const menu = page.getByRole('menu', { name: '文件操作' })
   await expect(menu).toBeVisible()
@@ -212,5 +220,38 @@ test('375px 顶栏折行时更新提示不挡住文件菜单', async ({ page }) 
   await sfcItem.click()
   await expect(menu).toBeHidden()
   await expect(page.getByRole('alert')).toContainText('这个工程还没有梯形图网络')
+  expect(errors).toEqual([])
+})
+
+test('1280px 更新提示不压住收藏指令条和状态栏', async ({ page }) => {
+  const errors = trackPageErrors(page)
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await installFakeWaitingWorker(page, false)
+  await page.goto('/')
+
+  const banner = page.getByRole('status', { name: `应用更新提示，版本 ${VERSION}` })
+  const strip = page.locator('.wb-instruction-strip')
+  const statusbar = page.locator('.status-bar')
+  await expect(banner).toBeVisible()
+  await expect(strip).toBeVisible()
+
+  const [bannerBox, stripBox, statusBox] = await Promise.all([
+    banner.boundingBox(),
+    strip.boundingBox(),
+    statusbar.boundingBox(),
+  ])
+  if (!bannerBox || !stripBox || !statusBox) throw new Error('更新提示、收藏条或状态栏没有布局尺寸')
+
+  expect(bannerBox.y).toBeGreaterThanOrEqual(stripBox.y + stripBox.height)
+  expect(bannerBox.y + bannerBox.height).toBeLessThanOrEqual(statusBox.y + 1)
+
+  const toolsBlocked = await page.evaluate(() => {
+    const tools = document.querySelector('.wb-instruction-tools')
+    if (!tools) return true
+    const rect = tools.getBoundingClientRect()
+    const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2)
+    return !hit || !tools.contains(hit)
+  })
+  expect(toolsBlocked).toBe(false)
   expect(errors).toEqual([])
 })

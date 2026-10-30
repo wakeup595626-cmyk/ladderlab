@@ -1,8 +1,10 @@
 .sw-update-banner {
   position: fixed;
-  top: calc(env(safe-area-inset-top, 0px) + 64px);
+  /* 更新提示是临时通知，固定在画布下方的状态栏上方。放在顶栏下面会整条
+     压住收藏指令工具条，用户点不到「常开 / 全部指令 / 变量表」。 */
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 42px);
   left: 50%;
-  z-index: 80;
+  z-index: 120;
   display: flex;
   width: min(560px, calc(100vw - 24px));
   min-height: 30px;
@@ -21,6 +23,11 @@
   font-family: var(--sans);
   font-size: var(--fs-body);
   line-height: 1.2;
+}
+
+/* 同屏出现操作提示时，把短提示抬到更新条上方，两个浮层不互相压字。 */
+.app-shell:has(.sw-update-banner) .toast {
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 92px);
 }
 
 .sw-update-banner__actions {
@@ -60,5 +67,17 @@
   .sw-update-banner__action {
     min-height: 44px;
     padding-inline: 16px;
+  }
+}
+
+@media (max-width: 720px) {
+  .sw-update-banner {
+    /* 手机底部依次是导航栏、状态栏和左下角咖啡浮标；提示条要停在浮标上方，
+       否则会盖住「请杯咖啡」的半个图标。 */
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 154px);
+  }
+
+  .app-shell:has(.sw-update-banner) .toast {
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 206px);
   }
 }
