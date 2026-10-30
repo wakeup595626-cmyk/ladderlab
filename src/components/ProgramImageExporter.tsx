@@ -673,17 +673,27 @@ function buildCompleteImage(program: Program, rungs: PreparedRung[], layout: Com
     context.strokeRect(pagePad + 0.5, card.y + 0.5, cardWidth - 1, card.height - 1)
     drawRule(context, pagePad, card.y + cardHeader, pagePad + cardWidth, card.y + cardHeader)
 
+    // 标题、副标题、页码共用一条基线：先把页码宽度量出来，标题再用剩下的
+    // 宽度截断，PNG 与 SVG 才会画出同一个结果，长程序段名也压不到页码。
+    const counter = `${String(index + 1).padStart(2, '0')} / ${String(rungs.length).padStart(2, '0')}`
+    context.fillStyle = MUTED
+    setFont(context, 500, 10)
+    const counterWidth = context.measureText(counter).width
+    const contentRight = pagePad + cardWidth - cardPad - counterWidth - 16
+
     context.fillStyle = INK
     setFont(context, 650, 13)
-    context.fillText(rung.label, card.rungX, card.y + cardTitleBaseline)
+    const label = fitText(context, rung.label, Math.max(60, contentRight - card.rungX))
+    const labelWidth = context.measureText(label).width
+    context.fillText(label, card.rungX, card.y + cardTitleBaseline)
 
     if (rung.title) {
-      const labelWidth = context.measureText(rung.label).width
       context.fillStyle = MUTED
       setFont(context, 450, 12)
+      const titleLeft = card.rungX + labelWidth + 14
       context.fillText(
-        fitText(context, rung.title, cardWidth - cardPad * 2 - labelWidth - 22),
-        card.rungX + labelWidth + 14,
+        fitText(context, rung.title, Math.max(40, contentRight - titleLeft)),
+        titleLeft,
         card.y + cardTitleBaseline,
       )
     }
@@ -691,11 +701,7 @@ function buildCompleteImage(program: Program, rungs: PreparedRung[], layout: Com
     context.fillStyle = MUTED
     setFont(context, 500, 10)
     context.textAlign = 'right'
-    context.fillText(
-      `${String(index + 1).padStart(2, '0')} / ${String(rungs.length).padStart(2, '0')}`,
-      pagePad + cardWidth - cardPad,
-      card.y + cardTitleBaseline,
-    )
+    context.fillText(counter, pagePad + cardWidth - cardPad, card.y + cardTitleBaseline)
     context.textAlign = 'left'
 
     drawRungImage(context, rung, card.rungX, card.rungY)

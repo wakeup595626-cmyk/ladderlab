@@ -3068,9 +3068,15 @@ export default function App() {
         notify('已导出顺序功能图 SVG（' + chart.steps.length + ' 步）')
         return
       }
-      const dataUrl = await rasterizeSfcPng(chart, controller.signal)
-      downloadDataUrl(base + '.png', dataUrl)
-      notify('已导出顺序功能图 PNG（' + chart.steps.length + ' 步）')
+      const png = await rasterizeSfcPng(chart, controller.signal)
+      downloadDataUrl(base + '.png', png.dataUrl)
+      if (png.scale < 2) {
+        // 长图会自动降倍率，这里必须说清楚，别让用户以为拿到的还是满分辨率。
+        notify('已导出顺序功能图 PNG（' + chart.steps.length + ' 步，'
+          + png.width + '×' + png.height + '，按 ' + png.scale + '× 输出；要无损请用 SVG）')
+      } else {
+        notify('已导出顺序功能图 PNG（' + chart.steps.length + ' 步，' + png.width + '×' + png.height + '）')
+      }
     } catch (reason) {
       if (reason instanceof DOMException && reason.name === 'AbortError') return
       notify(

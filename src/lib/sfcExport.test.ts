@@ -113,11 +113,11 @@ describe('rasterizeSfcPng', () => {
     const pending = rasterizeSfcPng(chart)
     expect(images).toHaveLength(1)
     images[0].onload?.()
-    const dataUrl = await pending
+    const result = await pending
 
     const width = Math.ceil(rendered.width * 2)
     const height = Math.ceil(rendered.height * 2)
-    expect(dataUrl).toBe(PNG_DATA_URL)
+    expect(result).toEqual({ dataUrl: PNG_DATA_URL, width, height, scale: 2 })
     expect(createElement).toHaveBeenCalledWith('canvas')
     expect(canvas.width).toBe(width)
     expect(canvas.height).toBe(height)
@@ -167,7 +167,12 @@ describe('rasterizeSfcPng', () => {
 
     const pending = rasterizeSfcPng(chart)
     images[0].onload?.()
-    await expect(pending).resolves.toBe(PNG_DATA_URL)
+    await expect(pending).resolves.toMatchObject({
+      dataUrl: PNG_DATA_URL,
+      scale: plan!.scale,
+      width: plan!.pixelWidth,
+      height: plan!.pixelHeight,
+    })
 
     expect(canvas.width).toBe(plan!.pixelWidth)
     expect(canvas.height).toBe(plan!.pixelHeight)
