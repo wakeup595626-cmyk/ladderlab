@@ -86,7 +86,7 @@ function AccountDialogContent({
             <span className="account-dialog-mark" aria-hidden="true"><CloudIcon size={18} /></span>
             <div>
               <h2 id="account-dialog-title">账号与云同步</h2>
-              <p>{account.status === 'disabled' ? '先连接一个免费的账号后端，再注册登录' : '登录后每个账号只看到自己的项目，换电脑也能打开'}</p>
+              <p>{account.status === 'disabled' ? '先连接一个免费的账号后端，再注册登录' : '项目跟着账号走 · 每个账号只看自己的项目'}</p>
             </div>
           </div>
           <button ref={closeRef} type="button" className="icon-button" onClick={closeDialog} aria-label="关闭账号面板">
@@ -94,46 +94,49 @@ function AccountDialogContent({
           </button>
         </header>
 
-        {account.error && (
-          <p className="account-error" role="alert">{account.error}</p>
-        )}
-        {connected && account.status === 'signed-out' && (
-          <p className="account-notice" role="status">云端已连接，现在可以注册或登录。</p>
-        )}
+        <div className="account-dialog-body">
+          {account.error && (
+            <p className="account-error" role="alert">{account.error}</p>
+          )}
+          {connected && account.status === 'signed-out' && (
+            <p className="account-notice" role="status">云端已连接，现在可以注册或登录。</p>
+          )}
 
-        {(account.status === 'disabled' || showSetup) && (
-          <SetupGuide
-            account={account}
-            canCancel={account.status !== 'disabled'}
-            onCancel={() => setShowSetup(false)}
-            onConnected={() => {
-              setConnected(true)
-              setShowSetup(false)
-            }}
-          />
-        )}
-        {account.status === 'signed-out' && !showSetup && (
-          <AuthForm account={account} onOpenSetup={() => setShowSetup(true)} />
-        )}
-        {account.status === 'signed-in' && account.recovery && (
-          <ResetPasswordForm
-            account={account}
-            onComplete={() => setPasswordUpdated(true)}
-          />
-        )}
-        {account.status === 'signed-in' && !account.recovery && (
-          <SignedInPanel
-            account={account}
-            passwordUpdated={passwordUpdated}
-            guestProjectCount={guestProjectCount}
-            onImportGuestProjects={onImportGuestProjects}
-            onSynced={onSynced}
-            onClose={onClose}
-          />
-        )}
+          {(account.status === 'disabled' || showSetup) && (
+            <SetupGuide
+              account={account}
+              canCancel={account.status !== 'disabled'}
+              onCancel={() => setShowSetup(false)}
+              onConnected={() => {
+                setConnected(true)
+                setShowSetup(false)
+              }}
+            />
+          )}
+          {account.status === 'signed-out' && !showSetup && (
+            <AuthForm account={account} onOpenSetup={() => setShowSetup(true)} />
+          )}
+          {account.status === 'signed-in' && account.recovery && (
+            <ResetPasswordForm
+              account={account}
+              onComplete={() => setPasswordUpdated(true)}
+            />
+          )}
+          {account.status === 'signed-in' && !account.recovery && (
+            <SignedInPanel
+              account={account}
+              passwordUpdated={passwordUpdated}
+              guestProjectCount={guestProjectCount}
+              onImportGuestProjects={onImportGuestProjects}
+              onSynced={onSynced}
+              onClose={onClose}
+            />
+          )}
+        </div>
 
         <footer className="account-dialog-foot">
-          未登录也能正常做实验：所有工程先写在本机，登录后才额外同步到账号。
+          <CloudIcon size={13} aria-hidden="true" />
+          不登录也能完整做实验，工程默认保存在本机。
         </footer>
       </section>
     </div>
@@ -175,7 +178,6 @@ function SetupGuide({
   return (
     <div className="account-setup">
       <div className="account-setup-intro">
-        <span className="account-setup-kicker">只差一次云端连接</span>
         <strong>填入 Supabase 的地址和公开密钥</strong>
         <p>连接成功后即可注册、登录；工程仍会先保存在本机，断网不影响编辑。</p>
       </div>
@@ -523,7 +525,13 @@ function SignedInPanel({
         <span className="account-avatar" aria-hidden="true"><UserIcon size={18} /></span>
         <div>
           <strong>{email}</strong>
-          <small>{account.syncing ? '正在同步…' : account.lastSync ? `上次同步 ${formatClock(account.lastSync.at)}` : '尚未同步'}</small>
+          <small>
+            {account.syncing
+              ? '正在同步…'
+              : account.lastSync
+                ? <>上次同步 <span className="account-time">{formatClock(account.lastSync.at)}</span></>
+                : '尚未同步'}
+          </small>
         </div>
       </div>
 
