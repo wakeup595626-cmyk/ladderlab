@@ -33,7 +33,7 @@ export function UpdateBannerView({
       aria-atomic="true"
       aria-label={`应用更新提示，版本 ${update.version}`}
     >
-      <span>有新版本，点击刷新</span>
+      <span>发现新版本</span>
       <span className="sw-update-banner__actions">
         <button type="button" className="sw-update-banner__action" onClick={onLater}>
           稍后

@@ -6,7 +6,9 @@
   bottom: calc(env(safe-area-inset-bottom, 0px) + 42px);
   z-index: 120;
   display: grid;
-  width: min(300px, calc(100vw - 24px));
+  /* Keep the notice inside the empty gutter to the right of the ladder sheet.
+     The previous 300px card reached back over the program on wide screens. */
+  width: min(204px, calc(100vw - 24px));
   min-height: 44px;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
