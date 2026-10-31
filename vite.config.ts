@@ -31,7 +31,9 @@ export default defineConfig({
   base: './',
   plugins: [react()],
   test: {
-    include: ['src/**/*.test.ts'],
+    // scripts/ 下的 CLI ↔ 网页互通契约测试同样必须进 CI，
+    // 否则分享链接改了一侧、另一侧悄悄失配也没人发现。
+    include: ['src/**/*.test.ts', 'scripts/**/*.contract.test.mjs'],
   },
   build: {
     rolldownOptions: {

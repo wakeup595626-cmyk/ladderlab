@@ -10,6 +10,19 @@ export const FIELD_LIMITS = {
   reference: 64,
 } as const
 
+/**
+ * 导入端（io.ts）的结构上限。保存、导出、分享必须复用同一组数字，
+ * 否则工程能写出去、却再也读不回来。
+ */
+export const STRUCTURE_LIMITS = {
+  tags: 1000,
+  rungs: 1000,
+  nodes: 5000,
+  /** 顶层元件算第 0 层，最多向下嵌套 32 层并联。 */
+  depth: 32,
+  pattern: 1024,
+} as const
+
 export type LimitedTextField = keyof typeof FIELD_LIMITS
 
 const FIELD_LABELS: Record<LimitedTextField, string> = {
@@ -78,4 +91,60 @@ export function programTextFieldIssues(program: Program): string[] {
 
 export function utf8ByteLength(value: string): number {
   return new TextEncoder().encode(value).byteLength
+}
+
+function hasNonFiniteNumber(value: unknown): boolean {
+  if (typeof value === 'number') return !Number.isFinite(value)
+  if (Array.isArray(value)) return value.some(hasNonFiniteNumber)
+  if (value && typeof value === 'object') {
+    return Object.values(value as Record<string, unknown>).some(hasNonFiniteNumber)
+  }
+  return false
+}
+
+/**
+ * 保存 / 导出 / 分享共用的结构闸门，条件与 io.ts 的导入端一一对应。
+ * 导入端拒绝的结构一旦被写出，工程就会变成刷新后打不开的草稿。
+ */
+export function programStructureIssues(program: Program): string[] {
+  const issues: string[] = []
+  if (program.tags.length > STRUCTURE_LIMITS.tags) {
+    issues.push(`变量数量超过上限 ${STRUCTURE_LIMITS.tags} 个。`)
+  }
+
+  let contentRungs = 0
+  for (const rung of program.rungs) {
+    // 末尾空白占位段不算内容段，与导入端保持一致。
+    if (rung.nodes.length > 0 || rung.label.trim() !== '' || rung.output.tag.trim() !== '') contentRungs += 1
+  }
+  if (contentRungs > STRUCTURE_LIMITS.rungs) {
+    issues.push(`程序段数量超过上限 ${STRUCTURE_LIMITS.rungs} 条（末尾空白占位段不计入上限）。`)
+  }
+
+  let nodeCount = 0
+  let tooDeep = false
+  const walk = (nodes: LadderNode[], depth: number): void => {
+    for (const node of nodes) {
+      nodeCount += 1
+      if (depth > STRUCTURE_LIMITS.depth) tooDeep = true
+      if (node.type === 'parallel') {
+        for (const branch of node.branches) walk(branch, depth + 1)
+      }
+    }
+  }
+  for (const rung of program.rungs) {
+    walk(rung.nodes, 0)
+    if ((rung.output.pattern?.length ?? 0) > STRUCTURE_LIMITS.pattern) {
+      issues.push(`灯字序列最多支持 ${STRUCTURE_LIMITS.pattern} 个。`)
+    }
+  }
+  if (tooDeep) issues.push(`并联层数超过 ${STRUCTURE_LIMITS.depth} 层。`)
+  if (nodeCount > STRUCTURE_LIMITS.nodes) issues.push(`节点总数超过上限 ${STRUCTURE_LIMITS.nodes}。`)
+  if (hasNonFiniteNumber(program)) issues.push('工程中含有 NaN 或 Infinity，重新打开时会被判为损坏。')
+  return issues
+}
+
+/** 写出工程前的完整防线：结构上限 + 文本字段上限。 */
+export function programSerializationIssues(program: Program): string[] {
+  return [...programStructureIssues(program), ...programTextFieldIssues(program)]
 }

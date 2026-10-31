@@ -368,6 +368,27 @@ describe('restoring into the project library', () => {
     expect(library.projects.find((project) => project.id === second.project.id)).toEqual(second.project)
   })
 
+  it('把较旧的备份恢复成一个严格更新的版本', async () => {
+    const saved = await saveNamedProject({ name: '版本恢复', program: namedProgram('版本恢复', '本机版本') })
+    if (!saved.ok) throw new Error('expected the fixture project to save')
+    const before = Date.now()
+    // 备份比本机版本更旧：如果没有换发新版本号，云同步会把它当成过期快照丢弃。
+    const backup: SavedProject = {
+      ...saved.project,
+      savedAt: saved.project.savedAt - 10_000,
+      program: namedProgram('版本恢复', '备份里的旧内容'),
+    }
+
+    const restored = await importSavedProjectBackup([backup])
+    expect(restored).toMatchObject({ ok: true, merged: 1 })
+    const library = readProjectLibrary()
+    if (library.status !== 'ok') throw new Error('expected a readable project library')
+    const target = library.projects.find((project) => project.id === saved.project.id)
+    expect(target?.program.rungs[0]?.label).toBe('备份里的旧内容')
+    expect(target?.savedAt).toBeGreaterThan(saved.project.savedAt)
+    expect(target?.savedAt).toBeGreaterThanOrEqual(before)
+  })
+
   it('refuses a stale restore preview after another tab saves the same project', async () => {
     vi.spyOn(Date, 'now').mockReturnValue(1_000)
     const existing = await saveNamedProject({ name: '并发目标', program: namedProgram('并发目标', '预览时版本') })

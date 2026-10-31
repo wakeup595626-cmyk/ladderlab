@@ -344,6 +344,8 @@
   display: inline-flex;
   align-items: center;
   gap: 3px;
+  min-height: 24px;
+  position: relative;
   margin-left: 6px;
   color: var(--accent-ink);
   font-weight: 600;
@@ -354,6 +356,15 @@
 
 .account-external:hover {
   text-decoration: underline;
+}
+
+/* 正文内联链接视觉尺寸保持原样，触屏上用透明命中层补到 44px 高。 */
+@media (pointer: coarse) {
+  .account-external::after {
+    content: '';
+    position: absolute;
+    inset: -10px -8px;
+  }
 }
 
 .account-site-url {

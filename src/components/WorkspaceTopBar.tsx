@@ -100,6 +100,7 @@ export default function WorkspaceTopBar({
   theme,
   onTheme,
 }: WorkspaceTopBarProps) {
+  const cloudSave = accountStatus === 'signed-in'
   const [menuOpen, setMenuOpen] = useState(false)
   const [fileMenuOpen, setFileMenuOpen] = useState(false)
   const [fileMenuKind, setFileMenuKind] = useState<'export' | 'file'>('export')
@@ -648,19 +649,19 @@ export default function WorkspaceTopBar({
           type="button"
           className={`wb-save-button is-${saveStatus}${saveBlocked ? ' is-blocked' : ''}`}
           onClick={onSaveProject}
-          aria-label="保存到本机项目库"
+          aria-label={cloudSave ? '保存并同步到当前账号' : '保存到本机项目库'}
           aria-busy={saveStatus === 'saving'}
           aria-keyshortcuts="Control+S Meta+S"
           title={
             saveStatus === 'saving'
               ? '正在保存工程，请稍候'
               : saveStatus === 'saved'
-                ? '已保存到本机项目库'
+                ? cloudSave ? '已保存，正在同步到当前账号' : '已保存到本机项目库'
                 : saveStatus === 'error'
                   ? '保存未完成，点击查看原因'
                   : saveBlocked
                     ? '项目库需要处理，点击查看原因并导出备份'
-                    : '保存到本机项目库 (Ctrl+S)'
+                    : cloudSave ? '保存到本机并同步到当前账号 (Ctrl+S)' : '保存到本机项目库 (Ctrl+S)'
           }
         >
           {saveStatus === 'saved'

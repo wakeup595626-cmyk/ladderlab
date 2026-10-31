@@ -39,7 +39,7 @@ function LibraryDialogContent({ onClose, onLoadSample }: Omit<LibraryDialogProps
       }}
     >
       <section ref={dialogRef} className="library-dialog" role="dialog" aria-modal="true" aria-labelledby="library-title" tabIndex={-1}>
-        <header className="library-head">
+      <header className="library-head" role="none">
           <div>
             <h2 id="library-title">实验与示例</h2>
             <p>{COURSE_LABS.length} 个课程实验与 {SAMPLES.length} 个基础示例，载入后都可直接编辑、仿真。</p>

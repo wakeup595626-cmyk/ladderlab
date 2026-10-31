@@ -2,9 +2,9 @@
  * 梯形实验室 LadderLab · Service Worker
  * ---------------------------------------------------------------------------
  * 缓存版本：生产构建会自动把 CACHE_VERSION 写成
- * v6-<UTC时间戳>-<提交号>。时间戳在前，保证多个连续部署可以按名称可靠
- * 排序；老客户端下次访问时会安装新脚本并重新拉取构建产物。
- * 只清理本应用前缀（ladderlab-）的缓存，不影响同一域名下的其他站点。
+ * v7-<提交时间>-<内容哈希>-<提交号>。提交时间在前，保证多个连续部署可以
+ * 按名称可靠排序；内容哈希保证同一份源码重复构建得到同一版本。
+ * 缓存前缀包含当前部署 scope 的指纹，同一域名下的多个副本不会互删缓存。
  *
  * 策略：
  * - 安装：预缓存应用外壳、图标，以及构建后 index.html 引用的 JS/CSS 入口
@@ -17,24 +17,47 @@
  * 不在 install 里自动 skipWaiting：新 worker 一旦立刻接管，页面里还没加载的
  * 懒加载 chunk 会去要新部署里已经不存在的旧文件名，导出功能就会突然失效。
  */
-const CACHE_PREFIX = 'ladderlab-'
-const CACHE_VERSION = 'v6'
+const CACHE_BASE = 'ladderlab-'
+const CACHE_VERSION = 'v7'
+const SCOPE_FINGERPRINT = fingerprintScope(self.registration.scope)
+const CACHE_PREFIX = CACHE_BASE + SCOPE_FINGERPRINT + '-'
 const CACHE_NAME = CACHE_PREFIX + CACHE_VERSION
 // 新 worker 接管时，可能仍有多个旧标签页在请求不同部署的懒加载文件。
 // 留三版并逐个回查，避免只保留一版时切页或导出突然 504。
 const KEEP_PREVIOUS_CACHES = 3
 const OFFLINE_URL = './index.html'
 const ASSET_MANIFEST_URL = './asset-manifest.json'
-const PRECACHE_URLS = [
+const OPTIONAL_PRECACHE_URLS = [
   './',
-  './index.html',
-  ASSET_MANIFEST_URL,
   './manifest.webmanifest',
   './favicon.svg',
   './icons/icon-192.png',
   './icons/icon-512.png',
   './icons/icon-maskable-512.png',
 ]
+
+/** 只用于缓存命名；FNV-1a 足够区分部署路径，不承担安全用途。 */
+function fingerprintScope(scope) {
+  let hash = 0x811c9dc5
+  for (let index = 0; index < scope.length; index += 1) {
+    hash ^= scope.charCodeAt(index)
+    hash = Math.imul(hash, 0x01000193)
+  }
+  return (hash >>> 0).toString(16).padStart(8, '0')
+}
+
+async function fetchRequired(url, label) {
+  let response
+  try {
+    response = await fetch(new Request(url, { cache: 'reload' }))
+  } catch (error) {
+    throw new Error(`precache: ${label} 请求失败 (${url})`, { cause: error })
+  }
+  if (!response.ok) {
+    throw new Error(`precache: ${label} 返回 HTTP ${response.status} (${url})`)
+  }
+  return response
+}
 
 /**
  * Cache the shell first, then read the built index and cache its hashed entry
@@ -43,78 +66,75 @@ const PRECACHE_URLS = [
  */
 async function precache(cache) {
   const scopeUrl = new URL('./', self.registration.scope).href
-  const urls = new Set(PRECACHE_URLS.map((path) => new URL(path, scopeUrl).href))
-  const preloaded = new Map()
-  let indexResponse = null
+  const indexUrl = new URL('./index.html', scopeUrl).href
+  const manifestUrl = new URL(ASSET_MANIFEST_URL, scopeUrl).href
+  const required = new Set()
+  const optional = new Set(OPTIONAL_PRECACHE_URLS.map((path) => new URL(path, scopeUrl).href))
+  const stored = new Set()
 
-  try {
-    indexResponse = await fetch(new Request(new URL('./index.html', scopeUrl), { cache: 'reload' }))
-  } catch {
-    // Keep the remaining shell URLs as best-effort precache entries.
-  }
+  // 外壳三件套是离线可用的最低条件：任何一项失败都必须让 install 失败，
+  // 保留旧的 Service Worker，而不是激活一个打开就 503 的空壳。
+  const indexResponse = await fetchRequired(indexUrl, 'index.html')
+  await Promise.all([
+    cache.put(indexUrl, indexResponse.clone()),
+    cache.put(scopeUrl, indexResponse.clone()),
+  ])
+  stored.add(indexUrl)
+  stored.add(scopeUrl)
 
-  if (indexResponse?.ok) {
-    await Promise.all([
-      cache.put(new URL('./index.html', scopeUrl), indexResponse.clone()).catch(() => undefined),
-      cache.put(scopeUrl, indexResponse.clone()).catch(() => undefined),
-    ])
-    urls.delete(new URL('./index.html', scopeUrl).href)
-    urls.delete(scopeUrl)
-
-    const html = await indexResponse.text()
-    for (const match of html.matchAll(/\b(?:src|href)=["']([^"'#]+)["']/gi)) {
-      const assetUrl = new URL(match[1], scopeUrl)
-      if (assetUrl.origin === self.location.origin) urls.add(assetUrl.href)
+  const html = await indexResponse.text()
+  for (const match of html.matchAll(/\b(?:src|href)=["']([^"'#]+)["']/gi)) {
+    const assetUrl = new URL(match[1], scopeUrl)
+    if (assetUrl.origin !== self.location.origin) continue
+    // 入口 JS/CSS 缺失时页面根本起不来，按必需资源处理。
+    if (assetUrl.pathname.includes('/assets/') && /\.(?:js|css)$/i.test(assetUrl.pathname)) {
+      required.add(assetUrl.href)
+    } else {
+      optional.add(assetUrl.href)
     }
   }
 
   // A build manifest also covers lazy chunks that index.html does not name.
   // Without it, installing the app and then opening the exporter offline could
   // miss the ProgramImageExporter chunk until it had been loaded once online.
-  try {
-    const manifestResponse = await fetch(
-      new Request(new URL(ASSET_MANIFEST_URL, scopeUrl), { cache: 'reload' }),
-    )
-    if (manifestResponse.ok) {
-      const manifest = await manifestResponse.json()
-      if (Array.isArray(manifest?.files)) {
-        for (const file of manifest.files) {
-          if (typeof file === 'string') urls.add(new URL(file, scopeUrl).href)
-        }
-      }
-    }
-  } catch {
-    // Older builds predate the manifest; index.html entries still enable offline use.
+  const manifestResponse = await fetchRequired(manifestUrl, 'asset-manifest.json')
+  await cache.put(manifestUrl, manifestResponse.clone())
+  stored.add(manifestUrl)
+  const manifest = await manifestResponse.json()
+  if (!Array.isArray(manifest?.files)) {
+    throw new Error('precache: asset-manifest.json 格式不正确')
+  }
+  for (const file of manifest.files) {
+    if (typeof file !== 'string') continue
+    const assetUrl = new URL(file, scopeUrl)
+    if (assetUrl.origin === self.location.origin) required.add(assetUrl.href)
   }
 
-  // 字体在 CSS 里通过 url() 引用，HTML 上看不到。少这一步，断网首屏会退到
-  // 系统字体，控制台还会刷一排 504。
   await Promise.all(
-    [...urls]
-      .filter((url) => url.endsWith('.css'))
-      .map(async (cssUrl) => {
-        try {
-          const response = await fetch(new Request(cssUrl, { cache: 'reload' }))
-          if (!response.ok) return
-          preloaded.set(cssUrl, response.clone())
-          const css = await response.text()
-          for (const match of css.matchAll(/url\(\s*['"]?([^'")]+)['"]?\s*\)/gi)) {
-            const assetUrl = new URL(match[1], cssUrl)
-            if (assetUrl.origin === self.location.origin) urls.add(assetUrl.href)
-          }
-        } catch {
-          // A broken CSS file must not block the rest of the precache.
-        }
-      }),
+    [...required].map(async (url) => {
+      if (stored.has(url)) return
+      const response = await fetchRequired(url, '构建资源')
+      await cache.put(url, response.clone())
+      stored.add(url)
+      if (!url.endsWith('.css')) return
+      // 字体在 CSS 里通过 url() 引用，HTML 上看不到。少这一步，断网首屏会
+      // 退到系统字体，控制台还会刷一排 504。字体缺失不阻塞安装。
+      const css = await response.text()
+      for (const match of css.matchAll(/url\(\s*['"]?([^'")]+)['"]?\s*\)/gi)) {
+        const assetUrl = new URL(match[1], url)
+        if (assetUrl.origin === self.location.origin) optional.add(assetUrl.href)
+      }
+    }),
   )
 
   await Promise.all(
-    [...urls].map(async (url) => {
+    [...optional].map(async (url) => {
+      if (stored.has(url)) return
       try {
-        const response = preloaded.get(url) ?? (await fetch(new Request(url, { cache: 'reload' })))
+        const response = await fetch(new Request(url, { cache: 'reload' }))
         if (response.ok) await cache.put(url, response)
       } catch {
-        // A single missing asset must not prevent the worker from activating.
+        // 图标、字体和旧浏览器兼容资源缺失不影响主程序离线启动。
       }
     }),
   )
@@ -123,8 +143,15 @@ async function precache(cache) {
 self.addEventListener('install', (event) => {
   event.waitUntil(
     (async () => {
-      const cache = await caches.open(CACHE_NAME)
-      await precache(cache)
+      try {
+        const cache = await caches.open(CACHE_NAME)
+        await precache(cache)
+      } catch (error) {
+        // 半成品缓存会让下一个版本误判“已缓存”，必须清掉再让 install 失败。
+        await caches.delete(CACHE_NAME).catch(() => undefined)
+        console.error('[LadderLab] 预缓存失败，保留上一版 Service Worker', error)
+        throw error
+      }
     })(),
   )
 })
@@ -133,11 +160,19 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(
     (async () => {
       const keys = await caches.keys()
-      const previous = keys
-        .filter((key) => key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME)
+      const previous = keys.filter((key) => isOwnCache(key) && key !== CACHE_NAME)
+      const currentScope = previous
+        .filter((key) => key.startsWith(CACHE_PREFIX))
+        .sort(compareCacheNamesNewestFirst)
+      // 上一版 v6 缓存没有 scope 指纹；只保留一份过渡，下一轮部署后清掉。
+      const legacy = previous
+        .filter((key) => !key.startsWith(CACHE_PREFIX))
         .sort(compareCacheNamesNewestFirst)
       await Promise.all(
-        previous.slice(KEEP_PREVIOUS_CACHES).map((key) => caches.delete(key)),
+        [
+          ...currentScope.slice(KEEP_PREVIOUS_CACHES),
+          ...legacy.slice(1),
+        ].map((key) => caches.delete(key)),
       )
       await self.clients.claim()
     })(),
@@ -269,11 +304,19 @@ async function matchCachedResponse(cache, request) {
 }
 
 function compareCacheNamesNewestFirst(left, right) {
-  // 生产版本形如 v6-20261029123045123-abcdef123456；固定宽度的 UTC
-  // 时间戳可以直接按字符串倒序。兜底版本也按整个后缀比较，避免旧版
-  // v5-<随机提交号> 因大小版本相同而排错顺序。
-  const version = (name) => name.slice(CACHE_PREFIX.length)
+  // 生产版本形如 v7-<提交时间>-<内容哈希>-<提交号>；固定宽度的提交时间
+  // 可以直接按字符串倒序。旧版 v6 的时间戳更宽，numeric 比较仍能对齐。
+  const version = (name) => (
+    name.startsWith(CACHE_PREFIX)
+      ? name.slice(CACHE_PREFIX.length)
+      : name.slice(CACHE_BASE.length)
+  )
   return version(right).localeCompare(version(left), 'en', { numeric: true })
+}
+
+/** 当前 scope 的缓存，以及升级前没有 scope 指纹的 v6 缓存。 */
+function isOwnCache(name) {
+  return name.startsWith(CACHE_PREFIX) || /^ladderlab-v\d/.test(name)
 }
 
 /**
@@ -289,7 +332,7 @@ async function matchPreviousCachedResponse(request) {
     return undefined
   }
   const previous = keys
-    .filter((key) => key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME)
+    .filter((key) => isOwnCache(key) && key !== CACHE_NAME)
     .sort(compareCacheNamesNewestFirst)
   for (const key of previous.slice(0, KEEP_PREVIOUS_CACHES)) {
     try {

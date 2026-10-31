@@ -39,6 +39,8 @@
   --gap: 24px;
   --pad: 24px;
   --control-height: 34px;
+  /* 顶栏一行里所有控件共用同一外高，避免分组框、主题按钮差 2px。 */
+  --topbar-control-h: 34px;
   --fs-title: 20px;
   --fs-section: 15px;
   --fs-kpi: 28px;
@@ -230,14 +232,15 @@ body[data-drag-kind] {
 
 .wb-save-button {
   display: inline-flex;
-  height: 36px;
+  /* 和顶栏其它控件同一外高：分组按钮 32px + 1px 边框 = 34px。 */
+  height: var(--control-height);
   flex: 0 0 auto;
   align-items: center;
   justify-content: center;
   gap: 6px;
   padding: 0 11px;
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: var(--radius-control);
   background: var(--surface);
   color: var(--text);
   font-size: 12.5px;
@@ -990,7 +993,7 @@ body[data-drag-kind] {
   width: min(340px, 92vw);
   height: 100%;
   flex-direction: column;
-  overflow-y: auto;
+  overflow: hidden;
   border-right: 1px solid var(--control);
   background: var(--surface);
   box-shadow: 18px 0 40px rgba(23, 27, 23, 0.12);
@@ -1157,18 +1160,29 @@ body[data-drag-kind] {
 
 .wb-saved-section {
   display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
   flex-direction: column;
   gap: 10px;
+  overflow: hidden;
 }
 
 .wb-saved-projects {
   display: grid;
-  max-height: 276px;
+  flex: 1 1 auto;
+  min-height: 0;
   gap: 5px;
   margin: 0;
   padding: 0 2px 0 0;
   overflow-y: auto;
   list-style: none;
+}
+
+.wb-project-drawer > .wb-drawer-section:last-child {
+  flex: 0 0 auto;
+  margin-top: auto;
+  border-bottom: 0;
+  background: var(--surface);
 }
 
 .wb-saved-project {
@@ -1461,8 +1475,8 @@ body[data-drag-kind] {
   right: auto;
   bottom: auto;
   left: auto;
-  width: min(760px, 100%);
-  height: min(78dvh, 680px);
+  width: min(1080px, 100%);
+  height: min(82dvh, 760px);
   padding: 14px;
   border: 1px solid var(--control);
   border-radius: var(--radius-sheet);
@@ -1493,6 +1507,35 @@ body[data-drag-kind] {
 
 .wb-instruction-drawer-backdrop .instruction-grip {
   color: var(--control);
+}
+
+/* 指令目录在桌面端用两列：单列会把 120 条指令拉成一米长的滚动条，
+   左右两列保持同一行高节奏，分组标题横跨整行，扫读时仍按分类走。 */
+@media (min-width: 901px) {
+  .wb-instruction-drawer-backdrop .sidebar-instructions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-content: start;
+    gap: 4px 22px;
+    padding-right: 8px;
+  }
+
+  .wb-instruction-drawer-backdrop .instruction-head,
+  .wb-instruction-drawer-backdrop .sidebar-search,
+  .wb-instruction-drawer-backdrop .instruction-empty {
+    grid-column: 1 / -1;
+  }
+
+  .wb-instruction-drawer-backdrop .instruction-group {
+    min-width: 0;
+    margin-top: 2px;
+    padding-bottom: 4px;
+    border-bottom: 1px solid color-mix(in srgb, var(--rule) 45%, transparent);
+  }
+
+  .wb-instruction-drawer-backdrop .instruction-row {
+    min-height: 42px;
+  }
 }
 
 /* ----------------------------------------------------------- inspector */
@@ -1793,6 +1836,10 @@ body[data-drag-kind] {
 }
 
 @media (max-width: 720px) {
+  .wb-shell {
+    --topbar-control-h: 46px;
+  }
+
   .wb-shell .wb-topbar {
     gap: 10px;
     padding: 0 16px;
@@ -2350,9 +2397,25 @@ body[data-drag-kind] {
   }
 
   .wb-shell .project-sidebar .instruction-star {
-    width: 38px;
-    height: 38px;
+    width: 44px;
+    height: 44px;
     opacity: 1;
+  }
+
+  /* 插入目标下拉与定位按钮同样按 44px 触控基线放大。 */
+  .wb-shell .wb-insert-target-select select {
+    height: 44px;
+  }
+
+  .wb-shell .wb-insert-target-locate {
+    width: 44px;
+    height: 44px;
+  }
+
+  .project-import-head .icon-button {
+    width: 44px;
+    min-width: 44px;
+    height: 44px;
   }
 }
 
@@ -2530,7 +2593,7 @@ body[data-drag-kind] {
 }
 
 .wb-topbar-actions {
-  height: 34px;
+  height: var(--topbar-control-h);
   gap: 0;
   overflow: hidden;
   border: 1px solid var(--control);
@@ -3639,7 +3702,7 @@ body[data-drag-kind] {
   }
 
   .wb-topbar-actions {
-    height: 46px;
+    height: var(--topbar-control-h);
   }
 
   .wb-project-button,
@@ -4104,13 +4167,23 @@ body[data-drag-kind] {
     font-size: 12px;
   }
 
-  /* A notification must never sit on top of the fields in a bottom sheet. */
-  .app-shell[data-sheet='open'] .toast {
-    /* 抽屉打开时提示条改走上侧，但要落在顶栏 + 文档栏下面，
-       不能挡住「Main [OB1]」和错误徽标。 */
-    top: calc(118px + env(safe-area-inset-top, 0px));
+  /* 通知条永远贴在“面板之外的可用空隙”，不压住正在编辑的字段。
+     属性抽屉只占下方 58dvh，项目抽屉上方仍留出页面区；两者都用顶栏
+     下方的位置。指令库在 82dvh 时上方只剩几像素，改停在其底部导航上方。 */
+  .app-shell[data-mobile-panel='properties'] .toast,
+  .app-shell[data-mobile-panel='project'] .toast,
+  .app-shell[data-quick-edit='open'] .toast {
+    top: calc(64px + env(safe-area-inset-top, 0px));
     bottom: auto;
     z-index: 140;
+    max-width: min(320px, calc(100vw - 24px));
+  }
+
+  .app-shell[data-mobile-panel='instructions'] .toast {
+    top: auto;
+    bottom: calc(64px + env(safe-area-inset-bottom, 0px));
+    z-index: 140;
+    max-width: min(320px, calc(100vw - 24px));
   }
 }
 
@@ -5101,7 +5174,7 @@ body[data-drag-kind] {
 
 .wb-theme-control {
   display: flex;
-  height: 36px;
+  height: var(--topbar-control-h);
   flex: 0 0 auto;
   align-items: stretch;
   border: 1px solid var(--border);
@@ -5241,10 +5314,6 @@ body[data-drag-kind] {
 }
 
 @media (max-width: 900px) {
-  .wb-theme-control {
-    height: 38px;
-  }
-
   .wb-theme-button {
     width: 40px;
     justify-content: center;
@@ -5367,7 +5436,9 @@ body[data-drag-kind] {
 
 .tag-card select.table-input {
   appearance: none;
-  padding: 0 12px 0 3px;
+  /* 窄屏四列布局只剩约 57px；为 FALSE/TRUE 留足文字空间，箭头仍保持
+     7px 的可点击视觉边界，不靠压缩文字换取“没溢出”。 */
+  padding: 0 8px 0 3px;
   background-image:
     linear-gradient(45deg, transparent 45%, currentColor 45%, currentColor 55%, transparent 55%),
     linear-gradient(-45deg, transparent 45%, currentColor 45%, currentColor 55%, transparent 55%);
@@ -5642,15 +5713,15 @@ body[data-drag-kind] {
     minmax(0, 1.1fr)
     minmax(0, 0.84fr)
     minmax(0, 0.88fr)
-    24px;
+    28px;
   gap: 4px;
 }
 
 .tag-table-head {
-  padding: 0 1px 4px;
+  padding: 0 1px 6px;
   color: var(--faint);
-  font-size: 9.5px;
-  letter-spacing: 0.05em;
+  font-size: 11px;
+  letter-spacing: 0.04em;
 }
 
 .tag-name-cell {
@@ -5658,27 +5729,27 @@ body[data-drag-kind] {
 }
 
 .tag-name-cell .type-pill {
-  width: 31px;
-  height: 17px;
-  flex-basis: 31px;
+  width: 36px;
+  height: 20px;
+  flex-basis: 36px;
   border-color: transparent;
   background: color-mix(in srgb, var(--control) 18%, transparent);
   color: var(--faint);
-  font-size: 8.5px;
-  line-height: 15px;
+  font-size: 10.5px;
+  line-height: 18px;
   letter-spacing: 0.02em;
 }
 
 .tag-card .tag-name-input {
   color: var(--text);
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 700;
 }
 
 .tag-card .table-input,
 .tag-card .live-value {
-  height: 30px;
-  min-height: 30px;
+  height: 32px;
+  min-height: 32px;
   padding-inline: 3px;
   border: 1px solid transparent;
   border-radius: 5px;
@@ -5693,19 +5764,19 @@ body[data-drag-kind] {
 
 .tag-card .address-input {
   color: var(--accent-ink);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
 }
 
 .tag-card select.table-input {
   color: var(--muted);
-  font-size: 10.5px;
+  font-size: 11.5px;
 }
 
 .tag-card .live-value {
   border-radius: 999px;
   background: color-mix(in srgb, var(--raised) 85%, transparent);
-  font-size: 10.5px;
+  font-size: 12px;
   font-weight: 600;
 }
 
@@ -5715,8 +5786,9 @@ body[data-drag-kind] {
 }
 
 .tag-card .delete-mini {
-  width: 22px;
-  height: 22px;
+  width: 26px;
+  height: 26px;
+  font-size: 15px;
   opacity: 0.3;
 }
 
@@ -5726,10 +5798,11 @@ body[data-drag-kind] {
 }
 
 .tag-card > .comment-input {
-  height: 19px;
+  height: 22px;
   padding-inline: 3px;
   color: var(--faint);
-  font-size: 9.5px;
+  font-size: 11.5px;
+  line-height: 22px;
   letter-spacing: 0.01em;
 }
 

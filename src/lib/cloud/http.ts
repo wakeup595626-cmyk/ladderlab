@@ -89,6 +89,14 @@ export async function cloudRequest<T>(
       }
     }
     if (!response.ok) {
+      // 限流和体积超限是最常见的两种“其实可以自己处理”的失败，
+      // 直接给中文结论，避免把英文网关错误原样丢到登录面板上。
+      if (response.status === 429) {
+        throw new CloudError('操作太频繁了，云端暂时限流，请过一会儿再试', 429, 'rate_limited')
+      }
+      if (response.status === 413) {
+        throw new CloudError('本次要上传的内容太大，请稍后再同步一次', 413, 'payload_too_large')
+      }
       const upstream = (parsed ?? null) as UpstreamError | null
       const picked = pickMessage(upstream)
       throw new CloudError(

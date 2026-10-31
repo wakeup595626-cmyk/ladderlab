@@ -682,7 +682,7 @@ describe('13 启保停加定时和运行灯', () => {
       ['运行灯', 'Q0.1=1'],
     ])
     expect(edgesOf(chart)).toEqual([
-      '__initial→__run: 启动',
+      '__initial→__run: 启动 且 停止=0',
       '__run→__done: 两秒到',
       '__run→__initial: 停止',
     ])

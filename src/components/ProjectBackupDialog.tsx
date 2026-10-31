@@ -401,7 +401,8 @@ function BackupPreview({
       )}
       <p className="project-import-note">
         同 ID 的工程会按备份内容更新；同名但不同 ID 的工程会保留双方，备份里的这个改名为“名称（导入）”。
-        如果预览后项目库又有变化，会先刷新预览并要求再次确认。
+        恢复会为每个工程生成一个新版本，登录账号时会自动同步到云端；如果预览后项目库又有变化，
+        会先刷新预览并要求再次确认。
       </p>
       <div className="project-import-actions">
         <button type="button" className="project-import-back" onClick={onBack} disabled={busy}>重新选择</button>

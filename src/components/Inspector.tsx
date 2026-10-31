@@ -13,7 +13,7 @@ import type {
   Selection,
   TagDef,
 } from '../engine/types'
-import { FIELD_LIMITS } from '../lib/limits'
+import { FIELD_LIMITS, STRUCTURE_LIMITS } from '../lib/limits'
 import {
   addTag,
   changeContactKind,
@@ -364,11 +364,27 @@ function TagsPanel({
     if (isSearching) return true
     return openGroupSet.has(key)
   }
-  const mountedSet = new Set(mountedGroups)
   // 折叠动画需要内容先存在过一帧，所以展开过的分组记进 mountedGroups。
-  // 直接按渲染期派生补齐，省掉一次 effect 重渲染（1000 段时差别很明显）。
+  // 当前渲染先派生补齐，提交后再把新 key 并入 state；这样首帧就有内容，
+  // 也不会在 render 期间同步 setState。
   const missingMounted = openGroupList.filter((key) => !mountedGroups.includes(key))
-  if (missingMounted.length > 0) setMountedGroups([...mountedGroups, ...missingMounted])
+  const mountedSet = new Set(missingMounted.length > 0
+    ? [...mountedGroups, ...missingMounted]
+    : mountedGroups)
+  const missingMountedSignature = missingMounted.join('\u0000')
+  useEffect(() => {
+    if (!missingMountedSignature) return
+    const missing = missingMountedSignature.split('\u0000')
+    // 新增的展开段必须在提交后补进 mountedGroups，收起动画才能拿到已渲染内容。
+    // oxlint-disable-next-line react/set-state-in-effect -- 用于让收起动画拿到已渲染内容。
+    setMountedGroups((current) => {
+      const next = [...current]
+      for (const key of missing) {
+        if (!next.includes(key)) next.push(key)
+      }
+      return next.length === current.length ? current : next
+    })
+  }, [missingMountedSignature])
   // 收起动画播完就立刻卸载卡片：搜索会把所有分组都“展开”一次，如果永久保留，
   // 上千个程序段会一直拖着几万个卡片节点不放。
   const releaseMounted = (key: string) => {
@@ -441,7 +457,23 @@ function TagsPanel({
     return () => window.cancelAnimationFrame(frame)
   }, [activeGroupKey, defaultOpenKey, isSearching])
 
-  const titleOf = (key: string) => rungGroups.find((group) => group.key === key)?.title ?? '前面的程序段'
+  const titleOf = (key: string) => {
+    if (key === UNUSED_KEY) return '未引用变量'
+    return rungGroups.find((group) => group.key === key)?.title ?? '前面的程序段'
+  }
+
+  // 新建变量默认没有程序段引用。分组视图里若只更新工程而不展开“未引用”，
+  // 用户点完按钮会看不见新行，像是操作失败；这里把新行直接滚到眼前。
+  const addNewTag = (kind: 'BOOL' | 'INT') => {
+    const next = addTag(program, kind)
+    const added = next.tags.find((tag) => !program.tags.some((current) => current.id === tag.id))
+    if (!added) {
+      onNotify(`没有可用的地址了：请先删掉一些 ${kind} 变量或腾出 M 区别的字节。`)
+      return
+    }
+    onProgram(next)
+    revealTag(added, UNUSED_KEY)
+  }
 
   const renderTagCard = (tag: TagDef) => {
     const usage = usageCounts.get(normalizeReference(tag.name)) ?? 0
@@ -606,29 +638,14 @@ function TagsPanel({
           <button
             type="button"
             className="secondary-button"
-            onClick={() => {
-              const next = addTag(program, 'BOOL')
-              // addTag 在地址池耗尽时不改动工程，这里必须说清楚，否则按钮看起来“点了没反应”。
-              if (next.tags.length === program.tags.length) {
-                onNotify('没有可用的地址了：请先删掉一些 BOOL 变量或腾出 M 区别的字节。')
-                return
-              }
-              onProgram(next)
-            }}
+            onClick={() => addNewTag('BOOL')}
           >
             + BOOL
           </button>
           <button
             type="button"
             className="secondary-button"
-            onClick={() => {
-              const next = addTag(program, 'INT')
-              if (next.tags.length === program.tags.length) {
-                onNotify('没有可用的地址了：请先删掉一些 INT 变量或腾出 M 区的字节。')
-                return
-              }
-              onProgram(next)
-            }}
+            onClick={() => addNewTag('INT')}
           >
             + INT
           </button>
@@ -1268,7 +1285,24 @@ function PropertiesPanel({
             {referenceField('当前步号 INT（可选）', 'stepTag', 'INT')}
             <label className="field">
               <span>灯字序列（0～255，逗号分隔）</span>
-              <textarea key={output.pattern?.join(',')} className="mono" rows={3} defaultValue={output.pattern?.join(', ') ?? ''} onBlur={(event) => setOutput({ pattern: event.target.value.split(/[,，\s]+/).filter(Boolean).map(Number) })} />
+              <textarea
+                key={output.pattern?.join(',')}
+                className="mono"
+                rows={3}
+                defaultValue={output.pattern?.join(', ') ?? ''}
+                onBlur={(event) => {
+                  const values = event.target.value.split(/[,，\s]+/).filter(Boolean).map(Number)
+                  const invalid = values.some((value) => !Number.isInteger(value) || value < 0 || value > 255)
+                  if (invalid || values.length > STRUCTURE_LIMITS.pattern) {
+                    onNotify(invalid
+                      ? '灯字序列只能填 0～255 的整数，已保留原序列'
+                      : `灯字序列最多 ${STRUCTURE_LIMITS.pattern} 个，已保留原序列`)
+                    event.target.value = output.pattern?.join(', ') ?? ''
+                    return
+                  }
+                  setOutput({ pattern: values })
+                }}
+              />
               <small>教学扩展指令，不是西门子标准 PATTERN 指令。停止时输出 0，保留下一拍位置。</small>
             </label>
           </>

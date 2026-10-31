@@ -56,6 +56,23 @@ export async function estimateStoragePressure(): Promise<StoragePressure> {
   }
 }
 
+export type PersistenceState = 'granted' | 'denied' | 'unsupported'
+
+/**
+ * 请求浏览器把本站数据标记为“持久”。必须在用户已经产生保存行为后调用；
+ * 浏览器可以拒绝（例如无痕模式），拒绝时只影响回收优先级，不影响保存。
+ */
+export async function requestPersistentStorage(): Promise<PersistenceState> {
+  try {
+    const storage = typeof navigator === 'undefined' ? undefined : navigator.storage
+    if (!storage || typeof storage.persist !== 'function') return 'unsupported'
+    if (typeof storage.persisted === 'function' && await storage.persisted()) return 'granted'
+    return (await storage.persist()) ? 'granted' : 'denied'
+  } catch {
+    return 'denied'
+  }
+}
+
 export function formatStorageBytes(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes <= 0) return '0 B'
   const units = ['B', 'KB', 'MB', 'GB']

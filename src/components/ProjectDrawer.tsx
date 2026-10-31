@@ -19,6 +19,7 @@ import {
 
 interface ProjectDrawerProps {
   open: boolean
+  signedIn: boolean
   program: Program
   activeRungId: string | null
   savedProjects: SavedProject[]
@@ -41,6 +42,7 @@ interface ProjectDrawerProps {
 
 export default function ProjectDrawer({
   open,
+  signedIn,
   program,
   activeRungId,
   savedProjects,
@@ -89,7 +91,7 @@ export default function ProjectDrawer({
         <div className="wb-drawer-head">
           <div>
             <h2 id="project-drawer-title">项目</h2>
-            <p>本机项目库与实验资源</p>
+            <p>{signedIn ? '账号项目库、云同步与实验资源' : '本机项目库与实验资源'}</p>
           </div>
           <button ref={closeRef} type="button" className="icon-button wb-drawer-close" onClick={onClose} aria-label="关闭项目">
             <CloseIcon size={19} />
@@ -133,7 +135,7 @@ export default function ProjectDrawer({
 
         <section className="wb-drawer-section wb-saved-section" aria-labelledby="saved-projects-title">
           <div className="wb-drawer-section-head">
-            <h3 id="saved-projects-title">本机项目</h3>
+            <h3 id="saved-projects-title">{signedIn ? '账号项目' : '本机项目'}</h3>
             <span>
               {savedProjects.length + brokenRecordCount > 0
                 ? `${savedProjects.length} 个${brokenRecordCount > 0 ? ` · ${brokenRecordCount} 条异常` : ''}`
@@ -147,7 +149,9 @@ export default function ProjectDrawer({
             <div className="wb-project-empty">
               <FolderIcon size={20} />
               <p>还没有命名项目</p>
-              <small>点击顶栏「保存」，给当前工程起一个名称。</small>
+              <small>
+                点击顶栏「保存」，给当前工程起一个名称{signedIn ? '，随后同步到当前账号' : ''}。
+              </small>
             </div>
           ) : (
             <ul className="wb-saved-projects">
@@ -181,7 +185,7 @@ export default function ProjectDrawer({
                       className="wb-saved-project-delete"
                       onClick={() => onDeleteSavedProject(project)}
                       aria-label={`删除项目「${project.name}」`}
-                      title="从本机项目库删除"
+                      title={signedIn ? '删除项目（同步时同时删除云端副本）' : '从本机项目库删除'}
                     >
                       <TrashIcon size={15} />
                     </button>
@@ -232,7 +236,9 @@ export default function ProjectDrawer({
           )}
 
           <p className="wb-saved-project-note">
-            「保存」写入当前浏览器；换设备请从右上角「导出」下载工程 JSON。
+            {signedIn
+              ? '「保存」先写入本机，再在后台同步到当前账号；换设备登录同一账号即可继续。'
+              : '「保存」写入当前浏览器；换设备请从右上角「导出」下载工程 JSON。'}
           </p>
         </section>
 

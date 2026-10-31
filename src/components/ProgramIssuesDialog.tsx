@@ -15,6 +15,8 @@ export default function ProgramIssuesDialog({
 }) {
   const closeRef = useRef<HTMLButtonElement>(null)
   const dialogRef = useModalFocus<HTMLDivElement>(true, onClose, closeRef)
+  const hasStructureIssue = issues.some((issue) => issue.code === 'structure')
+  const hasVariableIssue = issues.some((issue) => issue.code !== 'structure')
 
   return (
     <div
@@ -34,8 +36,12 @@ export default function ProgramIssuesDialog({
         aria-labelledby="issues-title"
         tabIndex={-1}
       >
-        <h2 id="issues-title">变量问题（{issues.length} 处）</h2>
-        <p>工程已载入。修好这些地址和引用后，编译和导出就不会再被挡住。</p>
+        <h2 id="issues-title">{hasStructureIssue ? '工程问题' : '变量问题'}（{issues.length} 处）</h2>
+        <p>
+          {hasStructureIssue
+            ? '下面这些内容会阻止保存、导出或分享，请先按提示精简工程。'
+            : '工程已载入。修好这些地址和引用后，编译和导出就不会再被挡住。'}
+        </p>
         <ol className="issues-list">
           {issues.map((issue, index) => <li key={index}>{issue.message}</li>)}
         </ol>
@@ -43,16 +49,18 @@ export default function ProgramIssuesDialog({
           <button ref={closeRef} type="button" className="confirm-cancel" onClick={onClose}>
             关闭
           </button>
-          <button
-            type="button"
-            className="confirm-ok"
-            onClick={() => {
-              onClose()
-              onOpenTags()
-            }}
-          >
-            打开变量表
-          </button>
+          {hasVariableIssue && (
+            <button
+              type="button"
+              className="confirm-ok"
+              onClick={() => {
+                onClose()
+                onOpenTags()
+              }}
+            >
+              打开变量表
+            </button>
+          )}
         </div>
       </div>
     </div>

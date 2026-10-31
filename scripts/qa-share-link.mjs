@@ -14,6 +14,7 @@ import {
   createQaPage,
   DEFAULT_QA_APP_URL,
   DEFAULT_QA_CDP,
+  isBrowserExtensionNoise,
 } from './qa-cdp.mjs'
 
 const CDP = process.env.LADDERLAB_CDP ?? DEFAULT_QA_CDP
@@ -37,10 +38,14 @@ const { send } = client
 const errors = []
 client.onEvent((message) => {
   if (message.method === 'Runtime.exceptionThrown') {
-    errors.push(message.params.exceptionDetails?.exception?.description ?? 'exception')
+    const details = message.params.exceptionDetails
+    if (!isBrowserExtensionNoise(details)) {
+      errors.push(details?.exception?.description ?? 'exception')
+    }
   }
   if (message.method === 'Runtime.consoleAPICalled' && message.params.type === 'error') {
-    errors.push(message.params.args?.map((arg) => arg.value ?? arg.description).join(' '))
+    const text = message.params.args?.map((arg) => arg.value ?? arg.description).join(' ')
+    if (!isBrowserExtensionNoise(text)) errors.push(text)
   }
 })
 

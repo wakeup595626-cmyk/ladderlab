@@ -85,7 +85,14 @@ export function useModalFocus<T extends HTMLElement>(
       const preferred = initialFocusTarget.current?.current
       const items = focusable()
       // 指定了落点就严格用它；落点被隐藏时退回普通控件，避免手机自动弹出键盘。
-      const visiblePreferred = preferred && items.includes(preferred) ? preferred : null
+      // 标题一类 tabIndex={-1} 的元素不在 Tab 序列里，但作为初始焦点仍然合法，
+      // 而且比落在第一个输入框上更能说明“现在打开的是哪个弹层”。
+      const visiblePreferred = preferred && (
+        items.includes(preferred)
+        || (preferred.tabIndex === -1 && preferred.getClientRects().length > 0)
+      )
+        ? preferred
+        : null
       const fallback = initialFocusTarget.current
         ? items.find((element) => !element.matches('input, select, textarea')) ?? items[0]
         : items.find((element) => element.matches('input, select, textarea')) ?? items[0]

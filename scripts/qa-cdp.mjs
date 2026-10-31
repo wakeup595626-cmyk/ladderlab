@@ -3,6 +3,17 @@
 export const DEFAULT_QA_CDP = 'http://127.0.0.1:9444'
 export const DEFAULT_QA_APP_URL = 'http://127.0.0.1:4173/'
 
+/**
+ * 浏览器扩展（内容脚本、侧边栏、下载器等）注入的报错不属于被测应用。
+ * 验收只对本项目自己的脚本负责，否则装了扩展的机器会永远报假失败。
+ */
+export function isBrowserExtensionNoise(value) {
+  const text = typeof value === 'string' ? value : JSON.stringify(value ?? '')
+  return text.includes('chrome-extension://')
+    || text.includes('moz-extension://')
+    || text.includes('safari-web-extension://')
+}
+
 /** 页面上下文读取项目库（v2 分键，应用删除墓碑，兼容 v1）。 */
 export const READ_LIBRARY_IN_PAGE = String.raw`(() => {
   try {

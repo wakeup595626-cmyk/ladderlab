@@ -4,6 +4,7 @@ import {
   DEFAULT_QA_APP_URL,
   DEFAULT_QA_CDP,
   READ_LIBRARY_IN_PAGE,
+  isBrowserExtensionNoise,
   selectExactPage,
 } from './qa-cdp.mjs'
 
@@ -54,10 +55,14 @@ socket.addEventListener('message', (event) => {
     return
   }
   if (message.method === 'Runtime.exceptionThrown') {
-    consoleErrors.push(message.params.exceptionDetails?.exception?.description ?? 'exception')
+    const details = message.params.exceptionDetails
+    if (!isBrowserExtensionNoise(details)) {
+      consoleErrors.push(details?.exception?.description ?? 'exception')
+    }
   }
   if (message.method === 'Runtime.consoleAPICalled' && message.params.type === 'error') {
-    consoleErrors.push(message.params.args?.map((item) => item.value ?? item.description).join(' '))
+    const text = message.params.args?.map((item) => item.value ?? item.description).join(' ')
+    if (!isBrowserExtensionNoise(text)) consoleErrors.push(text)
   }
 })
 

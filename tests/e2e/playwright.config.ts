@@ -12,6 +12,7 @@ export default defineConfig({
   // stay out of `npm test` without an extra vitest config.
   testMatch: '**/*.e2e.ts',
   fullyParallel: true,
+  workers: process.env.CI ? 2 : 4,
   forbidOnly: Boolean(process.env.CI),
   retries: 0,
   timeout: 45_000,
@@ -25,7 +26,8 @@ export default defineConfig({
   ],
   use: {
     baseURL,
-    trace: 'on-first-retry',
+    // retries 固定为 0，on-first-retry 永远拿不到 trace；失败即保留。
+    trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',
   },

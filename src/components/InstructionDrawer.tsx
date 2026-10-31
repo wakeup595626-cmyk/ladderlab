@@ -1,3 +1,4 @@
+import { useRef } from 'react'
 import type { ContactKind, OutputKind, Program } from '../engine/types'
 import type { DragPayload } from '../lib/dragTypes'
 import type { FavoriteInsertTarget } from '../lib/insertTarget'
@@ -44,7 +45,10 @@ export default function InstructionDrawer({
   onClose,
   dragging = false,
 }: InstructionDrawerProps) {
-  const drawerRef = useModalFocus<HTMLDivElement>(true, onClose)
+  // 抽屉里第一个可聚焦控件是程序段下拉；直接落在下拉上会让手机立刻弹出
+  // 原生选择器。初始焦点放在标题上，先读出「全部指令」再让用户自己 Tab。
+  const titleRef = useRef<HTMLHeadingElement>(null)
+  const drawerRef = useModalFocus<HTMLDivElement>(true, onClose, titleRef)
 
   return (
     <div
@@ -60,6 +64,7 @@ export default function InstructionDrawer({
         onClose()
       }}
     >
+      <h2 ref={titleRef} className="sr-only" tabIndex={-1}>全部指令</h2>
       <ProjectSidebar
         program={program}
         profile={program.profile}

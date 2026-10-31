@@ -180,7 +180,8 @@ describe('自建工程顺序功能图：三种不同结构', () => {
     ])
     // 梯形图里没有任何网络复位 ConveyorRun，完成步不能凭空写 Q0.0=0。
     expect(chart.steps[2].actions).toEqual([{ text: '两秒到', detail: 'M3.1=1' }])
-    expect(labelOf(chart, '__initial', '__run')).toBe('启动输送')
+    // 进入运行步必须同时满足启动与停止互锁，否则图上看不出“停止按下时不能启动”。
+    expect(labelOf(chart, '__initial', '__run')).toBe('启动输送 且 停止互锁=0')
     expect(labelOf(chart, '__run', '__done')).toBe('两秒到')
     expect(labelOf(chart, '__run', '__initial')).toBe('停止互锁')
     // 梯形图里没有复位 ConveyorRun 的网络，完成步就没有回到初始步的出口。
@@ -655,5 +656,128 @@ describe('状态链与移位链的转移完整性', () => {
     expect(chart.edges.some((edge) => edge.to === 'Step2')).toBe(false)
     expect(chart.notes.some((note) => note.includes('第 2 步'))).toBe(true)
     expect(chart.notes.every((note) => !note.includes('补齐'))).toBe(true)
+  })
+})
+
+/** 双启动并联 + 安全许可 + 总停：自保持网络里的四个条件一个都不能丢。 */
+function parallelStartHoldProgram(): Program {
+  return {
+    schema: 1,
+    name: '双启动并联联锁',
+    profile: 'v21',
+    tags: [
+      tag('StartLeft', '%I0.0', '左启动'),
+      tag('StartRight', '%I0.1', '右启动'),
+      tag('SafetyGuard', '%I0.2', '安全许可'),
+      tag('StopAll', '%I0.3', '总停'),
+      tag('Motor', '%Q0.0', '电机运行'),
+      tag('RunDone', '%M2.0', '两秒到'),
+    ],
+    rungs: [
+      coil('l1', '双启动并联自保持', [
+        parallel('l1-par', [
+          [contact('l1-c1', 'StartLeft')],
+          [contact('l1-c2', 'StartRight')],
+        ]),
+        contact('l1-c3', 'SafetyGuard'),
+        contact('l1-c4', 'Motor'),
+        contact('l1-c5', 'StopAll', 'NC'),
+      ], 'Motor'),
+      rung('l2', '运行两秒', [contact('l2-c1', 'Motor')], {
+        kind: 'TON',
+        tag: 'T9',
+        pt: 2000,
+        qTag: 'RunDone',
+      }),
+    ],
+  }
+}
+
+/** 序列盒驱动两盏灯；extra 用来往序列盒网络里塞一条额外条件。 */
+function patternProgram(extra?: LadderNode): Program {
+  const nodes: LadderNode[] = [contact('q1-c1', 'Start')]
+  if (extra) nodes.push(extra)
+  return {
+    schema: 1,
+    name: '序列盒灯字',
+    profile: 'v21',
+    tags: [
+      tag('Start', '%I0.0', '启动'),
+      tag('LampByte', '%QB0', '灯字'),
+      { ...tag('LampBit0', '%Q0.0', '一号灯位'), bitOf: 'LampByte' },
+      { ...tag('LampBit1', '%Q0.1', '二号灯位'), bitOf: 'LampByte' },
+      tag('LampOne', '%Q0.0', '一号灯'),
+      tag('LampTwo', '%Q0.1', '二号灯'),
+    ],
+    rungs: [
+      rung('q1', '序列盒逐拍点亮', nodes, {
+        kind: 'PATTERN',
+        tag: 'LampByte',
+        pattern: [1, 2, 1],
+      }),
+      coil('q2', '一号灯', [contact('q2-c1', 'LampBit0')], 'LampOne'),
+      coil('q3', '二号灯', [contact('q2-c1', 'LampBit1')], 'LampTwo'),
+    ],
+  }
+}
+
+/** 自保持 + 计数器：可选完成位，用来验证「完成转移」写的是谁。 */
+function counterHoldProgram(withDone: boolean): Program {
+  return {
+    schema: 1,
+    name: withDone ? '计数到站' : '计数器无完成位',
+    profile: 'v21',
+    tags: [
+      tag('StartBtn', '%I0.0', '启动'),
+      tag('StopBtn', '%I0.1', '停止'),
+      tag('Feeder', '%Q0.0', '送料'),
+      ...(withDone ? [tag('CountDone', '%M2.0', '计数到')] : []),
+    ],
+    rungs: [
+      coil('c1', '送料自保持', [
+        contact('c1-c1', 'StartBtn'),
+        contact('c1-c2', 'Feeder'),
+        contact('c1-c3', 'StopBtn', 'NC'),
+      ], 'Feeder'),
+      rung('c2', '计五次', [contact('c2-c1', 'Feeder')], {
+        kind: 'CTU',
+        tag: 'C1',
+        pv: 5,
+        ...(withDone ? { qTag: 'CountDone' } : {}),
+      }),
+    ],
+  }
+}
+
+describe('顺序功能图回归：完整条件与诚实降级', () => {
+  it('并联双启动、串联许可、停止互锁全部写进进入运行步的转移', () => {
+    const chart = mustBuild(parallelStartHoldProgram())
+    expect(chart.source).toBe('run-cycle')
+    const entry = labelOf(chart, '__initial', '__run') ?? ''
+    expect(entry).toContain('左启动')
+    expect(entry).toContain('右启动')
+    expect(entry).toContain('安全许可')
+    expect(entry).toContain('总停=0')
+    expect(labelOf(chart, '__run', '__initial')).toBe('总停')
+  })
+
+  it('序列盒多出一条停止/许可条件时退回逐网络图，而不是丢掉条件', () => {
+    expect(mustBuild(patternProgram()).source).toBe('pattern')
+    const guarded = buildSfc(patternProgram(contact('q1-c2', 'Stop', 'NC')))
+    expect(guarded).not.toBeNull()
+    expect(guarded!.source).not.toBe('pattern')
+  })
+
+  it('计数器完成转移写自己的完成位，不再一律叫「到时」', () => {
+    const chart = mustBuild(counterHoldProgram(true))
+    expect(chart.source).toBe('run-cycle')
+    expect(labelOf(chart, '__run', '__done')).toBe('计数到')
+  })
+
+  it('计数器没有完成位时不留悬空的完成步', () => {
+    const chart = mustBuild(counterHoldProgram(false))
+    expect(chart.source).toBe('run-cycle')
+    expect(chart.steps.some((step) => step.key === '__done')).toBe(false)
+    expect(chart.edges.some((edge) => edge.to === '__done')).toBe(false)
   })
 })

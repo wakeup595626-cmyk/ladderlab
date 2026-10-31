@@ -10,7 +10,6 @@ import {
   useState,
 } from 'react'
 import './SupportBadge.css'
-import alipayQr from '../assets/support-alipay.png'
 import {
   ArrowUpRightIcon,
   CloseIcon,
@@ -22,6 +21,9 @@ import {
 const GITHUB_PROFILE = 'https://github.com/wakeup595626-cmyk'
 const GITHUB_REPO = 'https://github.com/wakeup595626-cmyk/ladderlab'
 const REPO_API = 'https://api.github.com/repos/wakeup595626-cmyk/ladderlab'
+// 收款码不是应用外壳，只有真正打开打赏面板时才需要。放在 public 下按 URL
+// 懒加载，避免 Service Worker 给每位访客预缓存近百 KB 的图片。
+const ALIPAY_QR_URL = `${import.meta.env.BASE_URL}support-alipay.png`
 /** Star 数只是锦上添花：缓存六小时，拉不到就只留图标，不影响编辑。 */
 const STAR_CACHE_KEY = 'ladderlab.star-count'
 const STAR_CACHE_TTL = 6 * 60 * 60 * 1000
@@ -529,7 +531,7 @@ export default function SupportBadge() {
           <figure className="support-badge-scan">
             <img
               className="support-badge-qr"
-              src={alipayQr}
+              src={ALIPAY_QR_URL}
               alt="支付宝收款二维码，收款人显示为「树」"
               width={640}
               height={727}

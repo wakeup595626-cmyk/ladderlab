@@ -2321,14 +2321,24 @@
 
 .guide-sheet {
   position: relative;
+  display: flex;
   width: min(760px, 100%);
   max-height: calc(100vh - 48px);
   max-height: calc(100dvh - 48px);
-  overflow-y: auto;
+  flex-direction: column;
+  overflow: hidden;
   padding: 28px 30px 22px;
   border: 1px solid var(--control);
   border-radius: var(--radius-sheet);
   background: var(--surface);
+}
+
+.guide-body {
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding-right: 4px;
+  overscroll-behavior: contain;
 }
 
 .guide-close {
@@ -2428,6 +2438,7 @@
 
 .guide-actions {
   display: flex;
+  flex: 0 0 auto;
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
@@ -2476,6 +2487,55 @@
   color: var(--faint);
   font-size: 11.5px;
   line-height: 1.4;
+}
+
+.guide-shortcuts {
+  margin-top: 16px;
+  padding: 13px 14px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--raised);
+}
+
+.guide-shortcuts h3 {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.guide-shortcuts dl {
+  display: grid;
+  gap: 5px 18px;
+  margin: 0;
+}
+
+.guide-shortcuts dl > div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 12px;
+  padding: 4px 0;
+  border-top: 1px solid color-mix(in srgb, var(--rule) 72%, transparent);
+}
+
+.guide-shortcuts dt {
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.guide-shortcuts dd {
+  margin: 0;
+  color: var(--faint);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.guide-shortcuts kbd {
+  font: inherit;
 }
 
 .guide-footnote {
@@ -3353,6 +3413,16 @@ body[data-drag-kind] * {
   .guide-actions {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .guide-shortcuts dl > div {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px;
+  }
+
+  .guide-shortcuts dd {
+    text-align: left;
+    white-space: normal;
   }
 
   .guide-primary,

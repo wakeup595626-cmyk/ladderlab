@@ -54,7 +54,7 @@ function validTable(raw: string): boolean {
 }
 
 /** Supabase 的 secret/service_role 密钥拥有绕过 RLS 的权限，绝不能留在浏览器里。 */
-function looksLikeSecretKey(key: string): boolean {
+export function looksLikeSecretKey(key: string): boolean {
   if (key.startsWith('sb_secret_')) return true
   const payload = key.split('.')[1]
   if (!payload) return false
@@ -144,6 +144,14 @@ export function readCloudConfig(): CloudConfig | null {
   const url = normalizeUrl(envValue(CLOUD_ENV_KEYS.url))
   const anonKey = envValue(CLOUD_ENV_KEYS.anonKey)
   if (!url || !anonKey) return null
+  // 构建环境同样要过一遍密钥检查：CI 里误填 service_role，打出来的 JS
+  // 会带着绕过 RLS 的权限公开在 GitHub Pages 上，这里必须拒绝启用云端。
+  if (looksLikeSecretKey(anonKey)) {
+    console.error(
+      '[ladderlab] 构建变量里的 anon key 其实是 service_role / secret 密钥，已拒绝启用云端同步。请改用 publishable / anon public key 并重新部署。',
+    )
+    return null
+  }
   const configuredTable = envValue(CLOUD_ENV_KEYS.table)
   return { url, anonKey, table: validTable(configuredTable) ? configuredTable : DEFAULT_TABLE }
 }

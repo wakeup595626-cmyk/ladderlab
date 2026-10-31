@@ -9,7 +9,7 @@ import type {
 import { contentRungs, ensureTrailingBlankRung } from '../engine/rungInvariant'
 import { normalizeBitAddress, normalizeByteAddress, splitReference } from '../engine/references'
 import { normalizeLadderChain } from '../engine/ladderStructure'
-import { FIELD_LIMITS, programTextFieldIssues, utf8ByteLength } from './limits'
+import { FIELD_LIMITS, STRUCTURE_LIMITS, programSerializationIssues, utf8ByteLength } from './limits'
 
 const CONTACT_KINDS: ContactKind[] = ['NO', 'NC', 'P', 'N', 'CMP']
 const CONTACT_LABELS: Record<ContactKind, string> = {
@@ -22,11 +22,11 @@ const CONTACT_LABELS: Record<ContactKind, string> = {
 const OUTPUT_KINDS: OutputKind[] = ['COIL', 'SET', 'RESET', 'TON', 'TOF', 'TONR', 'CTU', 'MOVE', 'ADD', 'SUB', 'SHL', 'ROL', 'PATTERN']
 const TAG_KINDS: TagKind[] = ['BOOL', 'INT']
 const PROFILES: ProfileId[] = ['v14', 'v21']
-const MAX_DEPTH = 32
-const MAX_TAGS = 1000
-const MAX_RUNGS = 1000
-const MAX_NODES = 5000
-const MAX_PATTERN = 1024
+const MAX_DEPTH = STRUCTURE_LIMITS.depth
+const MAX_TAGS = STRUCTURE_LIMITS.tags
+const MAX_RUNGS = STRUCTURE_LIMITS.rungs
+const MAX_NODES = STRUCTURE_LIMITS.nodes
+const MAX_PATTERN = STRUCTURE_LIMITS.pattern
 export const MAX_IMPORT_BYTES = 5 * 1024 * 1024
 const RUNG_LIMIT_MESSAGE = `程序段数量超过上限 ${MAX_RUNGS} 条（末尾空白占位段不计入上限）。`
 
@@ -34,7 +34,7 @@ const RUNG_LIMIT_MESSAGE = `程序段数量超过上限 ${MAX_RUNGS} 条（末�
  * 可修复的语义问题。它们不破坏文件结构，因此草稿、项目库和整包恢复都要
  * 允许带着问题载入，由界面提示用户去变量表逐个修正；严格导入仍然拒绝。
  */
-export type ProgramIssueCode = 'empty-address' | 'duplicate-address' | 'undefined-reference'
+export type ProgramIssueCode = 'empty-address' | 'duplicate-address' | 'undefined-reference' | 'structure'
 
 export interface ProgramIssue {
   code: ProgramIssueCode
@@ -523,9 +523,9 @@ export function parseProgramStructureText(text: string): ParsedProgramStructure 
 }
 
 export function serializeProgram(program: Program): string {
-  const issues = programTextFieldIssues(program)
+  const issues = programSerializationIssues(program)
   if (issues.length > 0) {
-    throw new Error(`工程字段不合法，已阻止保存：${issues[0]}`)
+    throw new Error(`工程内容不合法，已阻止导出：${issues[0]}`)
   }
   return JSON.stringify(program, null, 2)
 }

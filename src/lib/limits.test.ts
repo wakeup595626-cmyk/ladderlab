@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { starterProgram } from '../engine/samples'
+import type { LadderNode } from '../engine/types'
 import { setProjectName, updateRungLabel, updateTag } from '../state/programOps'
-import { FIELD_LIMITS, utf8ByteLength } from './limits'
+import { FIELD_LIMITS, STRUCTURE_LIMITS, programStructureIssues, utf8ByteLength } from './limits'
 import { MAX_IMPORT_BYTES, parseProgramText, serializeProgram } from './io'
 
 describe('工程文本字段上限', () => {
@@ -113,5 +114,69 @@ describe('导入大小按 UTF-8 字节计算', () => {
 
   it('ASCII 边界仍按字节数拒绝', () => {
     expect(() => parseProgramText(' '.repeat(MAX_IMPORT_BYTES + 1))).toThrow('超过 5 MB')
+  })
+})
+
+describe('写出端结构上限与导入端一致', () => {
+  const template = starterProgram().rungs[0]
+
+  it('1001 段在导出前被拒绝，不会写出无法导入的工程', () => {
+    const source = starterProgram()
+    const rungs = Array.from({ length: STRUCTURE_LIMITS.rungs + 1 }, (_, index) => ({
+      ...template,
+      id: `r${index}`,
+    }))
+    const oversized = { ...source, rungs }
+    expect(programStructureIssues(oversized).some((issue) => issue.includes('程序段数量超过上限'))).toBe(true)
+    expect(() => serializeProgram(oversized)).toThrow('程序段数量超过上限')
+
+    const atLimit = { ...source, rungs: rungs.slice(0, STRUCTURE_LIMITS.rungs) }
+    expect(programStructureIssues(atLimit)).toEqual([])
+    expect(() => serializeProgram(atLimit)).not.toThrow()
+  })
+
+  it('节点总数超过 5000 被拒绝', () => {
+    const source = starterProgram()
+    const firstNode = template.nodes[0]
+    if (!firstNode || firstNode.type !== 'contact') throw new Error('模板首个元件不是触点')
+    const nodes = Array.from({ length: STRUCTURE_LIMITS.nodes + 1 }, (_, index) => ({ ...firstNode, id: `n${index}` }))
+    const oversized = { ...source, rungs: [{ ...template, nodes }] }
+    expect(programStructureIssues(oversized).some((issue) => issue.includes('节点总数超过上限'))).toBe(true)
+    expect(() => serializeProgram(oversized)).toThrow('节点总数超过上限')
+  })
+
+  it('并联超过 32 层被拒绝', () => {
+    const source = starterProgram()
+    const leaf = template.nodes[0]
+    if (!leaf) throw new Error('模板没有元件')
+    let nested: LadderNode = { ...leaf }
+    for (let index = 0; index <= STRUCTURE_LIMITS.depth; index += 1) {
+      nested = { type: 'parallel', id: `p${index}`, branches: [[nested], []] }
+    }
+    const oversized = { ...source, rungs: [{ ...template, nodes: [nested] }] }
+    expect(programStructureIssues(oversized).some((issue) => issue.includes('并联层数超过'))).toBe(true)
+    expect(() => serializeProgram(oversized)).toThrow('并联层数超过')
+  })
+
+  it('灯字序列超长或含 NaN 时阻止写出', () => {
+    const source = starterProgram()
+    const tooLong = {
+      ...source,
+      rungs: [{
+        ...template,
+        output: { ...template.output, kind: 'PATTERN' as const, pattern: Array.from({ length: STRUCTURE_LIMITS.pattern + 1 }, () => 1) },
+      }],
+    }
+    expect(programStructureIssues(tooLong).some((issue) => issue.includes('灯字序列最多支持'))).toBe(true)
+
+    const notFinite = {
+      ...source,
+      rungs: [{
+        ...template,
+        output: { ...template.output, kind: 'PATTERN' as const, pattern: [0, Number.NaN] },
+      }],
+    }
+    expect(programStructureIssues(notFinite).some((issue) => issue.includes('NaN'))).toBe(true)
+    expect(() => serializeProgram(notFinite)).toThrow('NaN')
   })
 })

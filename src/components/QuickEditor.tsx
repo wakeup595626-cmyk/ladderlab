@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { supportsContact, supportsOutput } from '../engine/profiles'
 import { parseAddress } from '../engine/address'
@@ -383,6 +383,38 @@ export default function QuickEditor({
     }
   }, [anchor, mobile, node, panelRef, rung, selection.path, selection.rungId])
 
+  // 桌面悬浮框不是模态层，关闭后要把焦点还给刚才编辑的画布元件；
+  // 否则按 Esc 后 document.activeElement 会掉到 body，键盘用户丢失位置。
+  const rungOutputId = rung?.output.id
+  const closeAndRestoreCanvasFocus = useCallback(() => {
+    const rungElement = Array.from(document.querySelectorAll<HTMLElement>('.ll-rung'))
+      .find((element) => element.dataset.rungId === selection.rungId)
+    const focusTarget = selection.path
+      ? Array.from(rungElement?.querySelectorAll<SVGGraphicsElement>('[data-node-id]') ?? [])
+        .find((element) => element.dataset.nodeId === node?.id)
+      : Array.from(rungElement?.querySelectorAll<SVGGraphicsElement>('[data-output-id]') ?? [])
+        .find((element) => element.dataset.outputId === rungOutputId)
+    onClose()
+    if (mobile) return
+    window.setTimeout(() => {
+      if (focusTarget?.isConnected) focusTarget.focus({ preventScroll: true })
+    }, 0)
+  }, [mobile, node?.id, onClose, rungOutputId, selection.path, selection.rungId])
+
+  // 桌面属性框不是模态层，焦点常在画布上。Esc 要在这里兜底，
+  // 否则只有把焦点先点进面板才关得掉，键盘用户会觉得快捷键失灵。
+  useEffect(() => {
+    if (mobile) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented) return
+      if (document.querySelector('[role="dialog"][aria-modal="true"]')) return
+      event.preventDefault()
+      closeAndRestoreCanvasFocus()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [closeAndRestoreCanvasFocus, mobile])
+
   if (!rung) return null
 
   const contactPath = node?.type === 'contact' ? selection.path : null
@@ -486,23 +518,6 @@ export default function QuickEditor({
   const output = rung.output
   const outputTag = hasInstance(output.kind) ? null : tagForReference(program, output.tag)
   const outputOptions = hasInstance(output.kind) ? refs.boolRefs : isInteger(output.kind) ? refs.intRefs : refs.boolRefs
-
-  // 桌面悬浮框不是模态层，关闭后要把焦点还给刚才编辑的画布元件；
-  // 否则按 Esc 后 document.activeElement 会掉到 body，键盘用户丢失位置。
-  const closeAndRestoreCanvasFocus = () => {
-    const rungElement = Array.from(document.querySelectorAll<HTMLElement>('.ll-rung'))
-      .find((element) => element.dataset.rungId === selection.rungId)
-    const focusTarget = selection.path
-      ? Array.from(rungElement?.querySelectorAll<SVGGraphicsElement>('[data-node-id]') ?? [])
-        .find((element) => element.dataset.nodeId === node?.id)
-      : Array.from(rungElement?.querySelectorAll<SVGGraphicsElement>('[data-output-id]') ?? [])
-        .find((element) => element.dataset.outputId === rung?.output.id)
-    onClose()
-    if (mobile) return
-    window.setTimeout(() => {
-      if (focusTarget?.isConnected) focusTarget.focus({ preventScroll: true })
-    }, 0)
-  }
 
   return createPortal(
     <>

@@ -345,7 +345,19 @@ function importedName(desired: string, projects: SavedProject[], exceptId: strin
  * - 不同 ID 但同名：两份都留下，备份里的那份改名成“名称（导入）”。
  * 任何情况下都不会静默覆盖已有工程，也不会让两个工程重名。
  */
-export function mergeLibraryBackup(existing: SavedProject[], incoming: SavedProject[]): LibraryMergeResult {
+export interface LibraryMergeOptions {
+  /**
+   * 整包恢复写盘时的版本起点。传入后每个恢复的工程都会拿到严格更新的 savedAt，
+   * 这样“用旧备份恢复”会被当成一次新的保存，而不是被云同步当成过期版本丢弃。
+   */
+  versionBase?: number
+}
+
+export function mergeLibraryBackup(
+  existing: SavedProject[],
+  incoming: SavedProject[],
+  options: LibraryMergeOptions = {},
+): LibraryMergeResult {
   const ordered = [...existing]
   const indexById = new Map(ordered.map((project, index) => [project.id, index] as const))
   const written: SavedProject[] = []
@@ -361,12 +373,17 @@ export function mergeLibraryBackup(existing: SavedProject[], incoming: SavedProj
       ? importedName(desired, ordered, item.id)
       : desired
     if (name !== desired) renamed += 1
+    // 恢复必须产生新版本：既不能小于备份里的版本，也不能小于本机现有版本，
+    // 否则同步的“谁更新”比较会把它判成旧快照。
+    const savedAt = options.versionBase === undefined
+      ? item.savedAt
+      : Math.max(options.versionBase + written.length, (previous?.savedAt ?? 0) + 1, item.savedAt + 1)
     const project: SavedProject = {
       id: item.id,
       name,
       // 恢复旧备份不应把工程的创建时间改成更晚的时间，取两边更早的那个。
       createdAt: previous ? Math.min(previous.createdAt, item.createdAt) : item.createdAt,
-      savedAt: item.savedAt,
+      savedAt,
       program: name === item.program.name ? item.program : { ...item.program, name },
     }
     if (targetIndex === undefined) {

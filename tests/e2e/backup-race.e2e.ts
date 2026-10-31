@@ -166,7 +166,10 @@ test.describe('整包备份并发恢复', () => {
     await expect.poll(async () => (await readStoredProject(page, fixture.project.id))?.program.name, {
       message: '第二次确认后应按备份内容恢复',
     }).toBe(projectName)
-    expect((await readStoredProject(page, fixture.project.id))?.savedAt).toBe(fixture.project.savedAt)
+    // 恢复是一次新的保存：内容回到备份，但版本必须晚于页面 B 的新版本，
+    // 否则云同步会把刚恢复的工程判成旧快照。
+    expect((await readStoredProject(page, fixture.project.id))?.savedAt)
+      .toBeGreaterThan(newer?.savedAt ?? 0)
   })
 
   test('恢复会等待另一个标签页释放项目库 Web Lock', async ({ context, page }) => {

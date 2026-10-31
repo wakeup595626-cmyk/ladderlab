@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type {
   CSSProperties,
@@ -1756,6 +1756,8 @@ function revealInserted(
 
 interface RungSectionProps {
   rung: Program['rungs'][number]
+  /** 任一工程修改都可能替换回调闭包；引用变化时让所有段一起更新。 */
+  programRevision: Program
   index: number
   total: number
   /** 图纸统一宽度：由画布测一次往下传，避免每段各挂一个 ResizeObserver。 */
@@ -1793,7 +1795,7 @@ function RungDropzone({
         active ? 'is-active' : '',
         noop ? 'is-noop' : '',
       ].filter(Boolean).join(' ')}
-      data-drop={JSON.stringify({ type: 'rung-boundary', boundary })}
+      data-drop={'{"type":"rung-boundary","boundary":' + boundary + '}'}
       aria-hidden="true"
     >
       <i />
@@ -1924,7 +1926,7 @@ function RungSection({
           isDropTarget ? 'is-drop-target' : '',
           draggedRungId === rung.id ? 'is-drag-source' : '',
         ].filter(Boolean).join(' ')}
-        data-drop={placeholder ? undefined : JSON.stringify({ type: 'rung', index })}
+        data-drop={placeholder ? undefined : '{"type":"rung","index":' + index + '}' }
         onPointerDown={(event) => {
           const target = event.target
           if (target instanceof Element
@@ -2260,6 +2262,68 @@ function RungSection({
   )
 }
 
+/**
+ * 1000 段工程里，选中一个触点不应该让整张图纸重新协调。
+ * 这里只比较真正属于本段的状态：选中、插入点、拖放目标和程序引用。
+ * 程序一旦变化就更新所有段，确保回调闭包不会引用旧工程。
+ */
+function sameRungSection(previous: Readonly<RungSectionProps>, next: Readonly<RungSectionProps>): boolean {
+  if (
+    previous.rung !== next.rung
+    || previous.programRevision !== next.programRevision
+    || previous.index !== next.index
+    || previous.total !== next.total
+    || previous.availableWidth !== next.availableWidth
+    || previous.segmentLabel !== next.segmentLabel
+    || previous.rungClipboardCount !== next.rungClipboardCount
+    || Boolean(previous.onRenameRung) !== Boolean(next.onRenameRung)
+    || Boolean(previous.onDeleteNode) !== Boolean(next.onDeleteNode)
+    || previous.context.runtime !== next.context.runtime
+    || previous.context.tags !== next.context.tags
+    || contextLocalSelection(previous.context.selection, next.rung.id)
+      !== contextLocalSelection(next.context.selection, next.rung.id)
+    || contextLocalInsert(previous.context, next.rung.id)
+      !== contextLocalInsert(next.context, next.rung.id)
+    || contextLocalDrop(previous.context.dragTarget, next.rung.id, next.index)
+      !== contextLocalDrop(next.context.dragTarget, next.rung.id, next.index)
+    || previous.context.dragSource !== next.context.dragSource
+    || contextLocalMerge(previous.context.mergeTarget, next.rung.id)
+      !== contextLocalMerge(next.context.mergeTarget, next.rung.id)
+    || Boolean(previous.context.onEdit) !== Boolean(next.context.onEdit)
+    || Boolean(previous.context.onExtendSelect) !== Boolean(next.context.onExtendSelect)
+  ) return false
+
+  const previousInsert = contextLocalInsert(previous.context, next.rung.id)
+  const nextInsert = contextLocalInsert(next.context, next.rung.id)
+  return !previousInsert && !nextInsert
+    ? true
+    : previous.context.insertTargetLabel === next.context.insertTargetLabel
+}
+
+function contextLocalSelection(selection: Selection | null, rungId: string) {
+  return selection?.rungId === rungId ? selection : null
+}
+
+function contextLocalInsert(context: DrawContext, rungId: string) {
+  return context.insertTarget?.rungId === rungId ? context.insertTarget : null
+}
+
+function contextLocalMerge(
+  target: DrawContext['mergeTarget'],
+  rungId: string,
+) {
+  return target?.rungId === rungId ? target : null
+}
+
+function contextLocalDrop(target: DropTarget | null, rungId: string, index: number) {
+  if (!target) return null
+  if (target.type === 'rung') return target.index === index ? target : null
+  if (target.type === 'rung-boundary') return null
+  return target.rungId === rungId ? target : null
+}
+
+const MemoRungSection = memo(RungSection, sameRungSection)
+
 interface SlotMenuProps {
   request: SlotMenuRequest
   clipboardCount: number
@@ -2512,8 +2576,9 @@ export default function LadderCanvas({
   const draggingRungIndex = draggingRungId
     ? program.rungs.findIndex((rung) => rung.id === draggingRungId)
     : -1
-  const contentIndexById = new Map(
-    contentRungs(program).map((rung, index) => [rung.id, index + 1] as const),
+  const contentIndexById = useMemo(
+    () => new Map(contentRungs(program).map((rung, index) => [rung.id, index + 1] as const)),
+    [program],
   )
 
   // 选完元件后把焦点交给下一个 +，键盘用户和触屏都能连续往下加。
@@ -2743,8 +2808,9 @@ export default function LadderCanvas({
                 active={dragTarget?.type === 'rung-boundary' && dragTarget.boundary === index}
                 noop={index === draggingRungIndex || index === draggingRungIndex + 1}
               />
-              <RungSection
+              <MemoRungSection
                 rung={rung}
+                programRevision={program}
                 index={index}
                 total={contentIndexById.size}
                 availableWidth={sheetWidth}

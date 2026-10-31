@@ -181,6 +181,23 @@ describe('storage', () => {
     expect(result.error).not.toMatch(/\.。|。。/)
   })
 
+  it('refuses to save a project that the importer would reject as too large', () => {
+    const base = starterProgram()
+    const template = base.rungs[0]
+    const program = {
+      ...base,
+      rungs: Array.from({ length: 1001 }, (_, index) => ({ ...template, id: `r${index}` })),
+    }
+
+    const result = saveProgram(program)
+    expect(result.ok).toBe(false)
+    if (result.ok) throw new Error('expected a rejected save')
+    expect(result.error).toContain('程序段数量超过上限')
+    // 没有写出任何半成品，刷新后不会出现“草稿损坏”。
+    expect(storage.length).toBe(0)
+    expect(session.length).toBe(0)
+  })
+
   it('prefers the tab draft and falls back to the last committed mirror', () => {
     const program = starterProgram()
     const result = saveProgram(program)

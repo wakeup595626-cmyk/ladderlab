@@ -23,6 +23,16 @@ const STEPS = [
   },
 ] as const
 
+const SHORTCUTS = [
+  ['撤销上一步', 'Ctrl/⌘ + Z'],
+  ['重做下一步', 'Ctrl + Y / Ctrl + Shift + Z'],
+  ['保存当前工程', 'Ctrl/⌘ + S'],
+  ['复制、剪切、粘贴', 'Ctrl/⌘ + C / X / V'],
+  ['给选中元件加分支', 'Shift + F8'],
+  ['删除选中元件或程序段', 'Delete / Backspace'],
+  ['取消取点、关闭浮层', 'Esc'],
+] as const
+
 export default function Guide({ open, onClose, onStartDemo }: GuideProps) {
   const primaryRef = useRef<HTMLButtonElement>(null)
   const dialogRef = useModalFocus<HTMLDivElement>(open, onClose, primaryRef)
@@ -52,25 +62,43 @@ export default function Guide({ open, onClose, onStartDemo }: GuideProps) {
           <CloseIcon size={18} />
         </button>
 
-        <header className="guide-header">
-          <span className="guide-label">LadderLab 快速上手</span>
-          <h2 id="guide-title">三步跑通一张梯形图。</h2>
-          <p id="guide-intro">
-            拖入、改参数、运行。浏览器里就能完成，不用学另一套规则。
-          </p>
-        </header>
+        <div className="guide-body">
+          <header className="guide-header" role="none">
+            <span className="guide-label">LadderLab 快速上手</span>
+            <h2 id="guide-title">三步跑通一张梯形图。</h2>
+            <p id="guide-intro">
+              拖入、改参数、运行。浏览器里就能完成，不用学另一套规则。
+            </p>
+          </header>
 
-        <ol className="guide-steps">
-          {STEPS.map((step, index) => (
-            <li key={step.title} className="guide-step">
-              <span className="guide-step-number" aria-hidden="true">{index + 1}</span>
-              <div>
-                <h3>{step.title}</h3>
-                <p>{step.body}</p>
-              </div>
-            </li>
-          ))}
-        </ol>
+          <ol className="guide-steps">
+            {STEPS.map((step, index) => (
+              <li key={step.title} className="guide-step">
+                <span className="guide-step-number" aria-hidden="true">{index + 1}</span>
+                <div>
+                  <h3>{step.title}</h3>
+                  <p>{step.body}</p>
+                </div>
+              </li>
+            ))}
+          </ol>
+
+          <section className="guide-shortcuts" aria-labelledby="guide-shortcuts-title">
+            <h3 id="guide-shortcuts-title">常用快捷键</h3>
+            <dl>
+              {SHORTCUTS.map(([label, keys]) => (
+                <div key={label}>
+                  <dt>{label}</dt>
+                  <dd><kbd>{keys}</kbd></dd>
+                </div>
+              ))}
+            </dl>
+          </section>
+
+          <p className="guide-footnote">
+            教学仿真器 · 非西门子官方产品 · 不兼容 S7 工程文件。所有编辑与仿真都在浏览器本地完成。
+          </p>
+        </div>
 
         <div className="guide-actions">
           <button ref={primaryRef} type="button" className="guide-primary" onClick={onStartDemo}>
@@ -83,9 +111,6 @@ export default function Guide({ open, onClose, onStartDemo }: GuideProps) {
           <span className="guide-note">随时可以从「更多」菜单重新打开</span>
         </div>
 
-        <p className="guide-footnote">
-          教学仿真器 · 非西门子官方产品 · 不兼容 S7 工程文件。所有编辑与仿真都在浏览器本地完成。
-        </p>
       </div>
     </div>
   )

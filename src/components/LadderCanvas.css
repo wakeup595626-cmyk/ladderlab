@@ -900,16 +900,15 @@
   .ll-rung-header {
     position: relative;
     min-height: 42px;
-    flex-wrap: wrap;
-    gap: 5px;
-    row-gap: 4px;
+    flex-wrap: nowrap;
+    gap: 6px;
     padding-left: 6px;
     /* 给右上角的程序段菜单留出固定位置，工具栏再用多少宽度都不会把它顶出屏幕。 */
     padding-right: 50px;
   }
 
   .ll-rung-title {
-    flex: 1 1 100%;
+    flex: 1 1 auto;
     gap: 5px;
   }
 
@@ -919,10 +918,15 @@
   }
 
   .ll-rung-header-right {
-    width: 100%;
-    flex: 1 1 100%;
+    width: auto;
+    flex: 0 0 auto;
     gap: 4px;
-    justify-content: flex-start;
+    /* 窄屏只留图标工具，和标题共用一行，避免多出一条空荡荡的操作行。 */
+    justify-content: flex-end;
+  }
+
+  .ll-rung-header .ll-tool-label {
+    display: none;
   }
 
   .ll-rung-menu {
@@ -932,7 +936,7 @@
   }
 
   .ll-power-state {
-    margin-left: auto;
+    margin-left: 0;
   }
 
   .ll-node-name,
@@ -962,6 +966,11 @@
     padding-inline: 7px;
   }
 
+  /* 第二行只剩图标按钮，文字标签在这个宽度上放不下，也读不出重点。 */
+  .ll-rung-header .ll-tool-label {
+    display: none;
+  }
+
   /* 窄屏只留通断电圆点，省下的宽带给插入、分支、删除三个动作。 */
   .ll-power-text {
     display: none;
@@ -981,6 +990,8 @@
 
   .ll-tool {
     height: 44px;
+    min-width: 44px;
+    justify-content: center;
     padding: 0 10px;
     font-size: 12.5px;
   }

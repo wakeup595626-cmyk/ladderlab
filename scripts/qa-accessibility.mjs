@@ -144,11 +144,16 @@ const check = (name, value, note) => {
 
 const axeSource = await readFile(resolve('node_modules/axe-core/axe.min.js'), 'utf8')
 
-/** 在页面里跑 axe；只把结论带回 Node，避免整棵 DOM 回传。 */
+/**
+ * 在页面里跑 axe；只把结论带回 Node，避免整棵 DOM 回传。
+ * 浏览器扩展会把 content script 挂到 <html> 下（例如 Plasmo 的
+ * <plasmo-csui id="dx-sibebar-container">），那部分 DOM 不属于本项目，
+ * 也不受本项目控制，不能让它把产品验收刷成失败。
+ */
 async function runAxe(label, contextSelector = null) {
   await evaluate(axeSource)
   const result = await evaluate(`(async () => {
-    const context = ${contextSelector ? `document.querySelector(${JSON.stringify(contextSelector)})` : 'document'};
+    const context = ${contextSelector ? `document.querySelector(${JSON.stringify(contextSelector)})` : '{ exclude: [["plasmo-csui"]] }'};
     if (!context) return { missing: true, violations: [] };
     const report = await window.axe.run(context, {
       runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'] },

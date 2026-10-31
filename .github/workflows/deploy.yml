@@ -9,6 +9,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: pages
@@ -28,52 +29,49 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       stale: ${{ steps.freshness.outputs.stale }}
+      run_id: ${{ steps.source.outputs.run_id }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-        with:
-          # deployment 必须对应 CI 真正验证过的提交，而不是“此刻的 main”。
-          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
-          persist-credentials: false
-
-      - name: Gate manual deploy on CI
-        if: github.event_name == 'workflow_dispatch'
+      # 自动部署沿用触发它的那次 CI；手动重发也必须找到同一提交上成功完成的
+      # push CI，再取那次 run 的 artifact，绝不能临时重新构建一份未经验证的产物。
+      - name: Resolve verified CI run
+        id: source
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
-          SHA: ${{ github.sha }}
+          EVENT_NAME: ${{ github.event_name }}
+          WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id }}
+          WORKFLOW_RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+          DISPATCH_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
-          gate="$(gh run list --repo "$REPO" --workflow CI --commit "$SHA" \
-            --event push --limit 1 --json status,conclusion \
-            --jq '.[0] | "\(.status)/\(.conclusion)"')"
-          test "$gate" = "completed/success" || {
-            echo "::error::$SHA 没有成功的 push CI（含 e2e），拒绝手动部署"; exit 1;
-          }
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version-file: .nvmrc
-          cache: npm
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Verify tests, types, lint, and build
-        env:
-          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
-          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
-        run: npm run check
+          if [ "$EVENT_NAME" = "workflow_run" ]; then
+            run_id="$WORKFLOW_RUN_ID"
+            sha="$WORKFLOW_RUN_SHA"
+          else
+            sha="$DISPATCH_SHA"
+            gate="$(gh run list --repo "$REPO" --workflow CI --commit "$sha" \
+              --event push --limit 1 --json status,conclusion,databaseId \
+              --jq '.[0] | "\(.status)/\(.conclusion) \(.databaseId)"')"
+            read -r gate_status run_id <<< "$gate"
+            test "$gate_status" = "completed/success" || {
+              echo "::error::$sha 没有成功的 push CI（含 e2e），拒绝手动部署"; exit 1;
+            }
+            test -n "$run_id" && test "$run_id" != "null" || {
+              echo "::error::找不到 $sha 对应的 CI run，拒绝部署"; exit 1;
+            }
+          fi
+          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
 
       - name: Check the build is still the tip of main
         id: freshness
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
+          BUILT_SHA: ${{ steps.source.outputs.sha }}
         run: |
           set -euo pipefail
-          built="$(git rev-parse HEAD)"
+          built="$BUILT_SHA"
           latest=""
           for attempt in 1 2 3; do
             if latest="$(gh api "repos/$REPO/commits/main" --jq .sha)" && [ -n "$latest" ]; then
@@ -94,18 +92,12 @@ jobs:
             echo "stale=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Upload built site
-        uses: actions/upload-artifact@v7
-        with:
-          name: site-dist
-          path: dist
-          if-no-files-found: error
-
   deploy:
     needs: build
     if: needs.build.outputs.stale != 'true'
     permissions:
       contents: read
+      actions: read
       pages: write
       id-token: write
     environment:
@@ -114,11 +106,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Download built site
-        # 与 build 阶段 actions/upload-artifact@v7 对齐：跨大版本混用是官方明确不保证的组合。
+        # 只取 CI 验证过的那次 run 的 site-dist，不在部署阶段重新构建。
         uses: actions/download-artifact@v8
         with:
           name: site-dist
           path: dist
+          run-id: ${{ needs.build.outputs.run_id }}
+          github-token: ${{ github.token }}
 
       - name: Configure Pages
         uses: actions/configure-pages@v5

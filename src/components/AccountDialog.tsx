@@ -81,7 +81,7 @@ function AccountDialogContent({
         aria-labelledby="account-dialog-title"
         tabIndex={-1}
       >
-        <header className="account-dialog-head">
+        <header className="account-dialog-head" role="none">
           <div className="account-dialog-title">
             <span className="account-dialog-mark" aria-hidden="true"><CloudIcon size={18} /></span>
             <div>
@@ -134,7 +134,7 @@ function AccountDialogContent({
           )}
         </div>
 
-        <footer className="account-dialog-foot">
+        <footer className="account-dialog-foot" role="none">
           <CloudIcon size={13} aria-hidden="true" />
           不登录也能完整做实验，工程默认保存在本机。
         </footer>

@@ -36,9 +36,17 @@ jobs:
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
         run: npm run check
 
+      - name: Upload verified production build
+        uses: actions/upload-artifact@v7
+        with:
+          name: site-dist
+          path: dist
+          if-no-files-found: error
+
   # E2E 是部署门禁的一部分：Deploy 只在 CI 整个工作流成功后触发，
   # 所以这里失败就不会把坏版本推到 Pages。
   e2e:
+    needs: verify
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -56,15 +64,20 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # 复用 verify 已经构建并通过静态检查的同一份 dist，避免 E2E 再构建出
+      # 一个无法证明与上线产物逐字一致的副本。
+      - name: Download verified build
+        uses: actions/download-artifact@v8
+        with:
+          name: site-dist
+          path: dist
+
       - name: Install Playwright Chromium
         run: npx playwright install --with-deps chromium
 
-      # pretest:e2e 会先构建 dist，跑的是和线上一致的 production 产物。
+      # 直接调用 Playwright，跳过 pretest:e2e 的重复构建。
       - name: Run Playwright tests
-        env:
-          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
-          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
-        run: npm run test:e2e
+        run: npx playwright test --config=tests/e2e/playwright.config.ts
 
       - name: Upload Playwright report
         if: ${{ failure() }}

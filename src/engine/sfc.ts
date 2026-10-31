@@ -1660,13 +1660,19 @@ function buildPatternChart(ctx: Context): SfcChart | null {
     // 序列盒之外的独立网络（报警、手动输出等）不能被逐拍图静默吞掉。
     if (ctx.rungs.some((item) => item.output.tag.trim() && !coveredRungs.has(item))) return null
     const label = formatDuration(timer?.output.pt) || '节拍'
-    const gate = collectContactNodes(rung.nodes)
+    const pulse = output.pulseTag?.trim() ?? ''
+    const contacts = collectContactNodes(rung.nodes)
+    const gate = contacts
       .find((node) => node.kind === 'NO' && isInput(ctx.tags.get(node.tag)))
+    // 逐拍模板只对“单一常开启动 + 节拍脉冲”这一种结构成立。并联启动、
+    // 串联许可、停止触点都会被压进同一个 guard 里而从图上消失，
+    // 与其画一张漏条件的图，不如退回逐网络图让每条条件都留在图上。
+    const pulseBase = pulse.split('.')[0]
+    if (contacts.some((node) => node !== gate && node.tag !== pulseBase)) return null
 
     const steps: SfcStep[] = []
     const edges: SfcEdge[] = []
     const startName = gate ? shortName(ctx.tags.get(gate.tag), gate.tag) : ''
-    const pulse = output.pulseTag?.trim() ?? ''
     const tick = pulse || label
     const runGuard = [startName, tick].filter(Boolean).join(' 且 ')
     if (gate) {
@@ -1735,7 +1741,11 @@ function buildRunCycleChart(ctx: Context): SfcChart | null {
   if (!holdTag || (!timer && !counter)) return null
 
   const contacts = collectContactNodes(hold.nodes)
-  const start = contacts.find((node) => node.kind === 'NO' && node.tag !== holdName && isInput(ctx.tags.get(node.tag)))
+  // 进入运行步必须带完整条件：并联启动按钮、串联许可、停止互锁都不能被
+  // “取第一个常开触点”吃掉，否则图上会漏掉真实联锁，甚至让许可未满足的
+  // 启动看起来也能进入运行。
+  const entryCondition = formatCondition(hold.nodes, ctx, new Set([holdName]))
+  if (!entryCondition) return null
   // 自保持网络里的输入常闭触点就是运行步的退出 / 互锁条件。定时器自身的
   // 常闭触点不在此列，否则会和「到点」转移重复成两条同义边。
   const stops = [...new Set(contacts
@@ -1787,44 +1797,52 @@ function buildRunCycleChart(ctx: Context): SfcChart | null {
     })
   }
 
+  // 转移条件必须写在图上：计数器完成要写它自己的 Q 位，不能一律叫“到时”。
+  // 没有任何可观测的完成条件时也不生成悬空的“完成”步。
+  const doneLabel = doneTag
+    ? shortName(doneTag, doneTag.name)
+    : timerTag ? shortName(timerTag, timerTag.name) : timer ? '到时' : ''
+  if (!doneLabel && done.length > 0) return null
+
+  const steps: SfcStep[] = [
+    {
+      key: '__initial',
+      number: '0',
+      title: '初始步',
+      initial: true,
+      actions: [{ text: '全部输出关闭', detail: '' }],
+    },
+    { key: '__run', number: '1', title: '运行', initial: false, actions: run },
+  ]
+  const edges: SfcEdge[] = [
+    { from: '__initial', to: '__run', label: entryCondition },
+  ]
+  if (doneLabel) {
+    steps.push({ key: '__done', number: '2', title: '完成', initial: false, actions: done })
+    edges.push({ from: '__run', to: '__done', label: doneLabel })
+  }
+  if (stops.length > 0) {
+    edges.push({
+      from: '__run',
+      to: '__initial',
+      label: stops.map((name) => shortName(ctx.tags.get(name), name)).join(' 或 '),
+    })
+  }
+  if (doneLabel && resetsHold) {
+    edges.push({
+      from: '__done',
+      to: '__initial',
+      label: holdResetRungs
+        .map((rung) => formatNodes(rung.nodes, ctx, true) || cleanRungLabel(rung.label))
+        .filter(Boolean)
+        .join(' 或 ') || '复位',
+    })
+  }
+
   return {
     programName: ctx.program.name,
-    steps: [
-      {
-        key: '__initial',
-        number: '0',
-        title: '初始步',
-        initial: true,
-        actions: [{ text: '全部输出关闭', detail: '' }],
-      },
-      { key: '__run', number: '1', title: '运行', initial: false, actions: run },
-      { key: '__done', number: '2', title: '完成', initial: false, actions: done },
-    ],
-    edges: [
-      {
-        from: '__initial',
-        to: '__run',
-        label: start ? shortName(ctx.tags.get(start.tag), start.tag) : '启动',
-      },
-      {
-        from: '__run',
-        to: '__done',
-        label: timerTag ? shortName(timerTag, timerTag.name) : '到时',
-      },
-      ...(stops.length > 0 ? [{
-        from: '__run',
-        to: '__initial',
-        label: stops.map((name) => shortName(ctx.tags.get(name), name)).join(' 或 '),
-      }] : []),
-      ...(resetsHold ? [{
-        from: '__done',
-        to: '__initial',
-        label: holdResetRungs
-          .map((rung) => formatNodes(rung.nodes, ctx, true) || cleanRungLabel(rung.label))
-          .filter(Boolean)
-          .join(' 或 ') || '复位',
-      }] : []),
-    ],
+    steps,
+    edges,
     notes: [
       '按自保持线圈与定时 / 计数网络归纳；具体时序仍以梯形图为准。',
       ...(stops.length > 0 ? ['运行步的停止 / 互锁条件取自自保持网络里的输入常闭触点。'] : []),

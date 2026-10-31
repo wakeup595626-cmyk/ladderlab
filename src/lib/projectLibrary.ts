@@ -1046,6 +1046,15 @@ export interface ApplySyncedProjectsResult {
   message?: string
   projects: SavedProject[]
   broken: BrokenSavedProject[]
+  /** 真正落到本机的下载条数。 */
+  downloaded: number
+  /** 因为本机版本更新而放弃落地的条数；下一轮同步会把它上传。 */
+  conflicts: number
+}
+
+export interface SyncedDeletion {
+  id: string
+  deletedAt: number
 }
 
 /**
@@ -1054,17 +1063,36 @@ export interface ApplySyncedProjectsResult {
  */
 export async function applySyncedProjects(input: {
   upserts?: SavedProject[]
-  deletes?: string[]
+  deletes?: Array<string | SyncedDeletion>
 }): Promise<ApplySyncedProjectsResult> {
   const upserts = input.upserts ?? []
   const deletes = input.deletes ?? []
   try {
     return await withLibraryLock(() => {
-      loadLibraryForWrite()
-      const now = Date.now()
-      for (const id of deletes) writeTombstone(id, now)
+      const library = loadLibraryForWrite()
+      const current = new Map(library.projects.map((project) => [project.id, project]))
+      let downloaded = 0
+      let conflicts = 0
+      for (const entry of deletes) {
+        const deletion = typeof entry === 'string' ? { id: entry, deletedAt: Date.now() } : entry
+        if (!deletion.id || !Number.isFinite(deletion.deletedAt) || deletion.deletedAt <= 0) continue
+        const local = current.get(deletion.id)
+        // 请求期间用户又保存了这一条：不要用旧的云端删除盖掉新内容。
+        if (local && local.savedAt > deletion.deletedAt) {
+          conflicts += 1
+          continue
+        }
+        writeTombstone(deletion.id, deletion.deletedAt)
+        current.delete(deletion.id)
+      }
       for (const project of upserts) {
         try {
+          const local = current.get(project.id)
+          // 快照发出后本机又保存过更新的版本：保留本机内容，交给下一轮上传。
+          if (local && local.savedAt >= project.savedAt) {
+            conflicts += 1
+            continue
+          }
           const parsed = parseProgramStructureText(JSON.stringify(project.program))
           const existingTombstone = window.localStorage.getItem(tombstoneKey(project.id))
           if (existingTombstone) {
@@ -1083,12 +1111,14 @@ export async function applySyncedProjects(input: {
             savedAt: project.savedAt,
             program: parsed.program,
           })
+          current.set(project.id, project)
+          downloaded += 1
         } catch {
           // 单条云端数据坏了只跳过这一条，不能让整次同步失败。
         }
       }
       const view = readV2View(listStorageKeys())
-      return { ok: true, projects: sortProjects(view.projects), broken: view.broken }
+      return { ok: true, projects: sortProjects(view.projects), broken: view.broken, downloaded, conflicts }
     })
   } catch (error) {
     return {
@@ -1096,6 +1126,8 @@ export async function applySyncedProjects(input: {
       message: `云同步写入本机项目库失败：${errorMessage(error)}`,
       projects: [],
       broken: [],
+      downloaded: 0,
+      conflicts: 0,
     }
   }
 }
@@ -1189,7 +1221,14 @@ export async function importSavedProjectBackup(
         }
       }
 
-      const merge = mergeLibraryBackup(library.projects, validated.projects)
+      // 恢复是一次新的保存动作：版本号必须晚于本机现有版本、备份里的版本和当前时间。
+      // 否则云同步会把它当成旧快照，刚恢复的内容可能在下一轮同步里消失。
+      const versionBase = Math.max(
+        Date.now(),
+        library.projects.reduce((latest, project) => Math.max(latest, project.savedAt), 0),
+        validated.projects.reduce((latest, project) => Math.max(latest, project.savedAt), 0),
+      )
+      const merge = mergeLibraryBackup(library.projects, validated.projects, { versionBase })
       const snapshot = new Map<string, string | null>()
       try {
         for (const project of merge.incoming) {

@@ -1,6 +1,7 @@
 import type { Program } from '../engine/types'
 import type { ProgramIssue } from './io'
-import { parseProgramStructure, parseProgramStructureText, serializeProgram } from './io'
+import { programSerializationIssues } from './limits'
+import { parseProgramStructure, parseProgramStructureText } from './io'
 
 const LEGACY_STORAGE_KEY = 'ladderlab.project.v1'
 const MIRROR_STORAGE_KEY = 'ladderlab.project.v1.mirror.v2'
@@ -552,7 +553,12 @@ export function saveProgram(program: Program, scope?: ProgramDraftScope): SavePr
   const savedAt = Date.now()
   let raw: string
   try {
-    serializeProgram(program)
+    // saveProgram 只需要校验字段和结构，最终写入的是紧凑信封。
+    // 不要为了校验再做一次带两空格缩进的完整序列化，大工程会白白多分配数百 KB。
+    const issues = programSerializationIssues(program)
+    if (issues.length > 0) {
+      throw new Error(`工程内容不合法，已阻止保存：${issues[0]}`)
+    }
     raw = draftEnvelope(program, scope, savedAt)
   } catch (error) {
     return {

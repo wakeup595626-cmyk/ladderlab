@@ -21,6 +21,7 @@ import { libraryScopeForUser } from './lib/cloud/scope'
 import {
   estimateStoragePressure,
   formatStorageBytes,
+  requestPersistentStorage,
   type StoragePressure,
 } from './lib/storageQuota'
 import { useConfirmDialog } from './lib/useConfirmDialog'
@@ -88,6 +89,7 @@ import {
   serializeProgram,
 } from './lib/io'
 import type { ProgramIssue } from './lib/io'
+import { STRUCTURE_LIMITS } from './lib/limits'
 import { safeFileName } from './lib/filename'
 import { copyText } from './lib/clipboard'
 import {
@@ -228,8 +230,13 @@ function programsEqual(left: Program, right: Program): boolean {
 function issuesOfProgram(program: Program): ProgramIssue[] {
   try {
     return parseProgramStructureText(serializeProgram(program)).issues
-  } catch {
-    return []
+  } catch (error) {
+    // 结构超限、字段非法都会让严格导出失败；这里必须显示出来，
+    // 否则「工程检查」会谎报 0 问题，用户直到刷新丢草稿才发现。
+    return [{
+      code: 'structure',
+      message: error instanceof Error ? error.message : '工程检查失败，工程内容可能超出上限。',
+    }]
   }
 }
 
@@ -548,6 +555,12 @@ export default function App() {
   useEffect(() => {
     persistThemePreference(window.localStorage, theme)
   }, [theme])
+  // 地址栏 / PWA 状态栏跟随当前主题，避免深色页面配浅色浏览器边框。
+  useEffect(() => {
+    const meta = document.querySelector('meta[name="theme-color"]')
+    const ground = themeVars['--ground']
+    if (meta && ground) meta.setAttribute('content', ground)
+  }, [themeVars])
   // 快速编辑器与插入菜单是 portal 到 body 的，必须让令牌也落在文档根上。
   useEffect(() => {
     const root = document.documentElement
@@ -705,6 +718,9 @@ export default function App() {
   // 本标签页见过的最新草稿时间戳。后台标签页的 storage 事件可能排队到很晚，
   // 过期草稿不应该再把已经前进的页面拉回冲突状态。
   const lastDraftStampRef = useRef<number | null>(startupState.lastSavedAt)
+  // 未命名工程没有项目 ID 可以做版本比对，多个标签页共用一个镜像键。
+  // 这里只记录上一次处理过的对方草稿，避免每次按键级自动保存都重复提示。
+  const lastForeignDraftRef = useRef<{ raw: string; at: number } | null>(null)
   const toastTimerRef = useRef<number | null>(null)
   // 变量表回收的提示不单独抢 Toast：等本次操作的提示先出现，再用下一轮补一句结果。
   const pendingPruneRef = useRef<string[]>([])
@@ -1050,6 +1066,7 @@ export default function App() {
   // 存储配额预警：启动时估一次，之后每次自动保存成功最多每分钟复测一次。
   // estimate() 只是浏览器给的近似值，读不到时保持静默，绝不影响编辑。
   const quotaCheckedAtRef = useRef(0)
+  const persistentStorageRequestedRef = useRef(false)
   const storageLevelRef = useRef<StoragePressure['level']>('unknown')
   useEffect(() => {
     const now = Date.now()
@@ -1086,6 +1103,11 @@ export default function App() {
       baseSavedAt: active?.savedAt ?? null,
     })
     if (result.ok) {
+      if (!persistentStorageRequestedRef.current) {
+        persistentStorageRequestedRef.current = true
+        // 保存成功后再申请，浏览器更愿意授予；拒绝时不影响本机保存。
+        void requestPersistentStorage()
+      }
       lastPersistedProgramRef.current = latestProgramRef.current
       lastDraftStampRef.current = result.savedAt
       saveDirtyRef.current = false
@@ -1233,19 +1255,26 @@ export default function App() {
     saveLatestProgram()
     // 本机写入成功就已经安全了；云端只是排队在后台补一刀，失败不会影响本地保存。
     scheduleCloudSyncRef.current()
+    const cloudSave = account.status === 'signed-in'
     const settlement = settleSupersededConflict(project.savedAt)
     if (closeDialog) {
       setSaveDialogOpen(false)
       setSaveDialogError(null)
     }
     if (settlement === 'cleared') {
-      notify(`已保存「${project.name}」到本机项目库；另一标签页的版本已存为恢复副本`)
+      notify(
+        cloudSave
+          ? `已保存「${project.name}」，正在同步到当前账号；另一标签页的版本已存为恢复副本`
+          : `已保存「${project.name}」到本机项目库；另一标签页的版本已存为恢复副本`,
+      )
     } else if (settlement === 'archive-failed') {
       notify(`已保存「${project.name}」，但另一标签页版本暂存失败；请先导出本页工程备份`, { tone: 'error' })
     } else {
-      notify(`已保存「${project.name}」到本机项目库`)
+      notify(cloudSave
+        ? `已保存「${project.name}」，正在同步到当前账号`
+        : `已保存「${project.name}」到本机项目库`)
     }
-  }, [commitSavedProjectName, notify, saveLatestProgram, settleSupersededConflict])
+  }, [account.status, commitSavedProjectName, notify, saveLatestProgram, settleSupersededConflict])
 
   const handleSaveNamedProject = useCallback(async (name: string): Promise<SaveNamedProjectResult> => {
     const outcome = await persistLatestNamedProject(name)
@@ -1557,6 +1586,15 @@ export default function App() {
         : placeholderIndex >= 0
           ? placeholderIndex
           : program.rungs.length
+    const contentCount = contentRungs(program).length
+    const pastedCount = clipboard.rungs.filter((rung) => !isBlankRung(rung)).length
+    if (contentCount + pastedCount > STRUCTURE_LIMITS.rungs) {
+      const room = Math.max(0, STRUCTURE_LIMITS.rungs - contentCount)
+      notify(room > 0
+        ? `上限 ${STRUCTURE_LIMITS.rungs} 段，这里最多还能粘贴 ${room} 段；请先删除程序段`
+        : `已达 ${STRUCTURE_LIMITS.rungs} 段上限，请先删除程序段再粘贴`)
+      return
+    }
     const result = insertRungCopies(program, clipboard.rungs, boundary)
     if (result.rungs.length === 0) {
       notify('这里不能粘贴程序段')
@@ -1833,11 +1871,38 @@ export default function App() {
       if (lastDraftStampRef.current !== null && draft.savedAt < lastDraftStampRef.current) return
       const active = activeSavedProjectRef.current
       const currentProjectId = active?.id ?? null
-
-      // 未命名草稿没有可靠的项目身份，不能被另一个标签页覆盖。
-      if (!currentProjectId || draft.projectId !== currentProjectId) return
       if (draft.tabId === getDraftTabId()) return
       const incoming = ensureTrailingBlankRung(draft.program)
+
+      if (!currentProjectId) {
+        // 未命名工程没有项目 ID 可用于版本比对，所有标签页共用同一个镜像键。
+        // 既然无法安全判断谁更新，就不做静默采用：把对方版本留成恢复快照，
+        // 本页继续编辑自己的内容，至少不会出现“谁最后保存，另一份就没了”。
+        if (draft.projectId !== null) return
+        if (programsEqual(incoming, latestProgramRef.current)) {
+          lastDraftStampRef.current = draft.savedAt
+          return
+        }
+        const now = Date.now()
+        const previous = lastForeignDraftRef.current
+        if (previous?.raw === event.newValue) return
+        lastForeignDraftRef.current = { raw: event.newValue, at: now }
+        // 自动保存可能逐次触发，短时间内只提示一次，避免提示条跟着编辑节奏闪烁。
+        if (previous && now - previous.at < 4_000) return
+        const backupKey = archiveRecoveryCopy(event.newValue)
+        if (backupKey) {
+          setBackups(listRecoveryBackups())
+          setBackupsDismissed(false)
+          notify('另一个标签页保存了未命名工程，已把对方版本留存为恢复快照')
+        } else {
+          notify('另一个标签页保存了未命名工程；本页继续编辑，建议先导出备份以免互相覆盖', {
+            tone: 'error',
+          })
+        }
+        return
+      }
+
+      if (draft.projectId !== currentProjectId) return
 
       if (programsEqual(incoming, latestProgramRef.current)) {
         lastDraftStampRef.current = draft.savedAt
@@ -2032,6 +2097,11 @@ export default function App() {
 
   // Ctrl/Cmd+S 是浏览器“保存网页”的默认快捷键，必须在捕获阶段拦住；
   // 即使焦点在工程名输入框里，也应该把当前工程存进本机项目库。
+  const requestSaveRef = useRef(requestSaveProject)
+  useEffect(() => {
+    requestSaveRef.current = requestSaveProject
+  }, [requestSaveProject])
+
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (!(event.ctrlKey || event.metaKey) || event.altKey) return
@@ -2040,7 +2110,16 @@ export default function App() {
       event.stopPropagation()
       if (event.repeat) return
       if (document.querySelector('[role="dialog"][aria-modal="true"]')) return
-      void requestSaveProject()
+      // QuickEditor 的名称/数值字段是「失焦才提交」。如果用户改完直接按
+      // Ctrl+S，先手动失焦把草稿写回 program，再等这一帧提交完才保存，
+      // 否则会把上一版内容存进项目库。
+      const active = document.activeElement
+      if (active instanceof HTMLElement && active.closest('.qe-panel')) {
+        active.blur()
+        window.setTimeout(() => { void requestSaveRef.current() }, 0)
+        return
+      }
+      void requestSaveRef.current()
     }
     window.addEventListener('keydown', onKeyDown, true)
     return () => window.removeEventListener('keydown', onKeyDown, true)
@@ -2653,6 +2732,10 @@ export default function App() {
       notify('新程序段会自动生成，不能创建副本')
       return
     }
+    if (contentRungs(program).length >= STRUCTURE_LIMITS.rungs) {
+      notify(`已达 ${STRUCTURE_LIMITS.rungs} 段上限，请先删除程序段或导出工程 JSON 备份`)
+      return
+    }
     const sourceIndex = program.rungs.findIndex((rung) => rung.id === rungId)
     const next = duplicateRung(program, rungId)
     const copy = sourceIndex >= 0 ? next.rungs[sourceIndex + 1] : undefined
@@ -2983,9 +3066,12 @@ export default function App() {
   }
 
   const handleDeleteSavedProject = async (saved: SavedProject) => {
+    const cloudSave = account.status === 'signed-in'
     const accepted = await confirm({
-      title: `从本机项目库删除「${saved.name}」？`,
-      description: '只删除浏览器里的这份命名项目，当前编辑区内容不会改变。',
+      title: cloudSave ? `删除项目「${saved.name}」？` : `从本机项目库删除「${saved.name}」？`,
+      description: cloudSave
+        ? '这会删除本机项目，并在同步时同时删除当前账号的云端副本；当前编辑区内容不会改变。'
+        : '只删除浏览器里的这份命名项目，当前编辑区内容不会改变。',
       confirmLabel: '删除',
       danger: true,
     })
@@ -2999,7 +3085,9 @@ export default function App() {
     }
     applyLibrarySnapshot(result.projects, result.broken)
     if (saved.id === activeSavedProjectId) setActiveProject(null)
-    notify(`已从本机项目库删除「${saved.name}」`)
+    notify(cloudSave
+      ? `已删除「${saved.name}」，同步完成后云端副本也会移除`
+      : `已从本机项目库删除「${saved.name}」`)
     scheduleCloudSyncRef.current()
   }
 
@@ -3090,19 +3178,31 @@ export default function App() {
       })
       return
     }
+    if (url.length > SHARE_LINK_SOFT_LIMIT) {
+      notify(
+        `链接有 ${url.length} 字，微信可能截断；工程较大时改用「工程文件（.json）」更稳`,
+        {
+          tone: 'error',
+          action: {
+            label: '仍要复制',
+            run: () => {
+              void copyText(url).then((ok) => {
+                notify(ok
+                  ? `已复制长链接（${url.length} 字），发送前请确认没有被截断`
+                  : '浏览器不让自动复制长链接，请改用工程文件', { tone: ok ? 'info' : 'error' })
+              })
+            },
+          },
+        },
+      )
+      return
+    }
     if (!(await copyText(url))) {
       // 浏览器拒绝写剪贴板时，至少让学生能打开地址栏自己复制。
       notify('链接已生成，但浏览器不让自动复制；打开后从地址栏复制即可', {
         tone: 'error',
         action: { label: '打开链接', run: () => window.open(url, '_blank', 'noopener') },
       })
-      return
-    }
-    if (url.length > SHARE_LINK_SOFT_LIMIT) {
-      notify(
-        `已复制，但链接有 ${url.length} 字，微信可能截断；工程较大时改用「工程文件（.json）」更稳`,
-        { tone: 'error' },
-      )
       return
     }
     notify(`分享链接已复制（${url.length} 字），同学打开就是这几段梯形图`, {
@@ -3633,7 +3733,8 @@ export default function App() {
       if (!node || !panel) return
       const overlap = node.getBoundingClientRect().bottom - (panel.getBoundingClientRect().top - 20)
       if (overlap > 0) {
-        pane.scrollTo({ top: pane.scrollTop + overlap, behavior: 'smooth' })
+        const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+        pane.scrollTo({ top: pane.scrollTop + overlap, behavior: reduceMotion ? 'auto' : 'smooth' })
       }
     })
     return () => window.cancelAnimationFrame(frame)
@@ -3646,6 +3747,7 @@ export default function App() {
       data-theme-switching={themeSwitching ? 'true' : undefined}
       data-mobile-panel={mobilePanel}
       data-sheet={sheetOpen ? 'open' : 'closed'}
+      data-quick-edit={quickEdit ? 'open' : 'closed'}
       data-inspector={inspectorVisible ? 'open' : 'closed'}
       data-inspector-resizing={resizingInspector ? 'true' : undefined}
       data-program-sheet-resizing={resizingProgramSheetSide ? 'true' : undefined}
@@ -4128,6 +4230,7 @@ export default function App() {
 
       <ProjectDrawer
         open={mobilePanel === 'project'}
+        signedIn={account.status === 'signed-in'}
         program={program}
         activeRungId={activeRungId}
         savedProjects={savedProjects}
@@ -4285,7 +4388,9 @@ export default function App() {
         onRestore={importSavedProjectBackup}
         onRestored={(projects, broken) => {
           applyLibrarySnapshot(projects, broken)
-          notify('整包恢复完成')
+          // 恢复产生的是新版本，登录状态下要立刻推上云端，而不是等下一次手动保存。
+          scheduleCloudSyncRef.current()
+          notify('整包恢复完成，已生成新版本')
         }}
       />
 
@@ -4326,7 +4431,11 @@ export default function App() {
 
       <Guide open={guideOpen} onClose={closeGuide} onStartDemo={startDemo} />
 
-      <AboutDialog open={aboutOpen} onClose={() => setAboutOpen(false)} />
+      <AboutDialog
+        open={aboutOpen}
+        signedIn={account.status === 'signed-in'}
+        onClose={() => setAboutOpen(false)}
+      />
 
       <AccountDialog
         open={accountOpen}
