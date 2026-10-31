@@ -1,15 +1,15 @@
-/* 程序段导航是贴在图纸右边缘的一根窄轨道：不占画布顶部一行，也不压住
-   程序段卡片右上角的「⋯」菜单。轨道占位由 Shell.css 预留右侧留白。 */
+/* 程序段导航做成贴在图纸左边缘的索引页签：和纸面共用一条边框，
+   不再漂浮成一根像遥控器的白色胶囊。占位由 Shell.css 预留。 */
 .rung-nav {
   position: sticky;
   top: 12px;
   z-index: 12;
   display: flex;
-  width: 40px;
+  width: 48px;
   height: 0;
   flex: 0 0 auto;
-  align-self: flex-end;
-  margin-right: -50px;
+  align-self: flex-start;
+  margin-left: -48px;
   margin-bottom: -12px;
   overflow: visible;
 }
@@ -19,44 +19,51 @@
   top: 0;
   right: 0;
   display: flex;
-  width: 40px;
+  width: 48px;
   flex-direction: column;
-  align-items: center;
-  gap: 2px;
-  padding: 5px 4px 6px;
+  align-items: stretch;
+  overflow: hidden;
+  padding: 0;
   border: 1px solid var(--border);
-  border-radius: 12px;
-  background: color-mix(in srgb, var(--surface) 92%, transparent);
-  box-shadow: 0 10px 24px rgba(22, 31, 27, 0.09), 0 1px 2px rgba(22, 31, 27, 0.05);
-  backdrop-filter: blur(12px);
-  transition: border-color 0.18s ease, box-shadow 0.18s ease;
+  border-right: 0;
+  border-radius: 11px 0 0 11px;
+  background: var(--surface);
+  transition: border-color 0.15s ease;
 }
 
 .rung-nav[data-open='true'] .rung-nav-rail {
-  border-color: color-mix(in srgb, var(--accent) 42%, var(--border));
-  box-shadow: 0 14px 30px rgba(22, 31, 27, 0.13), 0 1px 2px rgba(22, 31, 27, 0.05);
+  border-color: color-mix(in srgb, var(--accent) 48%, var(--border));
 }
 
 .rung-nav-step {
-  display: inline-grid;
-  width: 30px;
-  height: 30px;
+  display: grid;
+  width: 100%;
+  height: 33px;
   flex: 0 0 auto;
   place-items: center;
   border: 0;
-  border-radius: 8px;
+  border-radius: 0;
   background: transparent;
   color: var(--muted);
   cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease;
+  transition: background-color 0.14s ease, color 0.14s ease;
 }
 
+.rung-nav-step:nth-of-type(n + 2) { border-top: 1px solid var(--border); }
+
 .rung-nav-step:hover {
-  background: var(--raised);
+  background: var(--accent-wash);
   color: var(--accent-ink);
 }
 
 .rung-nav-step:active { background: var(--accent-wash); }
+
+.rung-nav-step:focus-visible {
+  position: relative;
+  z-index: 1;
+  outline: 2px solid var(--accent);
+  outline-offset: -3px;
+}
 
 .rung-nav-find[aria-expanded='true'] {
   background: var(--accent-wash);
@@ -65,63 +72,56 @@
 
 .rung-nav-meter {
   display: flex;
-  width: 30px;
+  width: 100%;
+  height: 43px;
+  box-sizing: border-box;
   flex-direction: column;
   align-items: center;
-  gap: 1px;
-  padding: 1px 0 2px;
+  justify-content: center;
+  gap: 3px;
+  border-bottom: 1px solid var(--border);
   color: var(--text);
   cursor: default;
   user-select: none;
 }
 
+.rung-nav-kicker {
+  color: var(--faint);
+  font-size: 9px;
+  font-weight: 650;
+  letter-spacing: 0.07em;
+  line-height: 1;
+}
+
+.rung-nav-count {
+  display: flex;
+  align-items: baseline;
+  gap: 1px;
+  line-height: 1;
+}
+
 .rung-nav-now {
-  font-size: 14px;
+  color: var(--accent-ink);
+  font-size: 16px;
   font-variant-numeric: tabular-nums;
-  font-weight: 680;
-  line-height: 1.1;
+  font-weight: 720;
+  line-height: 1;
 }
 
 .rung-nav-total {
   color: var(--muted);
-  font-size: 9.5px;
+  font-size: 10px;
   font-variant-numeric: tabular-nums;
-  letter-spacing: 0.01em;
-  line-height: 1.1;
+  font-weight: 620;
+  line-height: 1;
   white-space: nowrap;
-}
-
-.rung-nav-gauge {
-  display: block;
-  width: 20px;
-  height: 2px;
-  margin-top: 4px;
-  overflow: hidden;
-  border-radius: 2px;
-  background: var(--control);
-}
-
-.rung-nav-gauge span {
-  display: block;
-  height: 100%;
-  border-radius: 2px;
-  background: var(--accent);
-  opacity: 0.72;
-  transition: width 0.28s ease;
-}
-
-.rung-nav-sep {
-  width: 16px;
-  height: 1px;
-  margin: 3px 0;
-  background: var(--border);
 }
 
 /* 搜索面板向左展开，右边缘对齐图纸；只在查找时短暂覆盖画布本身。 */
 .rung-nav-panel {
   position: absolute;
-  top: -5px;
-  right: calc(100% + 10px);
+  top: 0;
+  left: calc(100% + 8px);
   display: flex;
   width: min(300px, calc(100vw - 140px));
   flex-direction: column;
@@ -252,7 +252,7 @@
 @keyframes rung-nav-pop {
   from {
     opacity: 0;
-    transform: translateX(6px) scale(0.985);
+    transform: translateX(-6px) scale(0.985);
   }
 }
 
@@ -262,6 +262,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .rung-nav-gauge span { transition: none; }
+  .rung-nav-step,
+  .rung-nav-rail { transition: none; }
   .rung-nav-panel { animation: none; }
 }

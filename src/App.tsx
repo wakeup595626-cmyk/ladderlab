@@ -3682,6 +3682,7 @@ export default function App() {
   /**
    * 只有界面留白会取消选中并收起常驻落点。顶栏、侧栏、收藏条、变量表、
    * 弹层和图纸内的交互控件都不算留白；图纸空白由画布自己的点击处理。
+   * 参数框是独立编辑面，点留白只清选区和落点，不替用户结束正在看的编辑。
    */
   const clearSelectionOnBlankPointerDown = (event: {
     button: number
@@ -3700,7 +3701,6 @@ export default function App() {
     const active = document.activeElement
     if (active instanceof HTMLElement && active !== document.body) active.blur()
     setSelection(null)
-    setQuickEdit(null)
     setInsertCursor(null)
     dismissFavoriteTargetPin()
   }
@@ -4060,11 +4060,11 @@ export default function App() {
                 isDragging={Boolean(drag.drag)}
                 onSelect={(next) => {
                   // 点元件或线路只切换编辑目标，不打断已经选好的插入游标；
-                  // 只有真正点到图纸留白才收起常驻落点。
+                  // 只有真正点到图纸留白才收起常驻落点。参数框继续停在上一个
+                  // 编辑对象，直到用户点另一个元件、关闭它或按 Esc。
                   if (!next) {
                     setInsertCursor(null)
                     setSelection(null)
-                    setQuickEdit(null)
                     dismissFavoriteTargetPin()
                     return
                   }

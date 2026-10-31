@@ -49,7 +49,6 @@ export default function RungNavigator({ program, selection, paneRef, onSelect }:
   const needle = query.trim().toLowerCase()
   const results = needle ? rungs.filter((rung) => rung.search.includes(needle)).slice(0, 8) : []
   const shown = currentIndex + 1
-  const progress = rungs.length ? (shown / rungs.length) * 100 : 0
 
   useEffect(() => {
     if (!panelOpen) return
@@ -129,10 +128,10 @@ export default function RungNavigator({ program, selection, paneRef, onSelect }:
           <ArrowUpIcon size={15} />
         </button>
         <span className="rung-nav-meter" title={`程序段 ${shown} / ${rungs.length} · ${currentLabel}`}>
-          <span className="rung-nav-now" aria-hidden="true">{shown}</span>
-          <span className="rung-nav-total" aria-hidden="true">/ {rungs.length}</span>
-          <span className="rung-nav-gauge" aria-hidden="true">
-            <span style={{ width: `${progress}%` }} />
+          <span className="rung-nav-kicker" aria-hidden="true">程序段</span>
+          <span className="rung-nav-count" aria-hidden="true">
+            <span className="rung-nav-now">{shown}</span>
+            <span className="rung-nav-total">/{rungs.length}</span>
           </span>
         </span>
         <span className="visually-hidden" aria-live="polite">
@@ -147,7 +146,6 @@ export default function RungNavigator({ program, selection, paneRef, onSelect }:
         >
           <ArrowDownIcon size={15} />
         </button>
-        <span className="rung-nav-sep" aria-hidden="true" />
         <button
           ref={findRef}
           type="button"

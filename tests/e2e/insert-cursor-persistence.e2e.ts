@@ -91,7 +91,7 @@ test('图纸加号选中的落点同样常驻到点击空白', async ({ page }) 
   expect(paneBox).not.toBeNull()
   await page.mouse.move(paneBox!.x + paneBox!.width / 2, paneBox!.y + 160)
   await page.mouse.wheel(0, 120)
-  await page.locator('.rung-nav-step').nth(1).click()
+  await page.locator('.rung-nav').getByRole('button', { name: '下一程序段' }).click()
   await expect(markedSlots).toHaveCount(1)
   await expect(cursorHalos).toHaveCount(1)
 
