@@ -2,7 +2,7 @@
  * 收藏指令连续插入的真实浏览器回归。
  *
  * 覆盖：空程序段无输出线圈、点 + 后游标持续存在、收藏触点顺序推进、
- * 点顶栏/文档栏/变量面板/画布任意位置清除游标、收藏条的分支/合并按钮走通现有线路操作。
+ * 滚动和普通界面交互保留落点、仅点画布空白处清除游标、收藏条的分支/合并按钮走通现有线路操作。
  */
 import {
   closeQaPage,
@@ -425,11 +425,31 @@ const markerCounts = () => evaluate(`({
   halos: document.querySelectorAll('.ll-insert-cursor-halo').length,
 })`)
 
-/* 用户要求“点任意地方都取消”：顶栏、收藏指令标题、变量面板、画布元件都要逐一验。 */
+/* 落点应常驻：顶栏、收藏指令标题、变量面板、画布元件都不能把它清掉。 */
 await clickSelector('.wb-brand')
 await pressEscape()
 const afterTopbar = await markerCounts()
-check('cursor/topbar-click-clears-marker', afterTopbar.slots === 0 && afterTopbar.halos === 0, afterTopbar)
+check('cursor/topbar-click-keeps-marker', afterTopbar.slots === 1 && afterTopbar.halos === 1, afterTopbar)
+
+/* 鼠标滚轮只改变视口，不能结束插入游标。 */
+const canvasCenter = await evaluate(`(() => {
+  const canvas = document.querySelector('.ll-canvas')
+  if (!canvas) return null
+  const rect = canvas.getBoundingClientRect()
+  return { x: rect.left + rect.width / 2, y: rect.top + Math.min(rect.height / 2, 240) }
+})()`)
+if (canvasCenter) {
+  await send('Input.dispatchMouseEvent', {
+    type: 'mouseWheel', x: canvasCenter.x, y: canvasCenter.y, deltaX: 0, deltaY: 120,
+  })
+  await sleep(500)
+}
+const afterWheel = await markerCounts()
+check(
+  'cursor/wheel-scroll-keeps-marker',
+  Boolean(canvasCenter) && afterWheel.slots === 1 && afterWheel.halos === 1,
+  { canvasCenter, afterWheel },
+)
 
 const rearmedTopbar = await rearmCursor(cursorRungId)
 const documentBarPoint = await blankPointIn('.wb-instruction-intro')
@@ -437,11 +457,11 @@ if (documentBarPoint) await clickAt(documentBarPoint.x, documentBarPoint.y)
 await pressEscape()
 const afterDocumentBar = await markerCounts()
 check(
-  'cursor/instruction-heading-click-clears-marker',
+  'cursor/instruction-heading-click-keeps-marker',
   Boolean(documentBarPoint)
     && rearmedTopbar.slots === 1
-    && afterDocumentBar.slots === 0
-    && afterDocumentBar.halos === 0,
+    && afterDocumentBar.slots === 1
+    && afterDocumentBar.halos === 1,
   { documentBarPoint, rearmedTopbar, afterDocumentBar },
 )
 
@@ -453,11 +473,11 @@ if (inspectorPoint) await clickAt(inspectorPoint.x, inspectorPoint.y)
 await pressEscape()
 const afterInspector = await markerCounts()
 check(
-  'cursor/variable-panel-click-clears-marker',
+  'cursor/variable-panel-click-keeps-marker',
   Boolean(inspectorPoint)
     && rearmedInspector.slots === 1
-    && afterInspector.slots === 0
-    && afterInspector.halos === 0,
+    && afterInspector.slots === 1
+    && afterInspector.halos === 1,
   { inspectorPoint, rearmedInspector, afterInspector },
 )
 
@@ -466,8 +486,8 @@ await clickSelector('.ll-node[data-node-id]')
 await pressEscape()
 const afterCanvasNode = await markerCounts()
 check(
-  'cursor/canvas-component-click-clears-marker',
-  rearmedCanvas.slots === 1 && afterCanvasNode.slots === 0 && afterCanvasNode.halos === 0,
+  'cursor/canvas-component-click-keeps-marker',
+  rearmedCanvas.slots === 1 && afterCanvasNode.slots === 1 && afterCanvasNode.halos === 1,
   { rearmedCanvas, afterCanvasNode },
 )
 

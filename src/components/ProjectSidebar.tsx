@@ -29,6 +29,8 @@ export interface ProjectSidebarProps {
   /** 已收藏指令的 id，用于星标的选中状态。 */
   favoriteIds: readonly string[]
   insertTarget: FavoriteInsertTarget | null
+  /** 当前可见落点（可能只是定位预览）；插入权限仍由 insertTarget 判断。 */
+  displayTarget: FavoriteInsertTarget | null
   targetAnchorLabel: string
   onSelectRung: (rungId: string) => void
   onLocateTarget: () => void
@@ -51,6 +53,7 @@ export default function ProjectSidebar({
   variant = 'full',
   favoriteIds,
   insertTarget,
+  displayTarget,
   targetAnchorLabel,
   onSelectRung,
   onLocateTarget,
@@ -105,7 +108,7 @@ export default function ProjectSidebar({
         <div className="sidebar-insert-target">
           <InsertTargetControl
             rungs={program.rungs}
-            insertTarget={insertTarget}
+            displayTarget={displayTarget}
             targetAnchorLabel={targetAnchorLabel}
             onSelectRung={onSelectRung}
             onLocate={onLocateTarget}

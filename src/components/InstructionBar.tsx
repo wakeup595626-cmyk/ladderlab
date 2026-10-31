@@ -36,6 +36,8 @@ interface InstructionBarProps {
   favoriteIds: readonly string[]
   rungs: readonly Rung[]
   insertTarget: FavoriteInsertTarget | null
+  /** 当前图纸上可见的落点，包含仅用于定位、尚未授予插入权限的预览。 */
+  displayTarget: FavoriteInsertTarget | null
   targetAnchorLabel: string
   onSelectRung: (rungId: string) => void
   onLocateTarget: () => void
@@ -78,6 +80,7 @@ export default function InstructionBar({
   favoriteIds,
   rungs,
   insertTarget,
+  displayTarget,
   targetAnchorLabel,
   onSelectRung,
   onLocateTarget,
@@ -230,7 +233,7 @@ export default function InstructionBar({
         <span className="wb-instruction-follow" aria-hidden="true" />
         <InsertTargetControl
           rungs={rungs}
-          insertTarget={insertTarget}
+          displayTarget={displayTarget}
           targetAnchorLabel={targetAnchorLabel}
           onSelectRung={onSelectRung}
           onLocate={onLocateTarget}

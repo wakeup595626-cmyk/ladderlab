@@ -600,10 +600,9 @@ export default function App() {
   const [favoriteTargetRungId, setFavoriteTargetRungId] = useState<string | null>(
     () => preferredRung(initialProgram)?.id ?? null,
   )
-  // 顶部「定位」的落点高亮是临时提示；用户亲手点过的「+」则固定成
-  // insertCursor，一直亮到再次换落点或点画布空白处。
-  const [favoriteTargetPreview, setFavoriteTargetPreview] = useState(false)
-  const favoriteTargetPreviewTimerRef = useRef<number | null>(null)
+  // 顶部下拉/「定位」选中的落点会常驻高亮，直到用户点空白或换落点；
+  // 用户亲手点过的「+」另存为 insertCursor，二者都不受滚动影响。
+  const [favoriteTargetPinned, setFavoriteTargetPinned] = useState(false)
   /** 用户刚点的 + 是收藏指令的连续插入游标，直到点空白或换落点。 */
   const [insertCursor, setInsertCursor] = useState<InsertSlotRef | null>(null)
   const [mergeArmed, setMergeArmed] = useState<MergeArmed | null>(null)
@@ -2058,7 +2057,11 @@ export default function App() {
     [favoriteTargetRungId, program, selection],
   )
   const insertTarget = cursorInsertTarget
-  const activeRungId = insertTarget?.rungId ?? selection?.rungId ?? null
+  const visibleInsertTarget = cursorInsertTarget
+    ?? (favoriteTargetPinned ? suggestedInsertTarget : null)
+  // 调宽把手和项目树跟随正在编辑的程序段；落点高亮可以留在另一段，
+  // 因为用户可能在看别的元件时仍要保留上次选好的插入位置。
+  const activeRungId = selection?.rungId ?? visibleInsertTarget?.rungId ?? null
 
   // 两侧调宽把手是图纸的边缘控件，纵向位置应贴近正在编辑的程序段。
   // 只移动把手本体，贯穿图纸的调整线仍保持全高。
@@ -2102,15 +2105,11 @@ export default function App() {
   }, [activeRungId, program])
 
   const targetAnchorLabel = useMemo(
-    () => (insertTarget
-      ? describeFavoriteInsertTarget(program, insertTarget)
+    () => (visibleInsertTarget
+      ? describeFavoriteInsertTarget(program, visibleInsertTarget)
       : '未选插入位 · 先在图纸点 +'),
-    [insertTarget, program],
+    [program, visibleInsertTarget],
   )
-  // 落点标记只在切换程序段或点「定位」后短暂出现；平时线路保持干净。
-  // 顶部“· 段末 / 某个触点后”的文字始终保留，不靠高亮也能确认落点。
-  const visibleInsertTarget = cursorInsertTarget
-    ?? (favoriteTargetPreview ? suggestedInsertTarget : null)
 
   const scrollFavoriteTargetIntoView = useCallback((rungId: string) => {
     window.requestAnimationFrame(() => {
@@ -2129,23 +2128,12 @@ export default function App() {
   }, [])
 
   const revealFavoriteInsertTarget = useCallback((rungId: string) => {
-    if (favoriteTargetPreviewTimerRef.current !== null) {
-      window.clearTimeout(favoriteTargetPreviewTimerRef.current)
-    }
-    setFavoriteTargetPreview(true)
-    favoriteTargetPreviewTimerRef.current = window.setTimeout(() => {
-      favoriteTargetPreviewTimerRef.current = null
-      setFavoriteTargetPreview(false)
-    }, 2200)
+    setFavoriteTargetPinned(true)
     scrollFavoriteTargetIntoView(rungId)
   }, [scrollFavoriteTargetIntoView])
 
-  const dismissFavoriteTargetPreview = useCallback(() => {
-    if (favoriteTargetPreviewTimerRef.current !== null) {
-      window.clearTimeout(favoriteTargetPreviewTimerRef.current)
-      favoriteTargetPreviewTimerRef.current = null
-    }
-    setFavoriteTargetPreview(false)
+  const dismissFavoriteTargetPin = useCallback(() => {
+    setFavoriteTargetPinned(false)
   }, [])
 
   /** 点画布上的 +：固定落点并持续高亮，收藏指令随后按这个位置连续插入。 */
@@ -2155,20 +2143,14 @@ export default function App() {
     setSelection(null)
     setQuickEdit(null)
     setMobilePanel('none')
-    dismissFavoriteTargetPreview()
-  }, [dismissFavoriteTargetPreview])
-
-  useEffect(() => () => {
-    if (favoriteTargetPreviewTimerRef.current !== null) {
-      window.clearTimeout(favoriteTargetPreviewTimerRef.current)
-    }
-  }, [])
+    dismissFavoriteTargetPin()
+  }, [dismissFavoriteTargetPin])
 
   const selectFavoriteTargetRung = useCallback((rungId: string) => {
     const rung = program.rungs.find((item) => item.id === rungId)
     if (!rung) return
-    // 下拉只负责“带我看看这一段”：清掉之前的落点，滚到该段并闪一下段末。
-    // 真正的插入权限仍然只来自图纸上点过的 +，避免收藏指令落到没看过的地方。
+    // 下拉负责定位并常驻标出该段建议落点；真正的插入权限仍只来自
+    // 图纸上点过的 +，避免收藏指令悄悄落到没看过的地方。
     setSelection(null)
     setInsertCursor(null)
     setFavoriteTargetRungId(rungId)
@@ -3599,26 +3581,17 @@ export default function App() {
   }
 
   /**
-   * 插入标记只服务于“连着插几条收藏指令”。除了收藏条本身和图纸上的
-   * 目标位置，点界面任何地方（顶栏、侧栏、变量表、留白）都算这次插入结束。
-   * 用捕获阶段是因为 `.ll-slot` 会 stopPropagation，冒泡阶段收不到。
+   * 只有界面留白会取消选中并收起常驻落点。顶栏、侧栏、收藏条、变量表、
+   * 弹层和图纸内的交互控件都不算留白；图纸空白由画布自己的点击处理。
    */
-  const clearInsertCursorOnAnyPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (event.button !== 0 || !(event.target instanceof Element)) return
-    if (event.target.closest('[data-keep-insert-cursor="true"], .ll-slot')) return
-    if (!insertCursor && !favoriteTargetPreview) return
-    setInsertCursor(null)
-    dismissFavoriteTargetPreview()
-  }
-
-  /** 点界面任意非交互留白都取消元件选中并收起落点提示；图纸内部仍由画布处理。 */
   const clearSelectionOnBlankPointerDown = (event: {
     button: number
     target: EventTarget | null
   }) => {
     if (event.button !== 0 || !(event.target instanceof Element)) return
     if (event.target.closest(
-      '.ll-canvas, .qe-panel, .wb-context-panel, dialog, '
+      '.ll-canvas, .qe-panel, .wb-context-panel, .wb-topbar, '
+      + '.wb-instruction-strip, .wb-sidebar, .wb-inspector, .wb-statusbar, dialog, '
       + 'button, input, textarea, select, label, a, summary, '
       + '[contenteditable="true"], [role="button"], [role="menu"], '
       + '[role="menuitem"], [role="dialog"], [role="alertdialog"], '
@@ -3629,7 +3602,8 @@ export default function App() {
     if (active instanceof HTMLElement && active !== document.body) active.blur()
     setSelection(null)
     setQuickEdit(null)
-    dismissFavoriteTargetPreview()
+    setInsertCursor(null)
+    dismissFavoriteTargetPin()
   }
 
   // 停靠的变量表是页面的一部分，不抢焦点；但按 Esc 也应该能收起，
@@ -3676,7 +3650,6 @@ export default function App() {
       data-inspector-resizing={resizingInspector ? 'true' : undefined}
       data-program-sheet-resizing={resizingProgramSheetSide ? 'true' : undefined}
       style={{ '--inspector-width': `${inspectorWidth}px`, ...themeVars } as CSSProperties}
-      onPointerDownCapture={clearInsertCursorOnAnyPointerDown}
       onPointerDown={clearSelectionOnBlankPointerDown}
     >
       <a className="skip-link" href="#wb-main">跳到梯形图</a>
@@ -3722,6 +3695,7 @@ export default function App() {
         favoriteIds={favoriteInstructions}
         rungs={program.rungs}
         insertTarget={insertTarget}
+        displayTarget={visibleInsertTarget}
         targetAnchorLabel={targetAnchorLabel}
         onSelectRung={selectFavoriteTargetRung}
         onLocateTarget={locateFavoriteTarget}
@@ -3804,7 +3778,8 @@ export default function App() {
                 selection={selection}
                 paneRef={editorRef}
                 onSelect={(next) => {
-                  setInsertCursor(null)
+                  // 跳段只改变当前编辑的程序段；已经选好的插入落点继续保留，
+                  // 直到用户明确点到图纸空白处。
                   setSelection(next)
                   setInspectorTab((current) => (
                     current === 'tags' && next.wholeRung ? 'tags' : 'properties'
@@ -3983,12 +3958,13 @@ export default function App() {
                 dragTarget={drag.target}
                 isDragging={Boolean(drag.drag)}
                 onSelect={(next) => {
-                  // 点画布上的元件/线路/空白都算重新指定落点：收起 + 的常驻游标。
-                  setInsertCursor(null)
+                  // 点元件或线路只切换编辑目标，不打断已经选好的插入游标；
+                  // 只有真正点到图纸留白才收起常驻落点。
                   if (!next) {
+                    setInsertCursor(null)
                     setSelection(null)
                     setQuickEdit(null)
-                    dismissFavoriteTargetPreview()
+                    dismissFavoriteTargetPin()
                     return
                   }
                   setSelection(next)
@@ -4193,6 +4169,7 @@ export default function App() {
           activeRungId={activeRungId}
           favoriteIds={favoriteInstructions}
           insertTarget={insertTarget}
+          displayTarget={visibleInsertTarget}
           targetAnchorLabel={targetAnchorLabel}
           onSelectRung={selectFavoriteTargetRung}
           onLocateTarget={locateFavoriteTarget}

@@ -10,6 +10,7 @@ interface InstructionDrawerProps {
   activeRungId: string | null
   favoriteIds: readonly string[]
   insertTarget: FavoriteInsertTarget | null
+  displayTarget: FavoriteInsertTarget | null
   targetAnchorLabel: string
   onSelectRung: (rungId: string) => void
   onLocateTarget: () => void
@@ -29,6 +30,7 @@ export default function InstructionDrawer({
   activeRungId,
   favoriteIds,
   insertTarget,
+  displayTarget,
   targetAnchorLabel,
   onSelectRung,
   onLocateTarget,
@@ -65,6 +67,7 @@ export default function InstructionDrawer({
         variant="instructions"
         favoriteIds={favoriteIds}
         insertTarget={insertTarget}
+        displayTarget={displayTarget}
         targetAnchorLabel={targetAnchorLabel}
         onSelectRung={onSelectRung}
         onLocateTarget={onLocateTarget}

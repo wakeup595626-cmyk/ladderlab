@@ -5,7 +5,8 @@ import { ChevronDownIcon, TargetIcon } from './Icons'
 
 interface InsertTargetControlProps {
   rungs: readonly Rung[]
-  insertTarget: FavoriteInsertTarget | null
+  /** 仅用于显示和定位的落点；是否允许插入仍由收藏条单独判断。 */
+  displayTarget: FavoriteInsertTarget | null
   targetAnchorLabel: string
   onSelectRung: (rungId: string) => void
   onLocate: () => void
@@ -19,7 +20,7 @@ interface InsertTargetControlProps {
  */
 export default function InsertTargetControl({
   rungs,
-  insertTarget,
+  displayTarget,
   targetAnchorLabel,
   onSelectRung,
   onLocate,
@@ -35,7 +36,7 @@ export default function InsertTargetControl({
     <span
       className={[
         'wb-insert-target',
-        insertTarget ? '' : 'is-empty',
+        displayTarget ? '' : 'is-empty',
         className,
       ].filter(Boolean).join(' ')}
       data-keep-insert-cursor="true"
@@ -45,11 +46,11 @@ export default function InsertTargetControl({
         <select
           aria-label="选择收藏指令插入到哪个程序段"
           title={targetAnchorLabel}
-          value={insertTarget?.rungId ?? ''}
+          value={displayTarget?.rungId ?? ''}
           onChange={(event) => onSelectRung(event.target.value)}
         >
           {/* 没有落点时只显示引导语：下拉只负责定位，不授予插入权限。 */}
-          {!insertTarget && <option value="">点 + 选位置</option>}
+          {!displayTarget && <option value="">点 + 选位置</option>}
           {options.map(({ rung, label }) => (
             <option key={rung.id} value={rung.id}>{label}</option>
           ))}
@@ -61,7 +62,7 @@ export default function InsertTargetControl({
         type="button"
         className="wb-insert-target-locate"
         onClick={onLocate}
-        disabled={!insertTarget}
+        disabled={!displayTarget}
         title={`定位：${targetAnchorLabel}`}
         aria-label={`在图纸上标出落点：${targetAnchorLabel}`}
       >
