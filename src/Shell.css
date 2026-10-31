@@ -4523,7 +4523,15 @@ body[data-drag-kind] {
    只有出现导航（多于一个程序段）时才让出这段留白。 */
 @media (min-width: 721px) {
   .wb-program-pane:has(.rung-nav) {
-    padding-left: 68px;
+    /* 34px 导航轨道 + 20px 与程序段的呼吸间距。 */
+    padding-left: 54px;
+  }
+}
+
+/* 触屏设备把导航恢复到 44px 的指尖宽度（加 1px 边框），留白同步加 11px。 */
+@media (min-width: 721px) and (pointer: coarse) {
+  .wb-program-pane:has(.rung-nav) {
+    padding-left: 65px;
   }
 }
 

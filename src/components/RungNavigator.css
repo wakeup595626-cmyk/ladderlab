@@ -1,15 +1,19 @@
 /* 程序段导航做成贴在图纸左边缘的索引页签：和纸面共用一条边框，
-   不再漂浮成一根像遥控器的白色胶囊。占位由 Shell.css 预留。 */
+   不再漂浮成一根像遥控器的白色胶囊。占位由 Shell.css 预留。
+   桌面轨道压到 34px，读数改为「当前段在上、总段数在下」，
+   省下来的宽度全部还给梯形图；触控设备仍保留 44px 的可点区域。 */
 .rung-nav {
+  --rung-rail-width: 34px;
+
   position: sticky;
   top: 12px;
   z-index: 12;
   display: flex;
-  width: 48px;
+  width: var(--rung-rail-width);
   height: 0;
   flex: 0 0 auto;
   align-self: flex-start;
-  margin-left: -48px;
+  margin-left: calc(var(--rung-rail-width) * -1);
   margin-bottom: -12px;
   overflow: visible;
 }
@@ -19,16 +23,21 @@
   top: 0;
   right: 0;
   display: flex;
-  width: 48px;
+  width: var(--rung-rail-width);
   flex-direction: column;
   align-items: center;
   overflow: hidden;
-  padding: 4px 0 5px;
+  padding: 5px 0 6px;
   border: 1px solid var(--border);
   border-right: 0;
-  border-radius: 11px 0 0 11px;
-  background: var(--surface);
-  transition: border-color 0.15s ease;
+  border-radius: 12px 0 0 12px;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--surface) 90%, var(--accent-wash)) 0,
+    var(--surface) 42%
+  );
+  box-shadow: 0 12px 26px -22px color-mix(in srgb, var(--accent-ink) 70%, transparent);
+  transition: border-color var(--dur-quick) var(--ease-out);
 }
 
 .rung-nav[data-open='true'] .rung-nav-rail {
@@ -39,7 +48,7 @@
   position: relative;
   display: grid;
   width: 100%;
-  height: 38px;
+  height: 34px;
   flex: 0 0 auto;
   place-items: center;
   border: 0;
@@ -47,46 +56,56 @@
   background: transparent;
   color: var(--muted);
   cursor: pointer;
-  transition: color var(--dur-press) var(--ease-out);
+  -webkit-tap-highlight-color: transparent;
+  transition: color var(--dur-quick) var(--ease-out);
 }
 
 .rung-nav-step::before {
   position: absolute;
   top: 50%;
   left: 50%;
-  width: 30px;
-  height: 30px;
-  border-radius: 8px;
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
   background: transparent;
   content: '';
   transform: translate(-50%, -50%);
   transition:
-    background-color var(--dur-press) var(--ease-out),
-    transform var(--dur-press) var(--ease-out);
+    background-color 160ms var(--ease-out),
+    transform 160ms var(--ease-out);
 }
 
 .rung-nav-step svg {
   position: relative;
   z-index: 1;
-  transition: transform var(--dur-press) var(--ease-out);
+  transition: transform 170ms var(--ease-fluid);
 }
 
-.rung-nav-step:hover {
-  color: var(--accent-ink);
+/* 悬停只在真正有指针的设备上生效，触屏点完不会留下“粘住”的高亮。 */
+@media (hover: hover) and (pointer: fine) {
+  .rung-nav-step:hover {
+    color: var(--accent-ink);
+  }
+
+  .rung-nav-step:hover::before {
+    background: var(--accent-wash);
+  }
+
+  .rung-nav-step[data-step='previous']:hover svg { transform: translateY(-1px); }
+  .rung-nav-step[data-step='next']:hover svg { transform: translateY(1px); }
+  .rung-nav-find:hover svg { transform: scale(1.06); }
 }
 
-.rung-nav-step:hover::before { background: var(--accent-wash); }
-
-.rung-nav-step[data-step='previous']:hover svg { transform: translateY(-1.5px); }
-.rung-nav-step[data-step='next']:hover svg { transform: translateY(1.5px); }
-
+/* 按下时先收再放：底色压到 90%，图标只做极轻的回缩。 */
 .rung-nav-step:active::before {
-  background: color-mix(in srgb, var(--accent-wash) 78%, var(--accent));
-  transform: translate(-50%, -50%) scale(0.92);
+  background: color-mix(in srgb, var(--accent-wash) 72%, var(--accent));
+  transform: translate(-50%, -50%) scale(0.9);
+  transition-duration: 80ms;
 }
 
-.rung-nav-step[data-step='previous']:active svg { transform: translateY(-2px) scale(0.96); }
-.rung-nav-step[data-step='next']:active svg { transform: translateY(2px) scale(0.96); }
+.rung-nav-step:active svg { transform: scale(0.94); }
+.rung-nav-step[data-step='previous']:active svg { transform: translateY(-2px) scale(0.94); }
+.rung-nav-step[data-step='next']:active svg { transform: translateY(2px) scale(0.94); }
 
 .rung-nav-step:focus-visible {
   z-index: 1;
@@ -97,79 +116,94 @@
 .rung-nav-step:focus-visible::before {
   background: var(--accent-wash);
   outline: 2px solid var(--accent);
-  outline-offset: -1px;
+  outline-offset: -2px;
+}
+
+.rung-nav-find {
+  margin-top: 4px;
 }
 
 .rung-nav-find[aria-expanded='true'] {
   color: var(--accent-ink);
 }
 
-.rung-nav-find[aria-expanded='true']::before { background: var(--accent-wash); }
-
-.rung-nav-find {
-  margin-top: 3px;
+.rung-nav-find[aria-expanded='true']::before {
+  background: var(--accent-wash);
 }
 
 .rung-nav-find::after {
   position: absolute;
-  top: -3px;
+  top: -2px;
   left: 50%;
-  width: 20px;
+  width: 14px;
   height: 1px;
-  background: var(--border);
+  background: color-mix(in srgb, var(--border) 82%, transparent);
   content: '';
   transform: translateX(-50%);
 }
 
-.rung-nav-find:hover svg { transform: scale(1.06); }
-
 .rung-nav-meter {
   display: flex;
   width: 100%;
-  height: 43px;
+  height: 46px;
   box-sizing: border-box;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 3px;
   color: var(--text);
   cursor: default;
   user-select: none;
 }
 
-.rung-nav-kicker {
-  color: var(--faint);
-  font-size: 9px;
-  font-weight: 650;
-  letter-spacing: 0.07em;
-  line-height: 1;
-}
-
 .rung-nav-count {
   display: flex;
-  align-items: baseline;
-  gap: 1px;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
   line-height: 1;
 }
 
-.rung-nav-now {
+.rung-nav-current {
+  min-width: 20px;
   color: var(--accent-ink);
-  font-size: 16px;
+  font-size: 17px;
   font-variant-numeric: tabular-nums;
-  font-weight: 720;
+  font-weight: 730;
+  letter-spacing: -0.01em;
   line-height: 1;
+  text-align: center;
+  animation: rung-nav-tick 200ms var(--ease-out);
+}
+
+.rung-nav-sep {
+  width: 9px;
+  height: 1px;
+  border-radius: 1px;
+  background: color-mix(in srgb, var(--accent) 22%, var(--border));
 }
 
 .rung-nav-total {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 1px;
   color: var(--muted);
-  font-size: 10px;
+  font-size: 9.5px;
   font-variant-numeric: tabular-nums;
   font-weight: 620;
+  letter-spacing: 0.01em;
   line-height: 1;
   white-space: nowrap;
 }
 
-/* 搜索面板向左展开，右边缘对齐图纸；只在查找时短暂覆盖画布本身。 */
+.rung-nav-total-label {
+  color: var(--faint);
+  font-size: 8px;
+  font-weight: 560;
+  letter-spacing: 0;
+}
+
+/* 搜索面板从轨道右侧向画布内展开；关闭后保留在 DOM 里，
+   用 inert 断开焦点，等退场动画播完再由 visibility 收起。 */
 .rung-nav-panel {
   position: absolute;
   top: 0;
@@ -183,7 +217,26 @@
   border-radius: var(--radius-card);
   background: var(--surface);
   box-shadow: 0 18px 40px rgba(22, 31, 27, 0.16);
-  animation: rung-nav-pop 0.14s ease-out;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(-5px) scale(0.985);
+  transform-origin: left top;
+  visibility: hidden;
+  transition:
+    opacity 110ms var(--ease-out),
+    transform 140ms var(--ease-out),
+    visibility 0s linear 140ms;
+}
+
+.rung-nav-panel[data-open='true'] {
+  opacity: 1;
+  pointer-events: auto;
+  transform: none;
+  visibility: visible;
+  transition:
+    opacity 150ms var(--ease-out) 20ms,
+    transform 200ms var(--ease-fluid),
+    visibility 0s;
 }
 
 .rung-nav-search {
@@ -196,6 +249,9 @@
   border-radius: 8px;
   background: var(--surface);
   color: var(--muted);
+  transition:
+    border-color var(--dur-quick) var(--ease-out),
+    box-shadow var(--dur-quick) var(--ease-out);
 }
 
 .rung-nav-search:focus-within {
@@ -276,6 +332,7 @@
   color: var(--text);
   cursor: pointer;
   text-align: left;
+  transition: background-color var(--dur-press) var(--ease-out);
 }
 
 .rung-nav-results button:hover,
@@ -301,11 +358,13 @@
   white-space: nowrap;
 }
 
-@keyframes rung-nav-pop {
+@keyframes rung-nav-tick {
   from {
     opacity: 0;
-    transform: translateX(-6px) scale(0.985);
+    transform: translateY(4px);
   }
+
+  60% { opacity: 1; }
 }
 
 /* 手机上画布本来就窄，再加一条跳段轨道只会挤压梯形图；滚动和底部标签栏已经够用。 */
@@ -313,16 +372,32 @@
   .rung-nav { display: none; }
 }
 
+/* 平板和触屏笔记本恢复 44×44px 的指尖目标，鼠标端仍用窄轨道。 */
+@media (min-width: 721px) and (pointer: coarse) {
+  .rung-nav { --rung-rail-width: 45px; }
+  .rung-nav-step { height: 44px; }
+  .rung-nav-step::before { width: 34px; height: 34px; }
+  .rung-nav-meter { height: 52px; }
+  .rung-nav-search { height: 44px; }
+  .rung-nav-results button { min-height: 44px; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .rung-nav-step,
   .rung-nav-step::before,
   .rung-nav-step svg,
-  .rung-nav-rail { transition: none; }
+  .rung-nav-rail,
+  .rung-nav-panel,
+  .rung-nav-panel[data-open='true'] { transition: none; }
+
+  .rung-nav-current { animation: none; }
   .rung-nav-step:active::before { transform: translate(-50%, -50%); }
+
   .rung-nav-step[data-step='previous']:hover svg,
   .rung-nav-step[data-step='next']:hover svg,
   .rung-nav-step[data-step='previous']:active svg,
   .rung-nav-step[data-step='next']:active svg,
   .rung-nav-find:hover svg { transform: none; }
-  .rung-nav-panel { animation: none; }
+
+  .rung-nav-panel { transform: none; }
 }

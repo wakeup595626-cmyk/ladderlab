@@ -21,7 +21,7 @@ function collectTags(nodes: LadderNode[], into: string[]): void {
 
 /**
  * 程序段总览：跳段、上一段/下一段，以及按标题或变量名定位。
- * 它是一根贴在图纸右边缘的窄轨道，不再横跨画布占用一整行。
+ * 它是一根贴在图纸左边缘的窄轨道，不再横跨画布占用一整行。
  */
 export default function RungNavigator({ program, selection, paneRef, onSelect }: RungNavigatorProps) {
   const [panelOpen, setPanelOpen] = useState(false)
@@ -75,9 +75,10 @@ export default function RungNavigator({ program, selection, paneRef, onSelect }:
     if (restoreFocus) window.requestAnimationFrame(() => findRef.current?.focus())
   }
 
-  function jumpTo(rungId: string) {
+  // 从搜索结果跳转时把焦点送回查找按钮；用上下箭头翻段时则保留在箭头上。
+  function jumpTo(rungId: string, restoreFocus = false) {
     onSelect({ rungId, path: null, wholeRung: true })
-    closePanel()
+    closePanel(restoreFocus)
     window.requestAnimationFrame(() => {
       const pane = paneRef.current
       if (!pane) return
@@ -126,13 +127,16 @@ export default function RungNavigator({ program, selection, paneRef, onSelect }:
           aria-label="上一程序段"
           title="上一程序段"
         >
-          <ArrowUpIcon size={15} />
+          <ArrowUpIcon size={16} />
         </button>
         <span className="rung-nav-meter" title={`程序段 ${shown} / ${rungs.length} · ${currentLabel}`}>
-          <span className="rung-nav-kicker" aria-hidden="true">程序段</span>
           <span className="rung-nav-count" aria-hidden="true">
-            <span className="rung-nav-now">{shown}</span>
-            <span className="rung-nav-total">/{rungs.length}</span>
+            {/* key 变化时让新段号从下方轻轻顶上来，避免读数生硬跳变。 */}
+            <span className="rung-nav-current" key={`${current?.id ?? 'none'}-${shown}`}>{shown}</span>
+            <span className="rung-nav-sep" />
+            <span className="rung-nav-total">
+              <span className="rung-nav-total-label">共</span>{rungs.length}
+            </span>
           </span>
         </span>
         <span className="visually-hidden" aria-live="polite">
@@ -146,7 +150,7 @@ export default function RungNavigator({ program, selection, paneRef, onSelect }:
           aria-label="下一程序段"
           title="下一程序段"
         >
-          <ArrowDownIcon size={15} />
+          <ArrowDownIcon size={16} />
         </button>
         <button
           ref={findRef}
@@ -161,56 +165,63 @@ export default function RungNavigator({ program, selection, paneRef, onSelect }:
           <SearchIcon size={15} />
         </button>
       </div>
-      {panelOpen && (
-        <div className="rung-nav-panel" id={panelId} role="search" aria-label="查找程序段">
-          <label className="rung-nav-search">
-            <SearchIcon size={14} />
-            <input
-              ref={inputRef}
-              type="search"
-              value={query}
-              placeholder="找标题或变量"
-              aria-label="按标题或变量名搜索程序段"
-              onChange={(event) => setQuery(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter' && results[0]) {
-                  event.preventDefault()
-                  jumpTo(results[0].id)
-                } else if (event.key === 'Escape') {
-                  event.stopPropagation()
-                  closePanel(true)
-                }
-              }}
-            />
-          </label>
-          <p className="rung-nav-here" title={currentLabel}>
-            <span>现在</span>程序段 {shown} · {currentLabel}
+      {/* 面板常驻 DOM，关闭时用 inert 收起；这样才能播完退场动画再隐藏。 */}
+      <div
+        className="rung-nav-panel"
+        id={panelId}
+        role="search"
+        aria-label="查找程序段"
+        data-open={panelOpen ? 'true' : 'false'}
+        aria-hidden={!panelOpen}
+        inert={!panelOpen}
+      >
+        <label className="rung-nav-search">
+          <SearchIcon size={14} />
+          <input
+            ref={inputRef}
+            type="search"
+            value={query}
+            placeholder="找标题或变量"
+            aria-label="按标题或变量名搜索程序段"
+            onChange={(event) => setQuery(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' && results[0]) {
+                event.preventDefault()
+                jumpTo(results[0].id, true)
+              } else if (event.key === 'Escape') {
+                event.stopPropagation()
+                closePanel(true)
+              }
+            }}
+          />
+        </label>
+        <p className="rung-nav-here" title={currentLabel}>
+          <span>现在</span>程序段 {shown} · {currentLabel}
+        </p>
+        {needle ? (
+          <div className="rung-nav-results" role="listbox" aria-label="程序段搜索结果">
+            {results.length === 0 ? (
+              <p>没有匹配的程序段</p>
+            ) : results.map((rung) => (
+              <button
+                key={rung.id}
+                type="button"
+                role="option"
+                aria-selected={rung.id === selection?.rungId}
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => jumpTo(rung.id, true)}
+              >
+                <span>{rung.number}</span>
+                <strong>{rung.label || '未命名程序段'}</strong>
+              </button>
+            ))}
+          </div>
+        ) : (
+          <p className="rung-nav-hint">
+            输入段标题、变量名或“程序段 12”，按 Enter 跳到第一条。
           </p>
-          {needle ? (
-            <div className="rung-nav-results" role="listbox" aria-label="程序段搜索结果">
-              {results.length === 0 ? (
-                <p>没有匹配的程序段</p>
-              ) : results.map((rung) => (
-                <button
-                  key={rung.id}
-                  type="button"
-                  role="option"
-                  aria-selected={rung.id === selection?.rungId}
-                  onMouseDown={(event) => event.preventDefault()}
-                  onClick={() => jumpTo(rung.id)}
-                >
-                  <span>{rung.number}</span>
-                  <strong>{rung.label || '未命名程序段'}</strong>
-                </button>
-              ))}
-            </div>
-          ) : (
-            <p className="rung-nav-hint">
-              输入段标题、变量名或“程序段 12”，按 Enter 跳到第一条。
-            </p>
-          )}
-        </div>
-      )}
+        )}
+      </div>
     </nav>
   )
 }
