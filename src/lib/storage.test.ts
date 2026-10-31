@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { starterProgram } from '../engine/samples'
 import {
   archiveRecoveryCopy,
+  clearRecoveryBackups,
+  deleteRecoveryBackup,
   getDraftTabId,
   getLastSavedAt,
   isRecoveryBackupIntact,
@@ -9,6 +11,7 @@ import {
   loadSavedProgram,
   parseProgramDraft,
   readRawSavedProgram,
+  readRecoveryBackup,
   saveProgram,
   setProgramDraftScope,
 } from './storage'
@@ -456,6 +459,54 @@ describe('storage', () => {
 
     expect(second).toBe(first)
     expect(recoveryKeys()).toHaveLength(1)
+  })
+
+  it('deletes one recovery copy and keeps the other copies', () => {
+    const olderKey = RECOVERY_KEY_PREFIX + '2025-01-01T08:00:00.000Z'
+    const newerKey = RECOVERY_KEY_PREFIX + '2025-02-02T09:30:00.000Z-1'
+    storage.setItem(olderKey, 'old')
+    storage.setItem(newerKey, 'newer')
+    storage.setItem('unrelated', 'ignored')
+
+    expect(deleteRecoveryBackup(olderKey)).toBe(true)
+    expect(readRecoveryBackup(olderKey)).toBeNull()
+    expect(readRecoveryBackup(newerKey)).toBe('newer')
+    expect(listRecoveryBackups()).toHaveLength(1)
+    // 只删这一份恢复副本，相邻的其它本机数据保持原样。
+    expect(storage.getItem('unrelated')).toBe('ignored')
+  })
+
+  it('refuses to delete a recovery key outside the active account scope', () => {
+    // 真实键形如 ladderlab.project.v1.recovery.@u-xxxx + ISO 时间戳。
+    const otherAccountKey = RECOVERY_KEY_PREFIX + '@u-bbbbbbbbbbbb' + '2025-01-01T08:00:00.000Z'
+    storage.setItem(otherAccountKey, 'other account')
+    setProgramDraftScope('u-aaaaaaaaaaaa')
+
+    expect(deleteRecoveryBackup(otherAccountKey)).toBe(false)
+    expect(readRecoveryBackup(otherAccountKey)).toBe('other account')
+  })
+
+  it('clears only the active account recovery copies', () => {
+    setProgramDraftScope('u-aaaaaaaaaaaa')
+    const firstKey = archiveRecoveryCopy('{"scope":"a1"}')
+    const secondKey = archiveRecoveryCopy('{"scope":"a2"}')
+    if (!firstKey || !secondKey) throw new Error('expected two recovery copies')
+    expect(listRecoveryBackups()).toHaveLength(2)
+
+    setProgramDraftScope('u-bbbbbbbbbbbb')
+    const otherKey = archiveRecoveryCopy('{"scope":"b"}')
+    expect(otherKey).toBeTruthy()
+
+    setProgramDraftScope('u-aaaaaaaaaaaa')
+    expect(clearRecoveryBackups()).toBe(2)
+    expect(listRecoveryBackups()).toHaveLength(0)
+    expect(readRecoveryBackup(firstKey)).toBeNull()
+    expect(readRecoveryBackup(secondKey)).toBeNull()
+
+    setProgramDraftScope('u-bbbbbbbbbbbb')
+    expect(listRecoveryBackups()).toHaveLength(1)
+    expect(clearRecoveryBackups()).toBe(1)
+    expect(listRecoveryBackups()).toHaveLength(0)
   })
 
   it('reports corrupt state when storage cannot be read', () => {

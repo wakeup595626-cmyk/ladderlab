@@ -420,6 +420,40 @@ export function listRecoveryBackups(): RecoveryBackup[] {
   )
 }
 
+/**
+ * 删除一份恢复副本。只允许删除当前账号作用域下的键，避免别的账号
+ * 或无关的 localStorage 数据被误删。
+ */
+export function deleteRecoveryBackup(key: string): boolean {
+  if (!key.startsWith(getRecoveryStorageKeyPrefix())) return false
+  try {
+    window.localStorage.removeItem(key)
+    return window.localStorage.getItem(key) === null
+  } catch {
+    return false
+  }
+}
+
+/** 清空当前账号的恢复副本，返回真正删掉的数量。 */
+export function clearRecoveryBackups(): number {
+  const prefix = getRecoveryStorageKeyPrefix()
+  const keys: string[] = []
+  try {
+    for (let index = 0; index < window.localStorage.length; index += 1) {
+      const key = window.localStorage.key(index)
+      if (key?.startsWith(prefix)) keys.push(key)
+    }
+    let removed = 0
+    for (const key of keys) {
+      window.localStorage.removeItem(key)
+      if (window.localStorage.getItem(key) === null) removed += 1
+    }
+    return removed
+  } catch {
+    return 0
+  }
+}
+
 function backupCorruptProject(raw: string): string | undefined {
   const existing = findRecoveryBackup(raw)
   if (existing) {

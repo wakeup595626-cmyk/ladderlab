@@ -13,6 +13,7 @@ import {
   FolderIcon,
   InfoIcon,
   LadderIcon,
+  LayersIcon,
   TagIcon,
   TrashIcon,
 } from './Icons'
@@ -31,6 +32,9 @@ interface ProjectDrawerProps {
   onOpenTags: () => void
   onOpenLibrary: () => void
   onOpenBackup?: () => void
+  /** 本机安全副本数量；0 时仍保留入口，只在计数位显示占位符。 */
+  recoveryBackupCount?: number
+  onOpenRecoveryBackups?: () => void
   onOpenSavedProject: (project: SavedProject) => void
   onDeleteSavedProject: (project: SavedProject) => void
   onRepairBrokenProject: (record: BrokenSavedProject) => void
@@ -54,6 +58,8 @@ export default function ProjectDrawer({
   onOpenTags,
   onOpenLibrary,
   onOpenBackup,
+  recoveryBackupCount = 0,
+  onOpenRecoveryBackups,
   onOpenSavedProject,
   onDeleteSavedProject,
   onRepairBrokenProject,
@@ -128,6 +134,15 @@ export default function ProjectDrawer({
                 <ExportIcon size={18} />
                 <span className="wb-tree-label">整包备份</span>
                 <span className="wb-tree-count" aria-hidden="true">JSON</span>
+              </button>
+            )}
+            {onOpenRecoveryBackups && (
+              <button type="button" className="wb-tree-item" onClick={onOpenRecoveryBackups}>
+                <LayersIcon size={18} />
+                <span className="wb-tree-label">安全副本</span>
+                <span className="wb-tree-count" aria-hidden="true">
+                  {recoveryBackupCount > 0 ? recoveryBackupCount : '—'}
+                </span>
               </button>
             )}
           </div>

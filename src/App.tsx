@@ -46,6 +46,7 @@ import ProjectImportDialog from './components/ProjectImportDialog'
 import NewProjectDialog from './components/NewProjectDialog'
 import SaveProjectDialog from './components/SaveProjectDialog'
 import ProjectBackupDialog from './components/ProjectBackupDialog'
+import RecoveryBackupsDialog from './components/RecoveryBackupsDialog'
 import ProgramIssuesDialog from './components/ProgramIssuesDialog'
 import type {
   ProgramImageFormat,
@@ -151,6 +152,8 @@ import {
 } from './lib/insertTarget'
 import {
   archiveRecoveryCopy,
+  clearRecoveryBackups,
+  deleteRecoveryBackup,
   isRecoveryBackupIntact,
   getDraftTabId,
   getProgramStorageKey,
@@ -400,10 +403,6 @@ function formatBackupTime(savedAt: number | null): string {
   return savedAt ? backupTimeFormatter.format(savedAt) : '时间未知'
 }
 
-function formatBackupSize(bytes: number): string {
-  return bytes < 1024 ? `${bytes} B` : `${(bytes / 1024).toFixed(1)} KB`
-}
-
 function archiveProgramVersion(program: Program): boolean {
   try {
     return Boolean(archiveRecoveryCopy(serializeProgram(program)))
@@ -585,7 +584,7 @@ export default function App() {
   const [storagePressure, setStoragePressure] = useState<StoragePressure | null>(null)
   const [storageNoticeDismissed, setStorageNoticeDismissed] = useState(false)
   const [backups, setBackups] = useState<RecoveryBackup[]>(() => listRecoveryBackups())
-  const [backupsDismissed, setBackupsDismissed] = useState(false)
+  const [recoveryOpen, setRecoveryOpen] = useState(false)
   const [rawDownloaded, setRawDownloaded] = useState(false)
   const [remoteConflict, setRemoteConflict] = useState<{
     program: Program
@@ -1042,7 +1041,6 @@ export default function App() {
     setMergeArmed(null)
     setQuickEdit(null)
     setBackups(listRecoveryBackups())
-    setBackupsDismissed(false)
     setRawDownloaded(false)
     setStorageNoticeDismissed(false)
   }, [applyLibrarySnapshot, cloudUserId])
@@ -1152,7 +1150,6 @@ export default function App() {
     remoteConflictDataRef.current = null
     setRemoteConflict(null)
     setBackups(listRecoveryBackups())
-    setBackupsDismissed(false)
     return 'cleared' as const
   }, [])
 
@@ -1891,7 +1888,6 @@ export default function App() {
         const backupKey = archiveRecoveryCopy(event.newValue)
         if (backupKey) {
           setBackups(listRecoveryBackups())
-          setBackupsDismissed(false)
           notify('另一个标签页保存了未命名工程，已把对方版本留存为恢复快照')
         } else {
           notify('另一个标签页保存了未命名工程；本页继续编辑，建议先导出备份以免互相覆盖', {
@@ -2897,7 +2893,6 @@ export default function App() {
     setRemoteConflict(null)
     saveDirtyRef.current = true
     setBackups(listRecoveryBackups())
-    setBackupsDismissed(false)
     if (saveLatestProgram()) notify('已保留本页修改；另一标签页版本已存为恢复副本')
     else notify('已保留本页修改，但写回本机存储失败；请先导出工程 JSON，另一版本已存为恢复副本', { tone: 'error' })
   }
@@ -2950,7 +2945,6 @@ export default function App() {
     setSaveError(null)
     setSavePending(false)
     setBackups(listRecoveryBackups())
-    setBackupsDismissed(false)
     notify('已载入另一标签页版本；本页修改已存为恢复副本')
   }
 
@@ -2964,6 +2958,34 @@ export default function App() {
     const stamp = downloadTimestamp()
     downloadText(`梯形实验室-恢复副本-${stamp}.txt`, raw)
     notify('恢复副本已下载')
+  }
+
+  const deleteBackup = async (backup: RecoveryBackup) => {
+    const accepted = await confirm({
+      title: '删除这份安全副本？',
+      description: '删除后无法再从浏览器里找回。需要保留的话，请先下载。当前工程不会受影响。',
+      confirmLabel: '删除',
+      danger: true,
+    })
+    if (!accepted) return
+    deleteRecoveryBackup(backup.key)
+    setBackups(listRecoveryBackups())
+    notify('已删除这份安全副本')
+  }
+
+  const clearBackups = async () => {
+    if (backups.length === 0) return
+    const accepted = await confirm({
+      title: `清空 ${backups.length} 份安全副本？`,
+      description: '只会删除自动快照，当前正在编辑的工程不受影响。删除后无法从浏览器恢复，需要保留请先逐份下载。',
+      confirmLabel: '全部清理',
+      danger: true,
+    })
+    if (!accepted) return
+    const removed = clearRecoveryBackups()
+    setBackups(listRecoveryBackups())
+    if (removed > 0) notify(`已清理 ${removed} 份安全副本`)
+    else notify('没有可清理的安全副本', { tone: 'error' })
   }
 
   const restoreBackup = async (backup: RecoveryBackup) => {
@@ -2986,8 +3008,8 @@ export default function App() {
       return
     }
     const accepted = await confirm({
-      title: '载入这份恢复副本？',
-      description: '当前工程会被替换，替换前会先在本机存一份恢复副本。',
+      title: '载入这份安全副本？',
+      description: '当前工程会被替换，替换前会先在本机存一份安全副本。',
       confirmLabel: '载入',
     })
     if (!accepted) return
@@ -3003,8 +3025,9 @@ export default function App() {
       ? { rungId: preferredRung(opened)!.id, path: null }
       : null)
     setActiveProject(null)
+    setRecoveryOpen(false)
     const restoreNote = corruptProject
-      ? '已载入恢复副本；请确认恢复横幅中的「接受当前工程」以恢复自动保存'
+      ? '已载入恢复副本；请点页面顶部「本机工程恢复」里的「接受当前工程并恢复自动保存」'
       : '已从恢复副本载入工程，会作为当前工程自动保存'
     if (restoreIssues.length > 0) {
       const first = restoreIssues[0]?.message ?? ''
@@ -3043,7 +3066,6 @@ export default function App() {
     }
 
     setBackups(listRecoveryBackups())
-    setBackupsDismissed(false)
     const opened = ensureTrailingBlankRung(saved.program)
     commit(opened)
     setSelection(preferredRung(opened)
@@ -3785,6 +3807,8 @@ export default function App() {
         onGuide={() => setGuideOpen(true)}
         onAbout={() => setAboutOpen(true)}
         onOpenAccount={openAccount}
+        recoveryBackupCount={backups.length}
+        onOpenRecoveryBackups={() => setRecoveryOpen(true)}
         accountStatus={account.status}
         accountEmail={account.user?.email ?? null}
         theme={theme}
@@ -3991,55 +4015,6 @@ export default function App() {
                       放弃损坏工程并新建
                     </button>
                   </div>
-                </section>
-              )}
-
-              {!corruptProject && backups.length > 0 && !backupsDismissed && (
-                <section className="backup-strip" aria-labelledby="backup-title">
-                  <div className="backup-strip-head">
-                    <div className="backup-strip-copy">
-                      <span>本机恢复副本</span>
-                      <strong id="backup-title">保留着 {backups.length} 份工程快照</strong>
-                      <small>可以直接下载，或载入为当前工程；载入后会自动保存。</small>
-                    </div>
-                    <button
-                      type="button"
-                      className="backup-dismiss"
-                      onClick={() => setBackupsDismissed(true)}
-                    >
-                      稍后再说
-                    </button>
-                  </div>
-                  <ul className="backup-list">
-                    {backups.map((backup) => {
-                      const label = formatBackupTime(backup.savedAt)
-                      return (
-                        <li key={backup.key}>
-                          <div className="backup-meta">
-                            <strong>{label}</strong>
-                            <span>{formatBackupSize(backup.bytes)}</span>
-                          </div>
-                          <div className="backup-actions">
-                            <button
-                              type="button"
-                              onClick={() => downloadBackup(backup)}
-                              aria-label={'下载 ' + label + ' 的恢复副本'}
-                            >
-                              下载
-                            </button>
-                            <button
-                              type="button"
-                              className="backup-restore"
-                              onClick={() => restoreBackup(backup)}
-                              aria-label={'载入 ' + label + ' 的恢复副本'}
-                            >
-                              载入
-                            </button>
-                          </div>
-                        </li>
-                      )
-                    })}
-                  </ul>
                 </section>
               )}
 
@@ -4320,6 +4295,11 @@ export default function App() {
           setMobilePanel('none')
           setBackupOpen(true)
         }}
+        recoveryBackupCount={backups.length}
+        onOpenRecoveryBackups={() => {
+          setMobilePanel('none')
+          setRecoveryOpen(true)
+        }}
         onGuide={() => {
           setMobilePanel('none')
           setGuideOpen(true)
@@ -4456,6 +4436,16 @@ export default function App() {
           scheduleCloudSyncRef.current()
           notify('整包恢复完成，已生成新版本')
         }}
+      />
+
+      <RecoveryBackupsDialog
+        open={recoveryOpen}
+        backups={backups}
+        onClose={() => setRecoveryOpen(false)}
+        onDownload={downloadBackup}
+        onRestore={(backup) => void restoreBackup(backup)}
+        onDelete={(backup) => void deleteBackup(backup)}
+        onClearAll={() => void clearBackups()}
       />
 
       {issuesDialog && (

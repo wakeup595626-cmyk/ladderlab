@@ -13,6 +13,7 @@ import {
   ImportIcon,
   InfoIcon,
   LadderIcon,
+  LayersIcon,
   LinkIcon,
   MoreIcon,
   PaletteIcon,
@@ -59,6 +60,9 @@ export interface WorkspaceTopBarProps {
   onGuide: () => void
   onAbout: () => void
   onOpenAccount: () => void
+  /** 本机安全副本数量：0 时入口仍然保留，只是不显示份数。 */
+  recoveryBackupCount?: number
+  onOpenRecoveryBackups: () => void
   accountStatus?: 'disabled' | 'signed-out' | 'signed-in'
   accountEmail?: string | null
   theme: ThemePreference
@@ -95,6 +99,8 @@ export default function WorkspaceTopBar({
   onGuide,
   onAbout,
   onOpenAccount,
+  recoveryBackupCount = 0,
+  onOpenRecoveryBackups,
   accountStatus = 'disabled',
   accountEmail = null,
   theme,
@@ -938,6 +944,20 @@ export default function WorkspaceTopBar({
                     </button>
                   ))}
                 </div>
+              </div>
+
+              <div className="wb-menu-group" role="group" aria-label="本机数据">
+                <span className="wb-menu-label">本机数据</span>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => chooseMenuAction(onOpenRecoveryBackups)}
+                >
+                  <LayersIcon size={16} />
+                  <span>
+                    安全副本{recoveryBackupCount > 0 ? ` · ${recoveryBackupCount} 份` : ''}
+                  </span>
+                </button>
               </div>
 
               <div className="wb-menu-group" role="group" aria-label="帮助">
