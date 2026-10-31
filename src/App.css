@@ -2615,17 +2615,247 @@
   position: relative;
   inset: auto;
   z-index: 2;
+  display: flex;
+  flex-direction: column;
   width: auto;
   min-width: 0;
   max-height: none;
   flex: 0 0 clamp(300px, 24vw, 360px);
   height: 100%;
-  overflow-x: hidden;
-  overflow-y: auto;
+  overflow: hidden;
   border: 0;
   border-left: 1px solid var(--border);
   border-radius: 0;
   background: var(--surface);
+}
+
+/* 标题和底部提示固定，参数主体与概览共用一条滚动轨道。
+   这样概览增加内容时不会把关闭提示和画布拖柄挤出可视区。 */
+.qe-scroll {
+  display: contents;
+}
+
+.qe-panel.is-dock .qe-scroll {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.qe-panel.is-dock > .qe-head,
+.qe-panel.is-dock > .qe-foot {
+  flex: 0 0 auto;
+}
+
+/* 参数较少时，面板下半程不再留成一块没有信息的白墙：
+   把当前段、诊断和实时读数留在手边，编辑时不用来回跳视图。 */
+.qe-context {
+  display: flex;
+  flex: 1 0 auto;
+  flex-direction: column;
+  gap: 12px;
+  padding: 13px 12px;
+  border-top: 1px solid var(--border);
+  background: var(--raised);
+}
+
+.qe-context-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.qe-context-kicker {
+  display: block;
+  color: var(--muted);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.qe-context-count {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  margin-top: 3px;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 22px;
+  font-variant-numeric: tabular-nums;
+}
+
+.qe-context-count span {
+  color: var(--faint);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.qe-run-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 10.5px;
+  white-space: nowrap;
+}
+
+.qe-run-state i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--faint);
+}
+
+.qe-run-state.is-running {
+  color: var(--positive);
+}
+
+.qe-run-state.is-running i {
+  background: var(--positive);
+}
+
+.qe-context-title {
+  margin: -4px 0 0;
+  overflow-wrap: anywhere;
+  color: var(--text-soft);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.qe-context-stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 12px;
+  margin: 0;
+  padding: 11px 0;
+  border-top: 1px solid var(--rule);
+  border-bottom: 1px solid var(--rule);
+}
+
+.qe-context-stats div,
+.qe-reading-list > div {
+  min-width: 0;
+}
+
+.qe-context-stats dt {
+  color: var(--faint);
+  font-size: 10.5px;
+}
+
+.qe-context-stats dd {
+  margin: 3px 0 0;
+  overflow: hidden;
+  color: var(--text-soft);
+  font-size: 11.5px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qe-context-stats dd.has-error {
+  color: var(--negative);
+}
+
+.qe-context-stats dd.has-warning {
+  color: var(--warning);
+}
+
+.qe-readings {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.qe-readings-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--text-soft);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.qe-readings-head small {
+  color: var(--faint);
+  font-size: 10.5px;
+  font-weight: 500;
+}
+
+.qe-readings-head small.is-on {
+  color: var(--positive);
+}
+
+.qe-reading-list {
+  display: grid;
+  gap: 0;
+  margin: 0;
+}
+
+.qe-reading-list > div {
+  display: flex;
+  min-height: 32px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border-top: 1px solid var(--rule);
+}
+
+.qe-reading-list dt {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.qe-reading-list dt span {
+  overflow: hidden;
+  color: var(--text-soft);
+  font-family: var(--mono);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qe-reading-list dt small {
+  flex: none;
+  color: var(--faint);
+  font-size: 9.5px;
+}
+
+.qe-reading-list dd {
+  margin: 0;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.qe-reading-list dd[data-on='true'] {
+  color: var(--positive);
+  font-weight: 600;
+}
+
+.qe-context-empty,
+.qe-reading-more {
+  margin: 0;
+  color: var(--faint);
+  font-size: 10.5px;
+  line-height: 1.5;
+}
+
+.qe-context-project {
+  margin: auto 0 0;
+  padding-top: 10px;
+  border-top: 1px solid var(--rule);
+  overflow-wrap: anywhere;
+  color: var(--faint);
+  font-size: 9.5px;
+  line-height: 1.45;
 }
 
 /* 从停靠列拖出来后才是自由浮动：仍被裁在工作台内，位置记在本机。 */

@@ -2656,7 +2656,7 @@ export default function LadderCanvas({
   const closeSlotMenu = (restoreFocus = true) => {
     const trigger = slotMenu?.trigger
     setSlotMenu(null)
-    if (!restoreFocus || !(trigger instanceof HTMLElement)) return
+    if (!restoreFocus || !(trigger instanceof HTMLElement || trigger instanceof SVGElement)) return
     window.requestAnimationFrame(() => {
       if (trigger.isConnected) trigger.focus()
     })

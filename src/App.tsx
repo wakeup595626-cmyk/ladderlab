@@ -444,6 +444,7 @@ function runtimeSignature(program: Program): string {
 interface QuickEditState {
   selection: Selection
   autoFocus?: boolean
+  focusToken?: number
 }
 
 /** 拖放后重新定位同一个节点，避免依赖插入下标在清洗分支时发生变化。 */
@@ -595,6 +596,7 @@ export default function App() {
   )
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>('properties')
   const [quickEdit, setQuickEdit] = useState<QuickEditState | null>(null)
+  const quickEditFocusTokenRef = useRef(0)
   const quickEditReturnFocusRef = useRef<Selection | null>(null)
   // 复制的是“快照”而不是选区引用：复制后再改原元件，粘贴出来的仍是复制时的样子。
   const [clipboard, setClipboard] = useState<DocumentClipboard | null>(null)
@@ -2214,8 +2216,6 @@ export default function App() {
   const armInsert = useCallback((slot: SlotRef) => {
     setInsertCursor({ rungId: slot.rungId, chain: [...slot.chain], index: slot.index })
     setFavoriteTargetRungId(slot.rungId)
-    setSelection(null)
-    setQuickEdit(null)
     setMobilePanel('none')
     dismissFavoriteTargetPin()
   }, [dismissFavoriteTargetPin])
@@ -2322,10 +2322,15 @@ export default function App() {
       }
       commit(next)
       const path = findNodePath(next, slot.rungId, made.node.id)
-      setSelection({ rungId: slot.rungId, path })
+      const selectionForNode = { rungId: slot.rungId, path }
+      setSelection(selectionForNode)
       advanceCursorAfter(next, slot.rungId, made.node.id)
       setFavoriteTargetRungId(slot.rungId)
-      setQuickEdit(null)
+      setQuickEdit({
+        selection: selectionForNode,
+        autoFocus: true,
+        focusToken: ++quickEditFocusTokenRef.current,
+      })
       setMobilePanel('none')
       notify(instructionLabel('contact', kind) + '已放置到' + rungSegmentLabel(program, slot.rungId))
       return
@@ -2356,7 +2361,11 @@ export default function App() {
     setSelection(selectionForNode)
     advanceCursorAfter(next, insertTarget.rungId, made.node.id)
     setFavoriteTargetRungId(insertTarget.rungId)
-    setQuickEdit(null)
+    setQuickEdit({
+      selection: selectionForNode,
+      autoFocus: true,
+      focusToken: ++quickEditFocusTokenRef.current,
+    })
     setMobilePanel('none')
     notify(
       instructionLabel('contact', kind)
@@ -2383,7 +2392,11 @@ export default function App() {
     advanceCursorAfter(next, slot.rungId, made.node.id)
     setFavoriteTargetRungId(slot.rungId)
     // 博途放下元件后可以直接输入操作数；这里把焦点送到新元件的操作数字段。
-    setQuickEdit({ selection: selectionForNode, autoFocus: true })
+    setQuickEdit({
+      selection: selectionForNode,
+      autoFocus: true,
+      focusToken: ++quickEditFocusTokenRef.current,
+    })
     setMobilePanel('none')
     notify(instructionLabel('contact', kind) + '已插入，可直接输入变量或 M4.0 地址')
   }, [advanceCursorAfter, commit, notify, program])
@@ -2404,7 +2417,11 @@ export default function App() {
     setSelection(selectionForNode)
     advanceCursorAfter(opened.program, slot.rungId, opened.nodeId)
     if (opened.mode === 'sibling') {
-      setQuickEdit({ selection: selectionForNode, autoFocus: true })
+      setQuickEdit({
+        selection: selectionForNode,
+        autoFocus: true,
+        focusToken: ++quickEditFocusTokenRef.current,
+      })
     } else {
       setQuickEdit(null)
     }
@@ -2503,7 +2520,7 @@ export default function App() {
       if (event.ctrlKey || event.metaKey || event.altKey) return
       const target = event.target
       if (target instanceof Element && target.closest(
-        'input, textarea, select, [contenteditable="true"], .ll-rung-menu-panel',
+        'input, textarea, select, button, a, [contenteditable="true"], .ll-rung-menu-panel',
       )) return
       if (document.querySelector('[role="dialog"][aria-modal="true"]')) return
       if (!selection) return
@@ -4050,11 +4067,12 @@ export default function App() {
                   setInspectorTab((current) => (
                     current === 'tags' && next.wholeRung ? 'tags' : 'properties'
                   ))
-                  // 参数框打开时点选另一个元件，直接切换编辑对象，不必先关掉面板。
+                  // 参数框打开时只有点选另一个具体元件才切换编辑对象。导线、
+                  // 程序段标题和空白画布不会替用户关闭面板；收起只由 × / Esc 触发。
                   setQuickEdit((current) => (
                     current && next.path && !(next.paths && next.paths.length > 1)
                       ? { ...current, selection: next }
-                      : null
+                      : current
                   ))
                 }}
                 onEdit={(next) => {
@@ -4125,8 +4143,11 @@ export default function App() {
           <QuickEditor
             program={program}
             runtime={runtime}
+            compileResult={compileResult}
+            running={running}
             selection={quickEdit.selection}
             autoFocus={quickEdit.autoFocus}
+            focusToken={quickEdit.focusToken}
             onProgram={commit}
             onClose={() => {
               quickEditReturnFocusRef.current = quickEdit.selection

@@ -33,7 +33,7 @@ async function findWorkbenchBlank(page: Page) {
   })
 }
 
-test('参数框只在点元件、关闭或 Esc 时结束', async ({ page }) => {
+test('参数框在空白、导线和程序段标题上保持，只由元件切换、关闭或 Esc 结束', async ({ page }) => {
   const errors = trackPageErrors(page)
 
   await openHome(page)
@@ -63,6 +63,16 @@ test('参数框只在点元件、关闭或 Esc 时结束', async ({ page }) => {
   const workbenchBlank = await findWorkbenchBlank(page)
   expect(workbenchBlank).not.toBeNull()
   await page.mouse.click(workbenchBlank!.x, workbenchBlank!.y)
+  await expect(panel).toBeVisible()
+  await expect(panel).toHaveAttribute('aria-label', initialLabel!)
+
+  // 线路上叠加着产品刻意保留的 44px “+”触控热区；直接派发线路自身的
+  // click，验证点击线路时状态层的持久化契约，而不让热区截获测试事件。
+  await page.locator('.ll-slot-wire').first().dispatchEvent('click')
+  await expect(panel).toBeVisible()
+  await expect(panel).toHaveAttribute('aria-label', initialLabel!)
+
+  await page.locator('.ll-rung-index').first().click()
   await expect(panel).toBeVisible()
   await expect(panel).toHaveAttribute('aria-label', initialLabel!)
 

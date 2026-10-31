@@ -4,11 +4,15 @@ import { supportsContact, supportsOutput } from '../engine/profiles'
 import { parseAddress } from '../engine/address'
 import { looksLikeAddress, normalizeBitAddress, normalizeByteAddress, normalizeReference } from '../engine/references'
 import { FIELD_LIMITS } from '../lib/limits'
+import { countProgramElements } from '../lib/projectSummary'
+import { contentRungs } from '../engine/rungInvariant'
 import type {
+  CompileResult,
   ContactKind,
   LadderNode,
   OutputKind,
   Program,
+  Rung,
   Runtime,
   Selection,
   TagDef,
@@ -42,8 +46,11 @@ import type { QuickEditorBox, QuickEditorPoint, QuickEditorSize } from '../lib/q
 interface QuickEditorProps {
   program: Program
   runtime: Runtime
+  compileResult: CompileResult
+  running: boolean
   selection: Selection
   autoFocus?: boolean
+  focusToken?: number
   onProgram: (program: Program) => void
   onClose: () => void
   onNotify: (message: string) => void
@@ -128,6 +135,100 @@ const OUTPUT_NAMES: Record<OutputKind, string> = {
   PATTERN: '灯字序列',
 }
 
+interface RuntimeReading {
+  key: string
+  name: string
+  detail: string
+  value: string
+  on: boolean
+}
+
+function collectRungReferences(rung: Rung): string[] {
+  const references: string[] = []
+  const seen = new Set<string>()
+  const push = (reference: string | undefined) => {
+    const trimmed = reference?.trim() ?? ''
+    if (!trimmed) return
+    const key = normalizeReference(trimmed)
+    if (seen.has(key)) return
+    seen.add(key)
+    references.push(trimmed)
+  }
+  const walk = (nodes: LadderNode[]) => {
+    for (const item of nodes) {
+      if (item.type === 'contact') push(item.tag)
+      else item.branches.forEach(walk)
+    }
+  }
+  walk(rung.nodes)
+  push(rung.output.tag)
+  push(rung.output.resetTag)
+  push(rung.output.qTag)
+  push(rung.output.valueTag)
+  push(rung.output.sourceTag)
+  push(rung.output.pulseTag)
+  push(rung.output.stepTag)
+  return references
+}
+
+function countRungNodes(nodes: LadderNode[]): { contacts: number; branches: number } {
+  return nodes.reduce((total, node) => {
+    if (node.type === 'contact') {
+      total.contacts += 1
+      return total
+    }
+    total.branches += 1
+    for (const branch of node.branches) {
+      const nested = countRungNodes(branch)
+      total.contacts += nested.contacts
+      total.branches += nested.branches
+    }
+    return total
+  }, { contacts: 0, branches: 0 })
+}
+
+function runtimeReading(program: Program, runtime: Runtime, reference: string): RuntimeReading | null {
+  const base = reference.split('.')[0]
+  const suffix = reference.slice(base.length).replace(/^\./, '')
+  const tag = tagForReference(program, reference)
+  const timer = runtime.timers[tag?.name ?? base]
+  const counter = runtime.counters[tag?.name ?? base]
+  const name = tag?.name ?? base
+  const key = normalizeReference(reference)
+
+  if (timer) {
+    return {
+      key,
+      name: reference,
+      detail: `ET ${Math.round(timer.et)} ms`,
+      value: timer.q ? 'TRUE' : 'FALSE',
+      on: timer.q,
+    }
+  }
+  if (counter) {
+    return {
+      key,
+      name: reference,
+      detail: '计数器 CV',
+      value: String(counter.cv),
+      on: counter.q,
+    }
+  }
+  if (tag?.kind === 'BOOL') {
+    const on = runtime.bools[name] === true
+    return { key, name, detail: tag.address || suffix || 'BOOL', value: on ? 'TRUE' : 'FALSE', on }
+  }
+  if (tag?.kind === 'INT') {
+    const value = runtime.ints[name] ?? 0
+    return { key, name, detail: tag.address || suffix || 'INT', value: String(value), on: value !== 0 }
+  }
+  if (suffix === 'Q' && typeof runtime.bools[name] === 'boolean') {
+    const on = runtime.bools[name]
+    return { key, name: reference, detail: '派生位', value: on ? 'TRUE' : 'FALSE', on }
+  }
+  return null
+}
+
 function isTimer(kind: OutputKind): boolean {
   return kind === 'TON' || kind === 'TOF' || kind === 'TONR'
 }
@@ -161,6 +262,7 @@ function normalizeAddressFor(input: string, kind: TagKind): string | null {
 }
 
 function focusField(event: React.KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) {
+  if (event.nativeEvent.isComposing || event.keyCode === 229) return
   if (event.key === 'Enter' && !event.shiftKey) {
     event.preventDefault()
     event.currentTarget.blur()
@@ -261,6 +363,7 @@ function AddressField({
         }}
         onBlur={commit}
         onKeyDown={(event) => {
+          if (event.nativeEvent.isComposing || event.keyCode === 229) return
           if (event.key !== 'Enter') return
           event.preventDefault()
           commit()
@@ -332,8 +435,11 @@ function shiftCountMax(program: Program, tagName: string | undefined): number {
 export default function QuickEditor({
   program,
   runtime,
+  compileResult,
+  running,
   selection,
   autoFocus = false,
+  focusToken = 0,
   onProgram,
   onClose,
   onNotify,
@@ -351,6 +457,7 @@ export default function QuickEditor({
   // 把本来就不高的画布再顶掉一半，用户反而看不到自己正在改的元件。
   const headingRef = useRef<HTMLHeadingElement>(null)
   const panelRef = useModalFocus<HTMLDivElement>(mobile, onClose, headingRef)
+  const scrollRef = useRef<HTMLDivElement>(null)
   const focusedOnceRef = useRef(false)
 
   // 桌面参数框默认仍是右侧停靠列：没拖过就不浮动，不重新制造遮挡。
@@ -442,7 +549,14 @@ export default function QuickEditor({
       panel.focus({ preventScroll: true })
     }, 0)
     return () => window.clearTimeout(timer)
-  }, [autoFocus, mobile, panelRef])
+  }, [autoFocus, focusToken, mobile, panelRef])
+
+  // 参数框切换编辑对象时回到表单顶部。只在选区真正变化时复位，
+  // 不干扰用户在同一元件内主动往下看运行读数。
+  const selectionKey = `${selection.rungId}:${selection.path?.join('.') ?? 'output'}`
+  useEffect(() => {
+    if (scrollRef.current) scrollRef.current.scrollTop = 0
+  }, [selectionKey])
 
   useEffect(() => {
     const media = window.matchMedia(MOBILE_QUERY)
@@ -468,6 +582,8 @@ export default function QuickEditor({
       instances,
     }
   }, [program])
+  const content = useMemo(() => contentRungs(program), [program])
+  const projectElementCount = useMemo(() => countProgramElements(program), [program])
 
   // 桌面悬浮框不是模态层，关闭后要把焦点还给刚才编辑的画布元件；
   // 否则按 Esc 后 document.activeElement 会掉到 body，键盘用户丢失位置。
@@ -768,6 +884,19 @@ export default function QuickEditor({
   const output = rung.output
   const outputTag = hasInstance(output.kind) ? null : tagForReference(program, output.tag)
   const outputOptions = hasInstance(output.kind) ? refs.boolRefs : isInteger(output.kind) ? refs.intRefs : refs.boolRefs
+  const segmentIndex = content.findIndex((item) => item.id === rung.id)
+  const rungStats = countRungNodes(rung.nodes)
+  const rungProblems = [...compileResult.errors, ...compileResult.warnings]
+    .filter((problem) => problem.rungId === rung.id)
+  const rungErrors = rungProblems.filter((problem) => problem.severity === 'error').length
+  const rungWarnings = rungProblems.length - rungErrors
+  const rungReferences = collectRungReferences(rung)
+  const allReadings = rungReferences
+    .map((reference) => runtimeReading(program, runtime, reference))
+    .filter((reading): reading is RuntimeReading => reading !== null)
+  const readings = allReadings.slice(0, 5)
+  const hiddenReadingCount = Math.max(0, allReadings.length - readings.length)
+  const rungPowered = runtime.rungPower[rung.id] === true
 
   // 桌面端把参数框停靠在程序区右侧，与图纸并排，不再浮在元件上方遮住梯形图。
   // 手机端仍用底部抽屉 + 遮罩，保持单层模态与「点空白关闭」的手感。
@@ -830,6 +959,7 @@ export default function QuickEditor({
           </div>
         </header>
 
+        <div className="qe-scroll" ref={scrollRef}>
         {node?.type === 'contact' && (
           <div className="qe-body">
             <div className="qe-field">
@@ -1031,6 +1161,7 @@ export default function QuickEditor({
                   label="预设时间 PT"
                   value={output.pt ?? 3000}
                   min={1}
+                  max={32767}
                   step={100}
                   suffix="ms"
                   onCommit={(value) => onProgram(updateOutput(program, rung.id, { pt: Math.round(value) }))}
@@ -1062,6 +1193,7 @@ export default function QuickEditor({
                   label="预设值 PV"
                   value={output.pv ?? 5}
                   min={1}
+                  max={32767}
                   step={1}
                   onCommit={(value) => onProgram(updateOutput(program, rung.id, { pv: Math.round(value) }))}
                 />
@@ -1113,6 +1245,79 @@ export default function QuickEditor({
             </div>
           </div>
         )}
+
+        {!mobile && !floating && (
+          <section className="qe-context" aria-label="当前程序段概览">
+            <div className="qe-context-head">
+              <div>
+                <span className="qe-context-kicker">当前程序段</span>
+                <strong className="qe-context-count">
+                  {segmentIndex >= 0 ? segmentIndex + 1 : '—'}
+                  <span>/ {content.length}</span>
+                </strong>
+              </div>
+              <span className={'qe-run-state' + (running ? ' is-running' : '')}>
+                <i aria-hidden="true" />
+                {running ? '仿真运行中' : '仿真已暂停'}
+              </span>
+            </div>
+
+            <p className="qe-context-title">{rung.label.trim() || '未命名程序段'}</p>
+
+            <dl className="qe-context-stats">
+              <div>
+                <dt>正在编辑</dt>
+                <dd>{title}</dd>
+              </div>
+              <div>
+                <dt>本段线路</dt>
+                <dd>{rungStats.contacts} 触点 · {rungStats.branches} 并联</dd>
+              </div>
+              <div>
+                <dt>仿真扫描</dt>
+                <dd>{runtime.scanCount.toLocaleString('zh-CN')} 次</dd>
+              </div>
+              <div>
+                <dt>本段诊断</dt>
+                <dd className={rungErrors > 0 ? 'has-error' : rungWarnings > 0 ? 'has-warning' : ''}>
+                  {rungProblems.length === 0 ? '无问题' : `${rungErrors} 错误 · ${rungWarnings} 警告`}
+                </dd>
+              </div>
+            </dl>
+
+            <div className="qe-readings">
+              <div className="qe-readings-head">
+                <span>本段运行读数</span>
+                <small className={rungPowered ? 'is-on' : ''}>
+                  {rungPowered ? '能流已接通' : '能流未接通'}
+                </small>
+              </div>
+              {readings.length > 0 ? (
+                <dl className="qe-reading-list">
+                  {readings.map((reading) => (
+                    <div key={reading.key}>
+                      <dt>
+                        <span>{reading.name}</span>
+                        <small>{reading.detail}</small>
+                      </dt>
+                      <dd data-on={reading.on ? 'true' : undefined}>{reading.value}</dd>
+                    </div>
+                  ))}
+                </dl>
+              ) : (
+                <p className="qe-context-empty">本段还没有绑定变量。选中左侧触点或输出即可开始编辑。</p>
+              )}
+              {hiddenReadingCount > 0 && (
+                <p className="qe-reading-more">另有 {hiddenReadingCount} 个运行读数，可在变量表查看全部。</p>
+              )}
+            </div>
+
+            <p className="qe-context-project">
+              工程 {program.name} · {program.tags.length} 个变量 · {projectElementCount} 个元件
+            </p>
+          </section>
+        )}
+        </div>
 
         <footer className="qe-foot">
           <span>
