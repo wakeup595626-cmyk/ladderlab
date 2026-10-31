@@ -21,6 +21,11 @@ class MemoryStorage implements Storage {
 let storage: MemoryStorage
 
 beforeEach(() => {
+  // 测试必须与 CI / 本地注入的真实 Supabase 环境变量隔离，否则构建环境一变
+  // “未配置时保持纯本机模式”这类断言就会误报。
+  vi.stubEnv('VITE_SUPABASE_URL', '')
+  vi.stubEnv('VITE_SUPABASE_ANON_KEY', '')
+  vi.stubEnv('VITE_SUPABASE_PROJECTS_TABLE', '')
   storage = new MemoryStorage()
   vi.stubGlobal('window', {
     localStorage: storage,
