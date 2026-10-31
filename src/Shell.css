@@ -3,32 +3,33 @@
    flat: rules define structure, the ladder diagram carries the visual weight. */
 
 .wb-shell {
-  --ground: #f0f1ef;
+  /* 首屏静态兜底：与 theme.ts 的「樱花粉」预设一致，脚本接管后再由 App 写入当前令牌。 */
+  --ground: #fdf4f6;
   /* The band either side of the sheet is the sheet-expansion area: it reads a
      full step darker than the app ground so the white paper always floats. */
-  --workbench: #e4e8e1;
+  --workbench: #f7e6ea;
   --surface: #ffffff;
-  --raised: #f6f7f5;
-  --active: #eaebe8;
-  --frame: #e9ebe8;
-  --frame-ink: #151816;
-  --border: #dcdfda;
-  --rule: #e8eae5;
-  --control: #c2c7c0;
-  --text: #151816;
-  --muted: #49504b;
-  --faint: #697069;
-  --accent: #0f6b7a;
-  --accent-ink: #0a4c58;
-  --accent-wash: #e3eef0;
+  --raised: #fefafb;
+  --active: #fbe9ee;
+  --frame: #fffafb;
+  --frame-ink: #2c1620;
+  --border: #f0d7de;
+  --rule: #f7e8ec;
+  --control: #d7aeba;
+  --text: #2c1620;
+  --muted: #6d4a55;
+  --faint: #7d5a65;
+  --accent: #b8446f;
+  --accent-ink: #8f2f52;
+  --accent-wash: #fbe9ef;
   /* TIA's cyan operand annotations stay distinct from the green power flow. */
-  --address-ink: #2f847c;
+  --address-ink: #a83a63;
   --positive: #157347;
-  --positive-wash: #e8f3ec;
+  --positive-wash: #e9f5ee;
   --negative: #b3261e;
-  --negative-wash: #f8e8e6;
+  --negative-wash: #fbe9e7;
   --warning: #8a5a13;
-  --warning-wash: #f7f0e2;
+  --warning-wash: #f9f0e0;
   --radius-control: 3px;
   --radius-card: 6px;
   --radius-sheet: 8px;
@@ -881,6 +882,9 @@ body[data-drag-kind] {
 /* ------------------------------------------------------------ workbench */
 
 .wb-workbench {
+  /* 浮动参数框的定位基准：拖出停靠列后仍被裁在工作台内，
+     不会压住顶栏、底栏或右侧变量面板。 */
+  position: relative;
   display: flex;
   min-height: 0;
   flex: 1 1 auto;
@@ -3602,6 +3606,16 @@ body[data-drag-kind] {
   box-shadow: var(--shadow-overlay);
 }
 
+/* Dock columns share the workspace edge instead of floating: no radius, no
+   elevation, and a single hairline separating them from the drawing. */
+.wb-shell .qe-panel.is-dock {
+  border: 0;
+  border-left: 1px solid var(--border);
+  border-radius: 0;
+  box-shadow: none;
+  background: var(--surface);
+}
+
 .qe-head {
   border-bottom-color: var(--control);
   background: var(--raised);
@@ -4067,20 +4081,27 @@ body[data-drag-kind] {
 
 /* ------------------------------------------------ paper notification */
 
+/* 提示条是工作台与状态栏之间的一条消息带：它占自己的高度，
+   画布随之为它让位，因此不会再压住参数框或正在编辑的元件。 */
+.toast-shelf {
+  border-top-color: var(--border);
+  background: var(--raised);
+}
+
 .wb-shell .toast {
-  padding: 8px 12px;
-  border: 1px solid var(--control);
-  border-radius: 2px;
-  background: var(--surface);
-  box-shadow: 0 4px 12px rgba(21, 24, 22, 0.12);
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
   color: var(--text);
   font-size: 12.5px;
   line-height: 1.45;
 }
 
 .wb-shell .toast.is-error {
-  border-color: var(--control);
-  background: var(--surface);
+  border-color: transparent;
+  background: transparent;
   color: var(--text);
 }
 
@@ -4167,23 +4188,55 @@ body[data-drag-kind] {
     font-size: 12px;
   }
 
-  /* 通知条永远贴在“面板之外的可用空隙”，不压住正在编辑的字段。
-     属性抽屉只占下方 58dvh，项目抽屉上方仍留出页面区；两者都用顶栏
-     下方的位置。指令库在 82dvh 时上方只剩几像素，改停在其底部导航上方。 */
+  /* 无抽屉时提示条是工作台底部的一条消息带，横向铺满，不压画布。 */
+  .wb-shell .toast {
+    width: 100%;
+    max-width: none;
+    justify-content: center;
+  }
+
+  /* 抽屉打开后，文档流里的消息带会被抽屉盖住；把消息本体临时提成固定
+     定位，落在抽屉之外的空隙里：属性/项目抽屉停在顶栏下方，指令库停在
+     其底部导航上方。display: contents 让消息带不再占据布局位置。 */
+  .app-shell[data-mobile-panel='properties'] .toast-shelf,
+  .app-shell[data-mobile-panel='project'] .toast-shelf,
+  .app-shell[data-quick-edit='open'] .toast-shelf,
+  .app-shell[data-mobile-panel='instructions'] .toast-shelf {
+    display: contents;
+  }
+
   .app-shell[data-mobile-panel='properties'] .toast,
   .app-shell[data-mobile-panel='project'] .toast,
   .app-shell[data-quick-edit='open'] .toast {
+    position: fixed;
     top: calc(64px + env(safe-area-inset-top, 0px));
     bottom: auto;
+    left: 50%;
     z-index: 140;
+    width: max-content;
     max-width: min(320px, calc(100vw - 24px));
+    padding: 7px 11px;
+    border: 1px solid var(--control);
+    border-radius: 2px;
+    background: var(--surface);
+    box-shadow: var(--shadow-overlay);
+    translate: -50% 0;
   }
 
   .app-shell[data-mobile-panel='instructions'] .toast {
+    position: fixed;
     top: auto;
     bottom: calc(64px + env(safe-area-inset-bottom, 0px));
+    left: 50%;
     z-index: 140;
+    width: max-content;
     max-width: min(320px, calc(100vw - 24px));
+    padding: 7px 11px;
+    border: 1px solid var(--control);
+    border-radius: 2px;
+    background: var(--surface);
+    box-shadow: var(--shadow-overlay);
+    translate: -50% 0;
   }
 }
 
@@ -5866,5 +5919,12 @@ body[data-drag-kind] {
     margin: -4px -2px;
     background-clip: content-box;
   }
+}
+
+/* 手机面板打开时焦点落在标题上（不落到输入框，避免弹键盘）；标题只做定位，
+   不画焦点框，否则看起来像一个空输入框。 */
+.qe-head h2:focus,
+.qe-head h2:focus-visible {
+  outline: none;
 }
 

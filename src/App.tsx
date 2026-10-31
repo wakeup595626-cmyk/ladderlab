@@ -444,7 +444,6 @@ function runtimeSignature(program: Program): string {
 
 interface QuickEditState {
   selection: Selection
-  anchor: DOMRect | null
   autoFocus?: boolean
 }
 
@@ -2388,7 +2387,7 @@ export default function App() {
     advanceCursorAfter(next, slot.rungId, made.node.id)
     setFavoriteTargetRungId(slot.rungId)
     // 博途放下元件后可以直接输入操作数；这里把焦点送到新元件的操作数字段。
-    setQuickEdit({ selection: selectionForNode, anchor: null, autoFocus: true })
+    setQuickEdit({ selection: selectionForNode, autoFocus: true })
     setMobilePanel('none')
     notify(instructionLabel('contact', kind) + '已插入，可直接输入变量或 M4.0 地址')
   }, [advanceCursorAfter, commit, notify, program])
@@ -2409,7 +2408,7 @@ export default function App() {
     setSelection(selectionForNode)
     advanceCursorAfter(opened.program, slot.rungId, opened.nodeId)
     if (opened.mode === 'sibling') {
-      setQuickEdit({ selection: selectionForNode, anchor: null, autoFocus: true })
+      setQuickEdit({ selection: selectionForNode, autoFocus: true })
     } else {
       setQuickEdit(null)
     }
@@ -4083,9 +4082,9 @@ export default function App() {
                       : null
                   ))
                 }}
-                onEdit={(next, anchor) => {
+                onEdit={(next) => {
                   setSelection(next)
-                  setQuickEdit({ selection: next, anchor })
+                  setQuickEdit({ selection: next })
                   // 点元件进入参数编辑时收起属性抽屉。桌面端只留就近参数框，
                   // 手机端只留一层底部弹层，避免同名字段在屏幕上出现两份。
                   setInspectorOpen(false)
@@ -4146,7 +4145,72 @@ export default function App() {
             </div>
           </div>
         </main>
+
+        {quickEdit && quickEditValid && (
+          <QuickEditor
+            program={program}
+            runtime={runtime}
+            selection={quickEdit.selection}
+            autoFocus={quickEdit.autoFocus}
+            onProgram={commit}
+            onClose={() => {
+              quickEditReturnFocusRef.current = quickEdit.selection
+              setQuickEdit(null)
+            }}
+            onNotify={notify}
+            onDeleteNode={() => {
+              if (quickEdit.selection.path) {
+                removeNode(quickEdit.selection.rungId, quickEdit.selection.path)
+              }
+            }}
+            onDeleteOutput={() => {
+              removeRung(quickEdit.selection.rungId)
+              setQuickEdit(null)
+            }}
+          />
+        )}
       </div>
+
+      {toast && (
+        <div className="toast-shelf">
+          <div
+            className={toast.tone === 'error' ? 'toast is-error' : 'toast'}
+            key={toast.id}
+            role={toast.tone === 'error' ? 'alert' : 'status'}
+            aria-live={toast.tone === 'error' ? 'assertive' : 'polite'}
+            onPointerEnter={stopToastTimer}
+            onPointerLeave={() => {
+              if (!toast.sticky) scheduleToastDismiss(toast.message, toast.action ? 7000 : 0)
+            }}
+          >
+            <span className="toast-message">{toast.message}</span>
+            {toast.action && (
+              <button
+                type="button"
+                className="toast-action"
+                autoFocus={toast.focusAction}
+                onClick={() => {
+                  const run = toast.action?.run
+                  dismissToast()
+                  run?.()
+                }}
+              >
+                {toast.action.label}
+              </button>
+            )}
+            {(toast.sticky || toast.action) && (
+              <button
+                type="button"
+                className="toast-close"
+                aria-label="关闭提示"
+                onClick={dismissToast}
+              >
+                ×
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
       <StatusBar
         running={running}
@@ -4477,31 +4541,6 @@ export default function App() {
 
       {confirmDialog}
 
-      {quickEdit && quickEditValid && (
-        <QuickEditor
-          program={program}
-          runtime={runtime}
-          selection={quickEdit.selection}
-          anchor={quickEdit.anchor}
-          autoFocus={quickEdit.autoFocus}
-          onProgram={commit}
-          onClose={() => {
-            quickEditReturnFocusRef.current = quickEdit.selection
-            setQuickEdit(null)
-          }}
-          onNotify={notify}
-          onDeleteNode={() => {
-            if (quickEdit.selection.path) {
-              removeNode(quickEdit.selection.rungId, quickEdit.selection.path)
-            }
-          }}
-          onDeleteOutput={() => {
-            removeRung(quickEdit.selection.rungId)
-            setQuickEdit(null)
-          }}
-        />
-      )}
-
       {drag.drag && (
         <div
           className="drag-ghost"
@@ -4509,45 +4548,6 @@ export default function App() {
           style={{ left: drag.drag.x, top: drag.drag.y }}
         >
           {drag.drag.label}
-        </div>
-      )}
-
-      {toast && (
-        <div
-          className={toast.tone === 'error' ? 'toast is-error' : 'toast'}
-          key={toast.id}
-          role={toast.tone === 'error' ? 'alert' : 'status'}
-          aria-live={toast.tone === 'error' ? 'assertive' : 'polite'}
-          onPointerEnter={stopToastTimer}
-          onPointerLeave={() => {
-            if (!toast.sticky) scheduleToastDismiss(toast.message, toast.action ? 7000 : 0)
-          }}
-        >
-          <span className="toast-message">{toast.message}</span>
-          {toast.action && (
-            <button
-              type="button"
-              className="toast-action"
-              autoFocus={toast.focusAction}
-              onClick={() => {
-                const run = toast.action?.run
-                dismissToast()
-                run?.()
-              }}
-            >
-              {toast.action.label}
-            </button>
-          )}
-          {(toast.sticky || toast.action) && (
-            <button
-              type="button"
-              className="toast-close"
-              aria-label="关闭提示"
-              onClick={dismissToast}
-            >
-              ×
-            </button>
-          )}
         </div>
       )}
 

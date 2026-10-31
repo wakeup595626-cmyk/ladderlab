@@ -1,4 +1,5 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
 import type { CloudAccountState } from '../lib/cloud/useCloudAccount'
 import { copyText } from '../lib/clipboard'
 import { useModalFocus } from '../lib/useModalFocus'
@@ -10,6 +11,8 @@ import {
   CloudIcon,
   CloseIcon,
   CopyIcon,
+  EyeIcon,
+  EyeOffIcon,
   UserIcon,
 } from './Icons'
 import './AccountDialog.css'
@@ -53,15 +56,27 @@ function AccountDialogContent({
   onImportGuestProjects,
   onSynced,
 }: Omit<AccountDialogProps, 'open'>) {
-  const closeRef = useRef<HTMLButtonElement>(null)
+  const titleRef = useRef<HTMLHeadingElement>(null)
+  const errorRef = useRef<HTMLParagraphElement>(null)
+  const connectedRef = useRef<HTMLParagraphElement>(null)
   const closeDialog = () => {
     account.clearError()
     onClose()
   }
-  const dialogRef = useModalFocus<HTMLElement>(true, closeDialog, closeRef)
+  const dialogRef = useModalFocus<HTMLElement>(true, closeDialog, titleRef)
   const [passwordUpdated, setPasswordUpdated] = useState(false)
   const [connected, setConnected] = useState(false)
   const [showSetup, setShowSetup] = useState(false)
+
+  // 异步结果不能把键盘焦点丢回 body：错误与连接成功都接管一次焦点，
+  // 屏幕阅读器会立即读到变化，键盘用户也能从当前位置继续。
+  useEffect(() => {
+    if (account.error) errorRef.current?.focus()
+  }, [account.error])
+
+  useEffect(() => {
+    if (connected) connectedRef.current?.focus()
+  }, [connected])
 
   return (
     <div
@@ -83,23 +98,27 @@ function AccountDialogContent({
       >
         <header className="account-dialog-head" role="none">
           <div className="account-dialog-title">
-            <span className="account-dialog-mark" aria-hidden="true"><CloudIcon size={18} /></span>
-            <div>
-              <h2 id="account-dialog-title">账号与云同步</h2>
-              <p>{account.status === 'disabled' ? '先连接一个免费的账号后端，再注册登录' : '项目跟着账号走 · 每个账号只看自己的项目'}</p>
-            </div>
+            <p className="account-dialog-eyebrow">梯形实验室 · 云端账号</p>
+            <h2 id="account-dialog-title" ref={titleRef} tabIndex={-1}>账号与云同步</h2>
+            <p className="account-dialog-sub">
+              {account.status === 'disabled'
+                ? '云同步可选。先连接一个免费的账号后端，再注册登录。'
+                : account.status === 'signed-in'
+                  ? '已登录。工程先保存在本机，再同步到你的账号。'
+                  : '登录后工程跟着账号走，每个账号只看到自己的项目。'}
+            </p>
           </div>
-          <button ref={closeRef} type="button" className="icon-button" onClick={closeDialog} aria-label="关闭账号面板">
+          <button type="button" className="icon-button" onClick={closeDialog} aria-label="关闭账号面板">
             <CloseIcon size={18} />
           </button>
         </header>
 
         <div className="account-dialog-body">
           {account.error && (
-            <p className="account-error" role="alert">{account.error}</p>
+            <p className="account-error" id="account-error" role="alert" tabIndex={-1} ref={errorRef}>{account.error}</p>
           )}
           {connected && account.status === 'signed-out' && (
-            <p className="account-notice" role="status">云端已连接，现在可以注册或登录。</p>
+            <p className="account-notice" role="status" tabIndex={-1} ref={connectedRef}>云端已连接，现在可以注册或登录。</p>
           )}
 
           {(account.status === 'disabled' || showSetup) && (
@@ -154,6 +173,7 @@ function SetupGuide({
   onCancel: () => void
   onConnected: () => void
 }) {
+  const headingRef = useRef<HTMLHeadingElement>(null)
   const [url, setUrl] = useState(account.config?.url ?? '')
   const [anonKey, setAnonKey] = useState(account.config?.anonKey ?? '')
   const [table, setTable] = useState(account.config?.table ?? 'ladderlab_projects')
@@ -175,10 +195,13 @@ function SetupGuide({
     })
   }
 
+  // 从登录表单点进配置向导时，把焦点交给向导标题，避免停在已卸载的按钮上。
+  useEffect(() => { headingRef.current?.focus() }, [])
+
   return (
     <div className="account-setup">
       <div className="account-setup-intro">
-        <strong>填入 Supabase 的地址和公开密钥</strong>
+        <h3 className="account-setup-title" ref={headingRef} tabIndex={-1}>填入 Supabase 的地址和公开密钥</h3>
         <p>连接成功后即可注册、登录；工程仍会先保存在本机，断网不影响编辑。</p>
       </div>
 
@@ -325,25 +348,100 @@ function SetupGuide({
   )
 }
 
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
 function AuthForm({ account, onOpenSetup }: { account: CloudAccountState; onOpenSetup: () => void }) {
   const [mode, setMode] = useState<'signin' | 'signup'>('signin')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [confirmation, setConfirmation] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
+  const [localError, setLocalError] = useState<string | null>(null)
+  const [emailTouched, setEmailTouched] = useState(false)
   const emailRef = useRef<HTMLInputElement>(null)
-  const canSubmit = email.trim().length > 3 && password.length >= 6 && !account.busy
+  const passwordRef = useRef<HTMLInputElement>(null)
+  const confirmRef = useRef<HTMLInputElement>(null)
+  const noticeRef = useRef<HTMLParagraphElement>(null)
+  const tabRefs = useRef<Record<'signin' | 'signup', HTMLButtonElement | null>>({
+    signin: null,
+    signup: null,
+  })
+
+  const trimmedEmail = email.trim()
+  const emailValid = EMAIL_PATTERN.test(trimmedEmail)
+  const passwordValid = password.length >= 6
+
+  useEffect(() => {
+    // 从配置向导或退出登录回到表单时，焦点落在当前标签，而不是 body。
+    tabRefs.current.signin?.focus()
+  }, [])
+
+  useEffect(() => {
+    if (notice) noticeRef.current?.focus()
+  }, [notice])
+
+  const switchMode = (next: 'signin' | 'signup') => {
+    setMode(next)
+    setNotice(null)
+    setLocalError(null)
+    setConfirmation('')
+    setShowPassword(false)
+    account.clearError()
+  }
+
+  const onTabKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
+    event.preventDefault()
+    const next = event.key === 'Home'
+      ? 'signin'
+      : event.key === 'End'
+        ? 'signup'
+        : mode === 'signin' ? 'signup' : 'signin'
+    switchMode(next)
+    tabRefs.current[next]?.focus()
+  }
+
+  const focusProblem = (target: HTMLInputElement | null, message: string) => {
+    setLocalError(message)
+    target?.focus()
+  }
 
   const submit = async () => {
-    if (!canSubmit) return
+    setLocalError(null)
     setNotice(null)
-    if (mode === 'signin') {
-      await account.signIn(email, password)
+    if (!emailValid) {
+      focusProblem(emailRef.current, '请填写完整邮箱，例如 you@example.com。')
       return
     }
-    const result = await account.signUp(email, password)
-    if (result === 'confirm-email') {
-      setNotice('注册成功，请去邮箱点确认链接，然后回来登录。')
+    if (!passwordValid) {
+      focusProblem(passwordRef.current, '密码至少 6 位字符。')
+      return
     }
+    if (mode === 'signup' && confirmation !== password) {
+      focusProblem(confirmRef.current, '两次输入的密码不一致。')
+      return
+    }
+    if (mode === 'signin') {
+      await account.signIn(trimmedEmail, password)
+      return
+    }
+    const result = await account.signUp(trimmedEmail, password)
+    if (result === 'confirm-email') {
+      setNotice('注册成功。请到邮箱点确认链接，再回来登录。')
+    }
+  }
+
+  const sendReset = () => {
+    setLocalError(null)
+    setNotice(null)
+    if (!emailValid) {
+      focusProblem(emailRef.current, '先填写注册邮箱，再发送重置邮件。')
+      return
+    }
+    void account.resetPassword(trimmedEmail).then((ok) => {
+      if (ok) setNotice('重置邮件已发送，请查收邮箱（也看看垃圾邮件）。')
+    })
   }
 
   return (
@@ -354,81 +452,134 @@ function AuthForm({ account, onOpenSetup }: { account: CloudAccountState; onOpen
         void submit()
       }}
     >
-      <div className="account-tabs" role="tablist" aria-label="登录或注册">
+      <div
+        className="account-tabs"
+        role="tablist"
+        aria-label="登录或注册"
+        data-mode={mode}
+        onKeyDown={onTabKeyDown}
+      >
+        <span className="account-tabs-thumb" aria-hidden="true" />
         <button
+          ref={(node) => { tabRefs.current.signin = node }}
+          id="account-tab-signin"
           type="button"
           role="tab"
           aria-selected={mode === 'signin'}
+          aria-controls="account-auth-panel"
+          tabIndex={mode === 'signin' ? 0 : -1}
           className={mode === 'signin' ? 'is-active' : ''}
-          onClick={() => { setMode('signin'); setNotice(null); account.clearError() }}
+          onClick={() => switchMode('signin')}
         >
           登录
         </button>
         <button
+          ref={(node) => { tabRefs.current.signup = node }}
+          id="account-tab-signup"
           type="button"
           role="tab"
           aria-selected={mode === 'signup'}
+          aria-controls="account-auth-panel"
+          tabIndex={mode === 'signup' ? 0 : -1}
           className={mode === 'signup' ? 'is-active' : ''}
-          onClick={() => { setMode('signup'); setNotice(null); account.clearError() }}
+          onClick={() => switchMode('signup')}
         >
           注册
         </button>
       </div>
 
-      <label className="account-field" htmlFor="account-email">
-        <span>邮箱</span>
-        <input
-          ref={emailRef}
-          id="account-email"
-          type="email"
-          inputMode="email"
-          autoComplete="email"
-          value={email}
-          onChange={(event) => setEmail(event.target.value)}
-          placeholder="you@example.com"
-          spellCheck={false}
-          required
-        />
-      </label>
+      <div
+        className="account-auth-panel"
+        id="account-auth-panel"
+        role="tabpanel"
+        aria-labelledby={mode === 'signin' ? 'account-tab-signin' : 'account-tab-signup'}
+      >
+        <div className="account-field">
+          <label className="account-field-label" htmlFor="account-email">邮箱</label>
+          <input
+            ref={emailRef}
+            id="account-email"
+            type="email"
+            inputMode="email"
+            autoComplete="email"
+            value={email}
+            onChange={(event) => setEmail(event.target.value)}
+            onBlur={() => setEmailTouched(true)}
+            placeholder="you@example.com"
+            aria-invalid={emailTouched && trimmedEmail.length > 0 && !emailValid ? true : undefined}
+            aria-describedby="account-email-hint"
+            spellCheck={false}
+          />
+          <small id="account-email-hint">用于登录和接收确认、重置邮件。</small>
+        </div>
 
-      <label className="account-field" htmlFor="account-password">
-        <span>密码</span>
-        <input
-          id="account-password"
-          type="password"
-          autoComplete={mode === 'signin' ? 'current-password' : 'new-password'}
-          value={password}
-          onChange={(event) => setPassword(event.target.value)}
-          placeholder="至少 6 位"
-          minLength={6}
-          required
-        />
-      </label>
+        <div className="account-field">
+          <label className="account-field-label" htmlFor="account-password">密码</label>
+          <div className="account-input">
+            <input
+              ref={passwordRef}
+              id="account-password"
+              type={showPassword ? 'text' : 'password'}
+              autoComplete={mode === 'signin' ? 'current-password' : 'new-password'}
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              placeholder="至少 6 位"
+              aria-describedby="account-password-hint"
+            />
+            <button
+              type="button"
+              className="account-reveal"
+              aria-label={showPassword ? '隐藏密码' : '显示密码'}
+              aria-pressed={showPassword}
+              onClick={() => setShowPassword(!showPassword)}
+            >
+              {showPassword ? <EyeOffIcon size={17} /> : <EyeIcon size={17} />}
+            </button>
+          </div>
+          <small id="account-password-hint">至少 6 位字符；只用于登录你的账号。</small>
+        </div>
 
-      {notice && <p className="account-notice" role="status">{notice}</p>}
-
-      <div className="account-form-actions">
-        <button type="submit" className="account-primary" disabled={!canSubmit}>
-          {account.busy ? '请稍候…' : mode === 'signin' ? '登录' : '创建账号'}
-        </button>
-        {mode === 'signin' && (
-          <button
-            type="button"
-            className="account-link"
-            disabled={account.busy || email.trim().length < 4}
-            onClick={() => {
-              void account.resetPassword(email).then((ok) => {
-                if (ok) setNotice('重置邮件已发送，请查收邮箱。')
-              })
-            }}
-          >
-            忘记密码
-          </button>
+        {mode === 'signup' && (
+          <div className="account-field">
+            <label className="account-field-label" htmlFor="account-password-confirm">确认密码</label>
+            <input
+              ref={confirmRef}
+              id="account-password-confirm"
+              type={showPassword ? 'text' : 'password'}
+              autoComplete="new-password"
+              value={confirmation}
+              onChange={(event) => setConfirmation(event.target.value)}
+              aria-invalid={confirmation.length > 0 && confirmation !== password ? true : undefined}
+              aria-describedby={confirmation.length > 0 && confirmation !== password ? 'account-confirm-hint' : undefined}
+            />
+            {confirmation.length > 0 && confirmation !== password && (
+              <small className="account-field-hint" id="account-confirm-hint">两次输入的密码不一致。</small>
+            )}
+          </div>
         )}
       </div>
-      <button type="button" className="account-cloud-link" onClick={onOpenSetup}>
-        云端连接设置
-      </button>
+
+      {localError && <p className="account-error" role="alert">{localError}</p>}
+      {notice && <p className="account-notice" role="status" tabIndex={-1} ref={noticeRef}>{notice}</p>}
+
+      <div className="account-form-actions">
+        <button type="submit" className="account-primary" disabled={account.busy}>
+          {account.busy && <span className="account-spinner" aria-hidden="true" />}
+          <span>{account.busy ? '正在连接…' : mode === 'signin' ? '登录' : '创建账号'}</span>
+        </button>
+      </div>
+      <div className="account-form-links">
+        {mode === 'signin' ? (
+          <button type="button" className="account-link" disabled={account.busy} onClick={sendReset}>
+            忘记密码
+          </button>
+        ) : (
+          <span className="account-form-note">注册后需去邮箱确认</span>
+        )}
+        <button type="button" className="account-cloud-link" onClick={onOpenSetup}>
+          云端连接设置
+        </button>
+      </div>
     </form>
   )
 }
@@ -471,7 +622,6 @@ function ResetPasswordForm({
           placeholder="至少 6 位"
           minLength={6}
           required
-          autoFocus
         />
       </label>
       <label className="account-field" htmlFor="account-new-password-confirm">
@@ -515,9 +665,12 @@ function SignedInPanel({
   onClose: () => void
 }) {
   const [message, setMessage] = useState<string | null>(null)
+  const panelRef = useRef<HTMLElement>(null)
+  // 登录成功后原表单已卸载；把焦点交给结果区，键盘和读屏都不会回到 body。
+  useEffect(() => { panelRef.current?.focus() }, [])
   const email = account.user?.email || '已登录'
   return (
-    <div className="account-signed">
+    <section className="account-signed" ref={panelRef} tabIndex={-1} aria-label="已登录账号">
       {passwordUpdated && (
         <p className="account-notice" role="status">密码已更新，下次用新密码登录即可。</p>
       )}
@@ -576,7 +729,7 @@ function SignedInPanel({
           </button>
         </div>
       )}
-    </div>
+    </section>
   )
 }
 

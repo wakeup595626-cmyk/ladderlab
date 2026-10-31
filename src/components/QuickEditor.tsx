@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useEffectEvent, useId, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { supportsContact, supportsOutput } from '../engine/profiles'
 import { parseAddress } from '../engine/address'
@@ -27,14 +27,22 @@ import {
   updateOutput,
   updateTag,
 } from '../state/programOps'
-import { CloseIcon } from './Icons'
+import { CloseIcon, GripIcon } from './Icons'
 import { useModalFocus } from '../lib/useModalFocus'
+import {
+  QUICK_EDITOR_PLACEMENT_GAP,
+  clampQuickEditorPlacement,
+  clearQuickEditorPlacement,
+  persistQuickEditorPlacement,
+  quickEditorStorage,
+  readQuickEditorPlacement,
+} from '../lib/quickEditorPlacement'
+import type { QuickEditorBox, QuickEditorPoint, QuickEditorSize } from '../lib/quickEditorPlacement'
 
 interface QuickEditorProps {
   program: Program
   runtime: Runtime
   selection: Selection
-  anchor: DOMRect | null
   autoFocus?: boolean
   onProgram: (program: Program) => void
   onClose: () => void
@@ -52,6 +60,57 @@ const CONTACT_NAMES: Record<ContactKind, string> = {
 }
 
 const MOBILE_QUERY = '(max-width: 720px)'
+const DRAG_THRESHOLD = 4
+
+/** 工作台里真正放得下参数框的区域：左上角带内边距偏移，宽高已扣掉内边距。 */
+type WorkbenchBox = QuickEditorBox
+
+const EMPTY_WORKBENCH: WorkbenchBox = { left: 0, top: 0, width: 0, height: 0 }
+
+interface DragSession {
+  pointerId: number
+  capture: HTMLElement
+  startX: number
+  startY: number
+  originX: number
+  originY: number
+  startPlacement: QuickEditorPoint | null
+  moved: boolean
+}
+
+const KEYBOARD_DIRECTIONS: Record<string, QuickEditorPoint> = {
+  ArrowLeft: { x: -1, y: 0 },
+  ArrowRight: { x: 1, y: 0 },
+  ArrowUp: { x: 0, y: -1 },
+  ArrowDown: { x: 0, y: 1 },
+}
+
+function cssPixels(value: string): number {
+  const parsed = Number.parseFloat(value)
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
+/**
+ * 浮动面板的坐标相对工作台「内容盒」：右侧变量面板展开时工作台会留出内边距，
+ * 扣掉它，参数框才不会滑到变量面板底下。
+ */
+function measureWorkbench(container: HTMLElement): WorkbenchBox {
+  const style = window.getComputedStyle(container)
+  const left = cssPixels(style.paddingLeft)
+  const right = cssPixels(style.paddingRight)
+  const top = cssPixels(style.paddingTop)
+  const bottom = cssPixels(style.paddingBottom)
+  return {
+    left,
+    top,
+    width: Math.max(0, container.clientWidth - left - right),
+    height: Math.max(0, container.clientHeight - top - bottom),
+  }
+}
+
+function sameWorkbench(a: WorkbenchBox, b: WorkbenchBox): boolean {
+  return a.left === b.left && a.top === b.top && a.width === b.width && a.height === b.height
+}
 
 const OUTPUT_NAMES: Record<OutputKind, string> = {
   COIL: '线圈',
@@ -274,7 +333,6 @@ export default function QuickEditor({
   program,
   runtime,
   selection,
-  anchor,
   autoFocus = false,
   onProgram,
   onClose,
@@ -282,7 +340,6 @@ export default function QuickEditor({
   onDeleteNode,
   onDeleteOutput,
 }: QuickEditorProps) {
-  const [position, setPosition] = useState({ left: 16, top: 16 })
   const rung = program.rungs.find((item) => item.id === selection.rungId)
   const node: LadderNode | null = selection.path ? getNodeAtPath(program, selection.rungId, selection.path) : null
   const boundTag = node?.type === 'contact' ? tagForReference(program, node.tag) : null
@@ -290,8 +347,81 @@ export default function QuickEditor({
     () => typeof window !== 'undefined' && window.matchMedia(MOBILE_QUERY).matches,
   )
   // 桌面端是悬浮属性框：不锁焦点、不铺遮罩，点选另一个元件直接切换编辑对象。
-  const panelRef = useModalFocus<HTMLDivElement>(mobile, onClose)
+  // 手机端把初始焦点放在标题上：落到第一个输入框会让软键盘立刻弹起来，
+  // 把本来就不高的画布再顶掉一半，用户反而看不到自己正在改的元件。
+  const headingRef = useRef<HTMLHeadingElement>(null)
+  const panelRef = useModalFocus<HTMLDivElement>(mobile, onClose, headingRef)
   const focusedOnceRef = useRef(false)
+
+  // 桌面参数框默认仍是右侧停靠列：没拖过就不浮动，不重新制造遮挡。
+  // 一旦拖过，位置写进本机存储，关闭、刷新、下次插入元件都回到落点。
+  const [placement, setPlacement] = useState<QuickEditorPoint | null>(
+    () => readQuickEditorPlacement(quickEditorStorage()),
+  )
+  const [dragging, setDragging] = useState(false)
+  // 可用区域与浮动后的真实尺寸都取自布局，夹紧时用它们把面板留在工作台里。
+  const [workbench, setWorkbench] = useState<WorkbenchBox>(EMPTY_WORKBENCH)
+  const [floatingSize, setFloatingSize] = useState<QuickEditorSize | null>(null)
+  const placementRef = useRef<QuickEditorPoint | null>(placement)
+  const dragRef = useRef<DragSession | null>(null)
+  const draggedAtRef = useRef(Number.NEGATIVE_INFINITY)
+  const hintId = useId()
+
+  // 工作台变窄（窗口缩小、右侧变量面板展开）时只收缩显示位置：存储里的落点不动，
+  // 窗口放大后还能回到原处。
+  useEffect(() => {
+    if (mobile) return
+    const container = panelRef.current?.closest<HTMLElement>('.wb-workbench')
+    if (!container) return
+    const sync = () => {
+      const next = measureWorkbench(container)
+      setWorkbench((prev) => (sameWorkbench(prev, next) ? prev : next))
+    }
+    const observer = new ResizeObserver(sync)
+    observer.observe(container)
+    window.addEventListener('resize', sync)
+    window.visualViewport?.addEventListener('resize', sync)
+    return () => {
+      observer.disconnect()
+      window.removeEventListener('resize', sync)
+      window.visualViewport?.removeEventListener('resize', sync)
+    }
+  }, [mobile, panelRef])
+
+  // 停靠列是整列高，拿它的高度夹紧会把面板顶到左上角，所以浮动后单独量真实尺寸。
+  const floating = !mobile && placement !== null
+  useEffect(() => {
+    if (!floating) return
+    const panel = panelRef.current
+    if (!panel) return
+    const sync = () => {
+      const width = panel.offsetWidth
+      const height = panel.offsetHeight
+      setFloatingSize((prev) => (
+        prev && prev.width === width && prev.height === height ? prev : { width, height }
+      ))
+    }
+    const observer = new ResizeObserver(sync)
+    observer.observe(panel)
+    return () => observer.disconnect()
+  }, [floating, panelRef])
+
+  // 显示位置在渲染时才夹紧，不写回状态：窗口再放大，面板会自己回到记忆的落点。
+  const shownPlacement = placement && floatingSize && (workbench.width > 0 || workbench.height > 0)
+    ? clampQuickEditorPlacement(placement, floatingSize, workbench, QUICK_EDITOR_PLACEMENT_GAP)
+    : placement
+
+  // 拖动时锁住整页光标与选区，指针滑出标题栏也不会选中画布文字。
+  useEffect(() => {
+    if (!dragging) return
+    const { cursor, userSelect } = document.body.style
+    document.body.style.cursor = 'grabbing'
+    document.body.style.userSelect = 'none'
+    return () => {
+      document.body.style.cursor = cursor
+      document.body.style.userSelect = userSelect
+    }
+  }, [dragging])
 
   useEffect(() => {
     if (mobile || (focusedOnceRef.current && !autoFocus)) return
@@ -339,54 +469,10 @@ export default function QuickEditor({
     }
   }, [program])
 
-  useLayoutEffect(() => {
-    if (mobile) return
-    const panel = panelRef.current
-    if (!panel) return
-    // 点选别的元件时面板会切换编辑对象，这里重新量一次真实位置，
-    // 避免面板还停在上一只元件旁边。
-    const measure = (): DOMRect | null => {
-      const attribute = node ? 'data-node-id' : 'data-output-id'
-      const key = node ? 'nodeId' : 'outputId'
-      const id = node ? node.id : rung?.output.id
-      if (!id) return anchor
-      for (const element of document.querySelectorAll<HTMLElement>('[' + attribute + ']')) {
-        if (element.dataset[key] !== id) continue
-        if (node && element.dataset.nodePath !== selection.path?.join('.')) continue
-        return element.getBoundingClientRect()
-      }
-      return anchor
-    }
-    const place = () => {
-      const box = measure() ?? anchor
-      const width = panel.offsetWidth
-      const height = panel.offsetHeight
-      const margin = 12
-      let left = box ? box.right + margin : margin
-      if (left + width > window.innerWidth - margin) {
-        left = box ? box.left - width - margin : window.innerWidth - width - margin
-      }
-      left = Math.max(margin, Math.min(left, window.innerWidth - width - margin))
-      const top = box
-        ? Math.max(margin, Math.min(box.top - 22, window.innerHeight - height - margin))
-        : margin
-      setPosition({ left, top })
-    }
-
-    place()
-    window.addEventListener('resize', place)
-    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(place)
-    observer?.observe(panel)
-    return () => {
-      window.removeEventListener('resize', place)
-      observer?.disconnect()
-    }
-  }, [anchor, mobile, node, panelRef, rung, selection.path, selection.rungId])
-
   // 桌面悬浮框不是模态层，关闭后要把焦点还给刚才编辑的画布元件；
   // 否则按 Esc 后 document.activeElement 会掉到 body，键盘用户丢失位置。
   const rungOutputId = rung?.output.id
-  const closeAndRestoreCanvasFocus = useCallback(() => {
+  const closeAndRestoreCanvasFocus = () => {
     const rungElement = Array.from(document.querySelectorAll<HTMLElement>('.ll-rung'))
       .find((element) => element.dataset.rungId === selection.rungId)
     const focusTarget = selection.path
@@ -399,22 +485,186 @@ export default function QuickEditor({
     window.setTimeout(() => {
       if (focusTarget?.isConnected) focusTarget.focus({ preventScroll: true })
     }, 0)
-  }, [mobile, node?.id, onClose, rungOutputId, selection.path, selection.rungId])
+  }
 
   // 桌面属性框不是模态层，焦点常在画布上。Esc 要在这里兜底，
   // 否则只有把焦点先点进面板才关得掉，键盘用户会觉得快捷键失灵。
+  // 监听器只安装一次，始终调用最新一次渲染的关闭逻辑。
+  const closeOnWindowEscape = useEffectEvent((event: KeyboardEvent) => {
+    if (event.key !== 'Escape' || event.defaultPrevented) return
+    if (document.querySelector('[role="dialog"][aria-modal="true"]')) return
+    event.preventDefault()
+    closeAndRestoreCanvasFocus()
+  })
   useEffect(() => {
     if (mobile) return
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape' || event.defaultPrevented) return
-      if (document.querySelector('[role="dialog"][aria-modal="true"]')) return
-      event.preventDefault()
-      closeAndRestoreCanvasFocus()
-    }
+    const onKeyDown = (event: KeyboardEvent) => closeOnWindowEscape(event)
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [closeAndRestoreCanvasFocus, mobile])
+  }, [mobile])
 
+  const dockEditor = useCallback(() => {
+    clearQuickEditorPlacement(quickEditorStorage())
+    placementRef.current = null
+    dragRef.current = null
+    setFloatingSize(null)
+    setPlacement(null)
+  }, [])
+
+  // 让面板贴合工作台可用区域：右下角始终留得住 8px，标题栏不会被推出视野。
+  const clampToWorkbench = (point: QuickEditorPoint) => {
+    const panel = panelRef.current
+    const container = panel?.closest<HTMLElement>('.wb-workbench')
+    if (!panel || !container) return point
+    return clampQuickEditorPlacement(
+      point,
+      { width: panel.offsetWidth, height: panel.offsetHeight },
+      measureWorkbench(container),
+      QUICK_EDITOR_PLACEMENT_GAP,
+    )
+  }
+
+  const beginHeaderDrag = (event: React.PointerEvent<HTMLElement>) => {
+    if (mobile || event.button !== 0 || !event.isPrimary) return
+    // 标题栏上的关闭、靠右按钮照常点击，不从它们开始拖。
+    if (event.target instanceof Element
+      && event.target.closest('button, input, select, textarea, a, [role="button"]')) return
+    const panel = panelRef.current
+    const container = panel?.closest<HTMLElement>('.wb-workbench')
+    if (!panel || !container) return
+
+    const rect = panel.getBoundingClientRect()
+    const frame = container.getBoundingClientRect()
+    const box = measureWorkbench(container)
+    const rawX = rect.left - frame.left - container.clientLeft
+    const rawY = rect.top - frame.top - container.clientTop
+    // 停靠列贴着工作台右缘，按下时先把起点收进 8px 留白，免得一拖就跳到边界上。
+    const minX = box.left + QUICK_EDITOR_PLACEMENT_GAP
+    const maxX = Math.max(minX, box.left + box.width - rect.width - QUICK_EDITOR_PLACEMENT_GAP)
+    dragRef.current = {
+      pointerId: event.pointerId,
+      capture: event.currentTarget,
+      startX: event.clientX,
+      startY: event.clientY,
+      originX: Math.round(Math.min(Math.max(rawX, minX), maxX)),
+      originY: Math.round(Math.max(box.top + QUICK_EDITOR_PLACEMENT_GAP, rawY)),
+      startPlacement: placementRef.current,
+      moved: false,
+    }
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId)
+    } catch {
+      // 指针在按下瞬间就失效时拿不到捕获，后面的 move 自然也不会来。
+    }
+  }
+
+  const moveHeaderDrag = (event: React.PointerEvent<HTMLElement>) => {
+    const drag = dragRef.current
+    if (!drag || drag.pointerId !== event.pointerId) return
+    const dx = event.clientX - drag.startX
+    const dy = event.clientY - drag.startY
+    if (!drag.moved) {
+      if (Math.hypot(dx, dy) < DRAG_THRESHOLD) return
+      drag.moved = true
+      setDragging(true)
+    }
+    event.preventDefault()
+    const next = { x: drag.originX + dx, y: drag.originY + dy }
+    placementRef.current = next
+    setPlacement(next)
+  }
+
+  const finishHeaderDrag = (event: React.PointerEvent<HTMLElement>) => {
+    const drag = dragRef.current
+    if (!drag || drag.pointerId !== event.pointerId) return
+    if (drag.capture.hasPointerCapture(event.pointerId)) {
+      drag.capture.releasePointerCapture(event.pointerId)
+    }
+    dragRef.current = null
+    if (!drag.moved) return
+    setDragging(false)
+    draggedAtRef.current = performance.now()
+    const current = placementRef.current
+    if (current) {
+      const final = clampToWorkbench(current)
+      placementRef.current = final
+      setPlacement(final)
+      persistQuickEditorPlacement(quickEditorStorage(), final)
+    }
+    // pointerup 之后浏览器还会补一次 click；吃掉它，拖完不会误触标题上的动作。
+    const swallow = (click: MouseEvent) => {
+      click.preventDefault()
+      click.stopPropagation()
+    }
+    window.addEventListener('click', swallow, true)
+    window.setTimeout(() => window.removeEventListener('click', swallow, true), 80)
+  }
+
+  const cancelHeaderDrag = (event: React.PointerEvent<HTMLElement>) => {
+    const drag = dragRef.current
+    if (!drag || drag.pointerId !== event.pointerId) return
+    if (drag.capture.hasPointerCapture(event.pointerId)) {
+      drag.capture.releasePointerCapture(event.pointerId)
+    }
+    dragRef.current = null
+    if (!drag.moved) return
+    setDragging(false)
+    // 浏览器接管手势（来电、系统滚动）时退回按下前的位置，且不写记忆。
+    placementRef.current = drag.startPlacement
+    setPlacement(drag.startPlacement)
+  }
+
+  const nudgeWithKeyboard = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    const direction = KEYBOARD_DIRECTIONS[event.key]
+    const panel = panelRef.current
+    const container = panel?.closest<HTMLElement>('.wb-workbench')
+    if (!direction || !panel || !container) return
+    event.preventDefault()
+    const frame = container.getBoundingClientRect()
+    const rect = panel.getBoundingClientRect()
+    const base = placementRef.current ?? {
+      x: rect.left - frame.left - container.clientLeft,
+      y: rect.top - frame.top - container.clientTop,
+    }
+    const step = event.shiftKey ? 24 : 8
+    const moved = { x: base.x + direction.x * step, y: base.y + direction.y * step }
+    // 停靠列整列高：第一次微调先按宽度夹紧，高度交给浮动后的实测尺寸。
+    const next = placementRef.current
+      ? clampToWorkbench(moved)
+      : clampQuickEditorPlacement(
+        moved,
+        { width: rect.width, height: 0 },
+        measureWorkbench(container),
+        QUICK_EDITOR_PLACEMENT_GAP,
+      )
+    placementRef.current = next
+    setPlacement(next)
+    persistQuickEditorPlacement(quickEditorStorage(), next)
+  }
+  const handlePanelKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (mobile) return
+    if (event.key === 'Escape') {
+      event.stopPropagation()
+      closeAndRestoreCanvasFocus()
+      return
+    }
+    if (!event.altKey) return
+    if (event.key === 'Home') {
+      event.preventDefault()
+      dockEditor()
+      return
+    }
+    nudgeWithKeyboard(event)
+  }
+
+  const resetOnDoubleClick = (event: React.MouseEvent<HTMLElement>) => {
+    if (mobile) return
+    if (event.target instanceof Element
+      && event.target.closest('button, input, select, textarea, a, [role="button"]')) return
+    // 两次快速拖动后浏览器也可能补双击事件，刚拖完的一下不算。
+    if (performance.now() - draggedAtRef.current < 350) return
+    dockEditor()
+  }
   if (!rung) return null
 
   const contactPath = node?.type === 'contact' ? selection.path : null
@@ -519,44 +769,65 @@ export default function QuickEditor({
   const outputTag = hasInstance(output.kind) ? null : tagForReference(program, output.tag)
   const outputOptions = hasInstance(output.kind) ? refs.boolRefs : isInteger(output.kind) ? refs.intRefs : refs.boolRefs
 
-  return createPortal(
-    <>
-      {mobile && (
-        <div
-          className="qe-scrim"
-          aria-hidden="true"
-          onPointerDown={(event) => {
-            event.preventDefault()
-            onClose()
-          }}
-        />
-      )}
+  // 桌面端把参数框停靠在程序区右侧，与图纸并排，不再浮在元件上方遮住梯形图。
+  // 手机端仍用底部抽屉 + 遮罩，保持单层模态与「点空白关闭」的手感。
+  const panel = (
       <div
-        className="qe-panel"
+        className={mobile ? 'qe-panel is-sheet' : placement ? 'qe-panel is-floating' : 'qe-panel is-dock'}
         ref={panelRef}
-        style={mobile ? undefined : position}
         role={mobile ? 'dialog' : 'group'}
         aria-modal={mobile ? true : undefined}
         aria-label={`编辑${title}`}
+        aria-describedby={mobile ? undefined : hintId}
         tabIndex={-1}
-        onKeyDown={(event) => {
-          if (mobile || event.key !== 'Escape') return
-          event.stopPropagation()
-          closeAndRestoreCanvasFocus()
-        }}
+        data-dragging={dragging ? 'true' : undefined}
+        style={floating && shownPlacement
+          ? { left: shownPlacement.x, top: shownPlacement.y }
+          : undefined}
+        onKeyDown={handlePanelKeyDown}
       >
-        <header className="qe-head">
-          <div>
-            <h2>{title}</h2>
+        <p className="visually-hidden" id={hintId}>
+          拖动标题栏可以移动参数框；按住 Alt 加方向键微调，按住 Shift 加速；Alt 加 Home 恢复右侧停靠。
+        </p>
+        <header
+          className="qe-head"
+          title={mobile ? undefined : '拖动标题移动参数框；双击恢复右侧停靠'}
+          onPointerDown={beginHeaderDrag}
+          onPointerMove={moveHeaderDrag}
+          onPointerUp={finishHeaderDrag}
+          onPointerCancel={cancelHeaderDrag}
+          onLostPointerCapture={cancelHeaderDrag}
+          onDragStart={(event) => event.preventDefault()}
+          onDoubleClick={resetOnDoubleClick}
+        >
+          <div className="qe-heading">
+            {!mobile && (
+              <span className="qe-drag-grip" aria-hidden="true">
+                <GripIcon size={14} />
+              </span>
+            )}
+            <h2 ref={headingRef} tabIndex={-1}>{title}</h2>
           </div>
-          <button
-            type="button"
-            className="qe-close"
-            onClick={closeAndRestoreCanvasFocus}
-            aria-label="关闭参数编辑"
-          >
-            <CloseIcon size={18} />
-          </button>
+          <div className="qe-head-actions">
+            {!mobile && placement && (
+              <button
+                type="button"
+                className="qe-dock"
+                onClick={dockEditor}
+                title="恢复右侧停靠并忘记当前位置"
+              >
+                靠右
+              </button>
+            )}
+            <button
+              type="button"
+              className="qe-close"
+              onClick={closeAndRestoreCanvasFocus}
+              aria-label="关闭参数编辑"
+            >
+              <CloseIcon size={18} />
+            </button>
+          </div>
         </header>
 
         {node?.type === 'contact' && (
@@ -844,9 +1115,30 @@ export default function QuickEditor({
         )}
 
         <footer className="qe-foot">
-          <span>{mobile ? '点空白处关闭 · 修改即时生效' : '回车确认 · Esc 关闭'}</span>
+          <span>
+            {mobile
+              ? '点空白处关闭 · 修改即时生效'
+              : placement
+                ? '位置已记住 · 双击标题靠右'
+                : '拖动标题可移动 · Esc 关闭'}
+          </span>
         </footer>
       </div>
+  )
+
+  if (!mobile) return panel
+
+  return createPortal(
+    <>
+      <div
+        className="qe-scrim"
+        aria-hidden="true"
+        onPointerDown={(event) => {
+          event.preventDefault()
+          onClose()
+        }}
+      />
+      {panel}
     </>,
     document.body,
   )

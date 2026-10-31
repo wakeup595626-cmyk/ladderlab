@@ -387,7 +387,7 @@ export default function WorkspaceTopBar({
 
   const activeThemeName = theme.preset === 'custom'
     ? '自定义'
-    : THEME_PRESETS.find((preset) => preset.id === theme.preset)?.name ?? '原版绿'
+    : THEME_PRESETS.find((preset) => preset.id === theme.preset)?.name ?? '樱花粉'
 
   // 导出进行中把图片与顺序功能图入口统一置灰：一张大图要跑十几秒，
   // 反复点击只会让主线程排队，用户还以为程序卡死了。

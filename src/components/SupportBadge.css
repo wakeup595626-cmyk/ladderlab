@@ -21,6 +21,13 @@ body:has([role='dialog'][aria-modal='true'], .qe-panel) .support-badge {
   visibility: hidden;
 }
 
+/* 手机上的提示条占据底部消息带时，打赏浮标让位，避免叠在提示文字上。 */
+@media (max-width: 720px) {
+  body:has(.toast-message) .support-badge {
+    visibility: hidden;
+  }
+}
+
 /*
  * 0×0 探针：钉在左下安全线上，JS 读它的位置即可拿到当前断点的边距，
  * 包括移动端标签栏和刘海屏的 env(safe-area-inset-bottom)。

@@ -98,12 +98,12 @@ describe('主题预设', () => {
       '樱花粉',
     ])
     expect(THEME_PRESETS.map((preset) => preset.note)).toEqual([
-      '最初版本，默认',
+      '最初版本',
       '清透冷调',
       '干净利落，偏产品感',
       '柔和护眼，偏自然',
       '安静柔和，偏创作感',
-      '柔和粉嫩，偏温柔',
+      '默认主题，柔和粉嫩',
     ])
     expect(THEME_PRESETS.map((preset) => preset.swatch)).toEqual([
       '#0f6b7a',
@@ -130,13 +130,13 @@ describe('主题预设', () => {
     }
   })
 
-  it('DEFAULT_THEME 指向原版绿的原始颜色', () => {
-    const classic = THEME_PRESETS[0]
-    expect(classic.id).toBe('classic')
+  it('DEFAULT_THEME 指向樱花粉的原始颜色', () => {
+    const blush = THEME_PRESETS.find((preset) => preset.id === 'blush')
+    expect(blush).toBeDefined()
     expect(DEFAULT_THEME).toEqual({
-      preset: 'classic',
-      accent: classic.tokens.accent,
-      ground: classic.tokens.ground,
+      preset: 'blush',
+      accent: blush?.tokens.accent,
+      ground: blush?.tokens.ground,
     })
     expect(THEME_STORAGE_KEY).toBe('ladderlab.theme.v1')
   })
@@ -219,12 +219,12 @@ describe('自定义主题的极端输入', () => {
     }
   })
 
-  it('非法颜色不抛异常，回退到原版绿再派生', () => {
+  it('非法颜色不抛异常，回退到默认樱花粉再派生', () => {
     expect(() => deriveCustomTheme('nope', '')).not.toThrow()
     const fallback = deriveCustomTheme('', 'oops')
-    expect(fallback.accent).toBe('#0f6b7a')
-    // 原版绿底色低于 0.9 亮度，派生时会先提亮到浅底区间。
-    expect(fallback.ground).toBe('#f3f4f2')
+    expect(fallback.accent).toBe('#b8446f')
+    // 樱花粉底色本身已在浅底区间，派生时保持原值。
+    expect(fallback.ground).toBe('#fdf4f6')
     expect(resolveTheme({ preset: 'custom', accent: 'rgb(1,2,3)', ground: '#fff' })).toEqual(fallback)
     expect(() => resolveTheme({ preset: 'custom', accent: '#GGGGGG', ground: '#12345' })).not.toThrow()
   })
@@ -277,7 +277,7 @@ describe('对比度修正', () => {
     expect(lightened).toMatch(HEX_COLOR)
     expect(relativeLuminance(lightened)).toBeGreaterThanOrEqual(0.9)
     expect(ensureLightBackground('#ffffff')).toBe('#ffffff')
-    expect(ensureLightBackground('not-a-color')).toBe('#f3f4f2')
+    expect(ensureLightBackground('not-a-color')).toBe('#fdf4f6')
   })
 })
 
@@ -348,7 +348,7 @@ describe('主题偏好持久化', () => {
   it('返回副本，修改它不会污染 DEFAULT_THEME', () => {
     const first = readThemePreference(null)
     first.accent = '#000000'
-    expect(DEFAULT_THEME.accent).toBe('#0f6b7a')
+    expect(DEFAULT_THEME.accent).toBe('#b8446f')
   })
 })
 

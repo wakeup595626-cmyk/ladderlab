@@ -40,17 +40,17 @@ export interface ThemeTokens {
 export const THEME_STORAGE_KEY = 'ladderlab.theme.v1'
 
 export const DEFAULT_THEME: ThemePreference = {
-  preset: 'classic',
-  accent: '#0f6b7a',
-  ground: '#f0f1ef',
+  preset: 'blush',
+  accent: '#b8446f',
+  ground: '#fdf4f6',
 }
 
 const WHITE = '#ffffff'
 const BLACK = '#000000'
 const INK_BASE = '#0b1a20'
 /** 自定义主题遇到非法输入时的兜底颜色，与默认主题保持一致。 */
-const DEFAULT_ACCENT = '#0f6b7a'
-const DEFAULT_GROUND = '#f0f1ef'
+const DEFAULT_ACCENT = '#b8446f'
+const DEFAULT_GROUND = '#fdf4f6'
 const LIGHT_GROUND_LUMINANCE = 0.9
 /** 二分查找使用固定迭代次数，结果不随设备性能变化。 */
 const SEARCH_STEPS = 30
@@ -65,7 +65,7 @@ export const THEME_PRESETS: ReadonlyArray<{
   {
     id: 'classic',
     name: '原版绿',
-    note: '最初版本，默认',
+    note: '最初版本',
     swatch: '#0f6b7a',
     tokens: {
       ground: '#f0f1ef',
@@ -225,7 +225,7 @@ export const THEME_PRESETS: ReadonlyArray<{
   {
     id: 'blush',
     name: '樱花粉',
-    note: '柔和粉嫩，偏温柔',
+    note: '默认主题，柔和粉嫩',
     swatch: '#b8446f',
     tokens: {
       ground: '#fdf4f6',

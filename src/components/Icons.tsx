@@ -230,6 +230,25 @@ export function LadderIcon(props: IconProps) {
   )
 }
 
+export function EyeIcon(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <path d="M2.8 12S6.4 5.8 12 5.8 21.2 12 21.2 12 17.6 18.2 12 18.2 2.8 12 2.8 12Z" />
+      <circle cx="12" cy="12" r="3.1" />
+    </IconBase>
+  )
+}
+
+export function EyeOffIcon(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <path d="M9.5 6.3A9.8 9.8 0 0 1 12 5.8c5.6 0 9.2 6.2 9.2 6.2a16.8 16.8 0 0 1-3 3.6M6.2 7.8A16.4 16.4 0 0 0 2.8 12S6.4 18.2 12 18.2a9.5 9.5 0 0 0 3.4-.6" />
+      <path d="M10 10a2.9 2.9 0 0 0 4 4" />
+      <path d="m4 4 16 16" />
+    </IconBase>
+  )
+}
+
 export function InfoIcon(props: IconProps) {
   return (
     <IconBase {...props}>

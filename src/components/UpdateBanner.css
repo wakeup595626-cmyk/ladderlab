@@ -43,11 +43,6 @@
   text-wrap: pretty;
 }
 
-/* 操作提示仍居中；更新通知出现在右下角时，把短提示抬到它上方。 */
-.app-shell:has(.sw-update-banner) .toast {
-  bottom: calc(env(safe-area-inset-bottom, 0px) + 102px);
-}
-
 .sw-update-banner__actions {
   display: flex;
   flex: 0 0 auto;
@@ -155,8 +150,19 @@
     bottom: calc(env(safe-area-inset-bottom, 0px) + 98px);
   }
 
-  .app-shell:has(.sw-update-banner) .toast {
-    bottom: calc(env(safe-area-inset-bottom, 0px) + 166px);
+}
+
+/* 弹窗、底部参数面板打开时，更新提示不能压在面板内容上。
+   提示本身不紧急，等用户关掉面板再出现即可。 */
+body:has([role='dialog'][aria-modal='true']) .sw-update-banner {
+  visibility: hidden;
+}
+
+/* 手机上提示条占用了底部消息带，两个角落浮卡暂时让位，
+   否则会盖住提示文字。 */
+@media (max-width: 720px) {
+  body:has(.toast-message) .sw-update-banner {
+    visibility: hidden;
   }
 }
 
@@ -165,9 +171,6 @@
     bottom: calc(env(safe-area-inset-bottom, 0px) + 168px);
   }
 
-  .app-shell:has(.sw-update-banner) .toast {
-    bottom: calc(env(safe-area-inset-bottom, 0px) + 236px);
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {

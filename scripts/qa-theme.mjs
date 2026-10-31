@@ -1,5 +1,5 @@
 /**
- * 主题验收：六套预设（默认原版绿）、自定义色派生、刷新持久化、portal 弹层换肤与移动端。
+ * 主题验收：六套预设（默认樱花粉）、自定义色派生、刷新持久化、portal 弹层换肤与移动端。
  *
  * 用法：先启动 preview（默认 4173）与带调试端口的浏览器（9444），
  * 然后 node scripts/qa-theme.mjs。
@@ -196,8 +196,8 @@ try {
 
   const initial = await evaluate(TOKENS)
   check(
-    'default-classic',
-    initial.theme === 'classic' && initial.accent === '#0f6b7a' && initial.ground === '#f0f1ef',
+    'default-blush',
+    initial.theme === 'blush' && initial.accent === '#b8446f' && initial.ground === '#fdf4f6',
     initial,
   )
 

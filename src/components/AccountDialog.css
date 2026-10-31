@@ -11,7 +11,7 @@
 
 .account-dialog {
   display: flex;
-  width: min(476px, 100%);
+  width: min(460px, 100%);
   max-height: min(88vh, 720px);
   max-height: min(88dvh, 720px);
   flex-direction: column;
@@ -19,11 +19,20 @@
   overflow: hidden;
   padding: 0;
   border: 1px solid var(--control);
-  border-radius: var(--radius-sheet, 8px);
+  border-radius: 6px;
   background: var(--surface);
   color: var(--text);
   box-shadow: var(--shadow-overlay, 0 16px 36px rgba(21, 24, 22, 0.15));
   animation: account-rise 200ms var(--ease-out, ease-out);
+}
+
+/* 一条 3px 主色压边给纸面一个明确的“封面”，比大色块安静，也比纯白
+   更像一个经过设计的登录入口。 */
+.account-dialog::before {
+  height: 3px;
+  flex: none;
+  background: var(--accent);
+  content: '';
 }
 
 .account-dialog:focus-visible {
@@ -42,20 +51,25 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
-  padding: 18px 20px 16px 22px;
+  padding: 19px 20px 17px 22px;
   border-bottom: 1px solid var(--border);
-  background: var(--raised);
+  background: var(--surface);
 }
 
 .account-dialog-title {
-  display: flex;
+  display: grid;
   min-width: 0;
-  align-items: center;
-  gap: 12px;
+  gap: 2px;
 }
 
-.account-dialog-title > div {
-  min-width: 0;
+.account-dialog-eyebrow {
+  margin: 0 0 2px;
+  color: var(--accent-ink);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  line-height: 1.4;
 }
 
 .account-dialog-mark {
@@ -73,18 +87,26 @@
 .account-dialog-head h2 {
   margin: 0;
   color: var(--text);
-  font-size: 17px;
+  font-size: 19px;
   font-weight: 650;
-  letter-spacing: -0.01em;
-  line-height: 1.3;
+  letter-spacing: -0.015em;
+  line-height: 1.25;
   text-wrap: balance;
 }
 
-.account-dialog-head p {
-  margin: 3px 0 0;
+/* 打开弹窗时焦点会落到标题上，供屏幕阅读器先读出「这是什么面板」。
+   标题不是可操作控件，不该出现浏览器默认的黑色焦点方框。 */
+.account-dialog-head h2:focus,
+.account-dialog-head h2:focus-visible {
+  outline: none;
+}
+
+.account-dialog-head .account-dialog-sub {
+  max-width: 34ch;
+  margin: 4px 0 0;
   color: var(--muted);
   font-size: 12.5px;
-  line-height: 1.55;
+  line-height: 1.6;
   text-wrap: pretty;
 }
 
@@ -138,7 +160,7 @@
   border-top: 1px solid var(--border);
   background: var(--raised);
   color: var(--faint);
-  font-size: 11.5px;
+  font-size: 12px;
   line-height: 1.45;
 }
 
@@ -150,21 +172,22 @@
 .account-error,
 .account-notice {
   margin: 0;
-  padding: 10px 12px;
-  border: 1px solid;
-  border-radius: var(--radius-card, 6px);
-  font-size: 12.5px;
-  line-height: 1.55;
+  padding: 9px 11px 9px 12px;
+  border: 0;
+  border-left: 2px solid;
+  border-radius: 0 2px 2px 0;
+  font-size: 13px;
+  line-height: 1.6;
 }
 
 .account-error {
-  border-color: color-mix(in srgb, var(--negative) 32%, var(--border));
+  border-left-color: var(--negative);
   background: var(--negative-wash);
   color: var(--negative);
 }
 
 .account-notice {
-  border-color: color-mix(in srgb, var(--accent) 28%, var(--border));
+  border-left-color: var(--accent);
   background: var(--accent-wash);
   color: var(--accent-ink);
 }
@@ -179,7 +202,8 @@
   gap: 4px;
 }
 
-.account-setup-intro strong {
+.account-setup-title {
+  margin: 0;
   color: var(--text);
   font-size: 15.5px;
   font-weight: 650;
@@ -456,38 +480,55 @@
   color: var(--accent-ink);
 }
 
+/* 分段控件：一块滑动的纸片，比两条下划线更容易看清“当前在哪一侧”。 */
 .account-tabs {
-  display: flex;
-  gap: 22px;
-  margin-bottom: 2px;
-  border-bottom: 1px solid var(--rule);
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control, 3px);
+  background: var(--raised);
+}
+
+.account-tabs-thumb {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  left: 3px;
+  width: calc(50% - 3px);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  background: var(--surface);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--text) 8%, transparent);
+  transition: translate 200ms var(--ease-out, ease-out);
+}
+
+.account-tabs[data-mode='signup'] .account-tabs-thumb {
+  translate: 100% 0;
 }
 
 .account-tabs button {
   position: relative;
-  min-width: 58px;
-  min-height: 40px;
-  margin-bottom: -1px;
-  padding: 7px 2px 9px;
+  z-index: 1;
+  min-height: 34px;
+  padding: 6px 8px;
   border: 0;
-  border-bottom: 2px solid transparent;
-  border-radius: 0;
+  border-radius: 2px;
   background: transparent;
   color: var(--muted);
   font: 600 13px/1 var(--sans);
   cursor: pointer;
-  transition:
-    border-color 160ms var(--ease-out, ease-out),
-    color 160ms var(--ease-out, ease-out);
+  transition: color 160ms var(--ease-out, ease-out);
 }
 
 .account-tabs button:hover {
-  color: var(--accent-ink);
+  color: var(--text);
 }
 
 .account-tabs button.is-active {
-  border-bottom-color: var(--accent);
-  color: var(--text);
+  color: var(--accent-ink);
 }
 
 .account-form {
@@ -521,7 +562,8 @@
   gap: 7px;
 }
 
-.account-field > span {
+.account-field > span,
+.account-field-label {
   color: var(--text);
   font-size: 12.5px;
   font-weight: 600;
@@ -529,8 +571,42 @@
 
 .account-field > small {
   color: var(--muted);
-  font-size: 11.5px;
-  line-height: 1.55;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.account-input {
+  position: relative;
+  display: grid;
+}
+
+.account-input input {
+  padding-right: 46px;
+}
+
+/* 显隐密码是叠在输入框里的图标键，所以用绝对定位，避免撑高二行。 */
+.account-reveal {
+  position: absolute;
+  top: 50%;
+  right: 4px;
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border: 0;
+  border-radius: var(--radius-control, 3px);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  translate: 0 -50%;
+  transition:
+    background-color 160ms var(--ease-out, ease-out),
+    color 160ms var(--ease-out, ease-out);
+}
+
+.account-reveal:hover {
+  background: var(--active);
+  color: var(--accent-ink);
 }
 
 .account-field input {
@@ -580,8 +656,35 @@
 .account-field-hint {
   margin: -4px 0 0;
   color: var(--negative);
-  font-size: 11.5px;
+  font-size: 12.5px;
   line-height: 1.5;
+}
+
+.account-form-links {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: -3px;
+  padding-top: 11px;
+  border-top: 1px solid var(--rule);
+}
+
+.account-form-note {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+/* 忙碌态的小圆环：只证明“在动”，不抢按钮文案。 */
+.account-spinner {
+  width: 13px;
+  height: 13px;
+  margin-right: 7px;
+  border: 2px solid color-mix(in srgb, currentColor 30%, transparent);
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: account-spin 700ms linear infinite;
 }
 
 .account-form-actions {
@@ -757,7 +860,7 @@
   display: block;
   margin-top: 3px;
   color: var(--muted);
-  font-size: 11.5px;
+  font-size: 12px;
   line-height: 1.45;
 }
 
@@ -771,7 +874,7 @@
   margin: -2px 0 0;
   color: var(--muted);
   font-family: var(--mono);
-  font-size: 11.5px;
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
   line-height: 1.55;
 }
@@ -835,6 +938,7 @@
 .account-advanced:focus-visible,
 .account-cloud-link:focus-visible,
 .account-tabs button:focus-visible,
+.account-reveal:focus-visible,
 .account-setup-help > summary:focus-visible,
 .account-deploy-help > summary:focus-visible,
 .account-dialog-head .icon-button:focus-visible {
@@ -858,10 +962,18 @@
   }
 }
 
+@keyframes account-spin {
+  to { transform: rotate(360deg); }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .account-backdrop,
   .account-dialog {
     animation: none;
+  }
+
+  .account-spinner {
+    animation-duration: 2s;
   }
 
   .account-dialog *,
@@ -890,7 +1002,7 @@
     font-size: 16px;
   }
 
-  .account-dialog-head p {
+  .account-dialog-head .account-dialog-sub {
     font-size: 12px;
   }
 
@@ -902,7 +1014,7 @@
   .account-dialog-foot {
     align-items: flex-start;
     padding: 10px 16px;
-    font-size: 11px;
+    font-size: 12px;
   }
 
   .account-dialog-foot svg {
@@ -917,9 +1029,8 @@
     flex: 1 1 100%;
   }
 
-  .account-form-actions .account-link {
-    flex: 1 1 100%;
-    justify-content: flex-start;
+  .account-form-links {
+    flex-wrap: wrap;
   }
 
   .account-site-url {
@@ -951,6 +1062,7 @@
   .account-secondary,
   .account-copy,
   .account-tabs button,
+  .account-reveal,
   .account-advanced,
   .account-cloud-link,
   .account-link,
@@ -960,5 +1072,10 @@
 
   .account-dialog-head .icon-button {
     min-width: 44px;
+  }
+
+  .account-reveal {
+    width: 44px;
+    height: 44px;
   }
 }

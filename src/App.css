@@ -2743,14 +2743,107 @@
   color: var(--text);
 }
 
+/* 桌面端参数框是工作台的一列，而不是浮在图纸上的窗口：
+   程序区自动收窄，元件与字段永远互不遮挡。 */
+.qe-panel.is-dock {
+  position: relative;
+  inset: auto;
+  z-index: 2;
+  width: auto;
+  min-width: 0;
+  max-height: none;
+  flex: 0 0 clamp(300px, 24vw, 360px);
+  height: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
+  border: 0;
+  border-left: 1px solid var(--border);
+  border-radius: 0;
+  background: var(--surface);
+}
+
+/* 从停靠列拖出来后才是自由浮动：仍被裁在工作台内，位置记在本机。 */
+.qe-panel.is-floating {
+  position: absolute;
+  inset: auto;
+  z-index: 24;
+  width: min(360px, calc(100% - 16px));
+  max-height: calc(100% - 16px);
+  overflow-x: hidden;
+  overflow-y: auto;
+  border: 1px solid var(--control);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-overlay);
+  overscroll-behavior: contain;
+}
+
 .qe-head {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 10px;
   padding: 10px 12px;
   border-bottom: 1px solid var(--border);
   background: var(--raised);
+}
+
+.qe-heading {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+}
+
+.qe-drag-grip {
+  display: grid;
+  width: 14px;
+  height: 18px;
+  flex: 0 0 auto;
+  place-items: center;
+  color: var(--faint);
+  pointer-events: none;
+}
+
+.qe-head-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 2px;
+}
+
+.qe-dock {
+  min-height: 26px;
+  padding: 0 7px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.qe-dock:hover {
+  border-color: var(--border);
+  background: var(--surface);
+  color: var(--text);
+}
+
+/* 只在桌面暴露拖动语义；手机仍是底部抽屉，标题栏要能正常滚动。 */
+@media (min-width: 721px) {
+  .qe-head {
+    cursor: grab;
+    touch-action: none;
+    user-select: none;
+  }
+
+  .qe-panel[data-dragging='true'] .qe-head {
+    cursor: grabbing;
+  }
+
+  .qe-panel[data-dragging='true'] {
+    user-select: none;
+  }
 }
 
 .qe-head h2 {
@@ -3011,28 +3104,36 @@
 
 /* ----------------------------------------------------------------- toast */
 
+/* 提示条是文档流里的一条消息带，出现时把画布整体缩短一点。
+   它不再悬浮在状态栏上方，因此不会盖住元件、参数框或运行读数。 */
+.toast-shelf {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 7px 16px;
+  border-top: 1px solid var(--border);
+  background: var(--raised);
+}
+
 .toast {
-  position: fixed;
-  bottom: 42px;
-  left: 50%;
+  position: relative;
   z-index: 120;
   display: flex;
   align-items: center;
-  gap: 10px;
-  /* left:50% 只留出半屏可用宽度，带按钮的提示会被挤成一条竖排字。
-     先按内容取宽，再用 max-width 兜底换行。 */
+  gap: 9px;
   width: max-content;
-  max-width: min(440px, calc(100vw - 32px));
-  padding: 8px 13px;
-  border: 1px solid var(--control);
-  border-radius: var(--radius-control);
-  background: var(--surface);
-  box-shadow: 0 6px 20px rgba(21, 24, 22, 0.12);
+  max-width: min(620px, 100%);
+  margin-inline: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
   color: var(--text);
-  font-size: 11.5px;
+  font-size: 12.5px;
   line-height: 1.45;
-  text-align: center;
-  transform: translateX(-50%);
+  text-align: left;
 }
 
 .toast::before {
@@ -3062,10 +3163,10 @@
 .toast-action {
   flex: none;
   padding: 3px 10px;
-  border: 1px solid currentColor;
-  border-radius: 999px;
+  border: 1px solid var(--input-rule);
+  border-radius: 2px;
   background: transparent;
-  color: inherit;
+  color: var(--accent-ink);
   font-size: 11.5px;
   font-weight: 600;
   line-height: 1.4;
@@ -3073,7 +3174,8 @@
 }
 
 .toast-action:hover {
-  background: color-mix(in srgb, currentColor 12%, transparent);
+  border-color: var(--accent);
+  background: var(--accent-wash);
 }
 
 .toast-close {
@@ -3360,9 +3462,6 @@ body[data-drag-kind] * {
     text-align: left;
   }
 
-  .toast {
-    bottom: 68px;
-  }
 }
 
 /* ---------------------------------------------------------------- phone */
@@ -3375,15 +3474,6 @@ body[data-drag-kind] * {
   /* 手机上页脚信息与状态栏重复，且会在首屏露出一条被裁切的文字 */
   .editor-footer {
     display: none;
-  }
-
-  /* 手机端提示条停在底部导航上方。顶部那一条正好是「Main [OB1] / 变量表」，
-     提示条压上去会挡住它自己让你去点的按钮；贴着导航则是常见的 snackbar 位置。 */
-  .toast {
-    top: auto;
-    /* 底部导航 56px + 状态栏 30px + 12px 间距：提示条不能压住
-       「仿真运行中 / 已扫描」这行运行证据。 */
-    bottom: calc(98px + env(safe-area-inset-bottom, 0px));
   }
 
   .library-list {
@@ -3484,6 +3574,9 @@ body[data-drag-kind] * {
     width: auto;
     max-height: 82vh;
     max-height: 82dvh;
+    /* 矮屏（小屏手机 / 浏览器工具栏占位）上再收一道：面板最多用掉一屏高度减去
+       顶栏与一小段画布，保证正在编辑的程序段仍然露在上面，而不是整屏都被抽屉盖住。 */
+    max-height: min(82dvh, calc(100dvh - 232px));
     z-index: 81;
     border-right: 0;
     border-bottom: 0;
@@ -3726,12 +3819,12 @@ body[data-drag-kind] * {
   @keyframes ll-toast-in {
     from {
       opacity: 0;
-      transform: translate(-50%, 8px);
+      transform: translateY(8px);
     }
 
     to {
       opacity: 1;
-      transform: translate(-50%, 0);
+      transform: translateY(0);
     }
   }
 
@@ -3859,9 +3952,15 @@ body[data-drag-kind] * {
   border-radius: 2px;
 }
 
-.wb-shell .qe-panel,
-.wb-shell .toast {
+.wb-shell .qe-panel.is-sheet {
   box-shadow: var(--shadow-overlay);
+}
+
+.wb-shell .qe-panel.is-dock {
+  border: 0;
+  border-left: 1px solid var(--border);
+  border-radius: 0;
+  box-shadow: none;
 }
 
 @media (pointer: coarse), (max-width: 720px) {

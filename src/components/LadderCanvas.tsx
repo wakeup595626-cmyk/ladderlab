@@ -2362,10 +2362,16 @@ function SlotMenu({
         ? '插到线路末尾'
         : `插到第 ${request.index} 个元件之后`
 
-  useLayoutEffect(() => {
+  /**
+   * 按触发点当前的位置重新摆放菜单，返回这次用到的矩形。
+   * 每次都用实时 rect 而不是打开瞬间的快照：画布横向滚动、参数面板开合
+   * 改变图纸宽度时，菜单必须跟着自己的「+」走，不能停在旧坐标上。
+   */
+  const measureAndPlace = useCallback(() => {
     const menu = menuRef.current
-    if (!menu) return
-    const { anchor } = request
+    if (!menu) return null
+    const trigger = request.trigger
+    const anchor = trigger?.isConnected ? trigger.getBoundingClientRect() : request.anchor
     const margin = 8
     const width = menu.offsetWidth
     const height = menu.offsetHeight
@@ -2384,6 +2390,13 @@ function SlotMenu({
       top = Math.max(margin, window.innerHeight - height - margin)
     }
     setPlacement({ left: Math.round(left), top: Math.round(top) })
+    return anchor
+  }, [request])
+
+  useLayoutEffect(() => {
+    const menu = menuRef.current
+    if (!menu) return
+    measureAndPlace()
     const timer = window.setTimeout(() => {
       const preferred = initialKind
         ? menu.querySelector<HTMLButtonElement>(`[data-kind="${initialKind}"]`)
@@ -2393,7 +2406,7 @@ function SlotMenu({
       next?.focus()
     }, 0)
     return () => window.clearTimeout(timer)
-  }, [initialKind, request])
+  }, [initialKind, measureAndPlace])
 
   useEffect(() => {
     const onPointerDown = (event: PointerEvent) => {
@@ -2427,22 +2440,38 @@ function SlotMenu({
       else if (event.key === 'End') next = items.length - 1
       items[next]?.focus()
     }
-    const onDismiss = (event: Event) => {
+    // 滚动和窗口尺寸变化只让菜单跟着触发点移动，不再直接关掉它：
+    // 插入后画布会自动把新「+」横向滚进视野（一次程序化 scroll），
+    // 以前这条 scroll 会在菜单画出之前就把它关掉，表现为“第一次点 +
+    // 只是收起了参数面板，要再点一次才出菜单”。触发点滚出视口才关。
+    let followFrame = 0
+    const followAnchor = (event: Event) => {
       const menu = menuRef.current
       if (menu && event.target instanceof Node && menu.contains(event.target)) return
-      onClose()
+      if (followFrame) return
+      followFrame = window.requestAnimationFrame(() => {
+        followFrame = 0
+        const anchor = measureAndPlace()
+        if (!anchor) return
+        const outside = anchor.bottom < 0
+          || anchor.top > window.innerHeight
+          || anchor.right < 0
+          || anchor.left > window.innerWidth
+        if (outside) onClose()
+      })
     }
     window.addEventListener('pointerdown', onPointerDown, true)
     window.addEventListener('keydown', onKeyDown, true)
-    window.addEventListener('resize', onDismiss)
-    window.addEventListener('scroll', onDismiss, true)
+    window.addEventListener('resize', followAnchor)
+    window.addEventListener('scroll', followAnchor, true)
     return () => {
+      if (followFrame) window.cancelAnimationFrame(followFrame)
       window.removeEventListener('pointerdown', onPointerDown, true)
       window.removeEventListener('keydown', onKeyDown, true)
-      window.removeEventListener('resize', onDismiss)
-      window.removeEventListener('scroll', onDismiss, true)
+      window.removeEventListener('resize', followAnchor)
+      window.removeEventListener('scroll', followAnchor, true)
     }
-  }, [onClose, request.trigger])
+  }, [measureAndPlace, onClose, request.trigger])
 
   return createPortal(
     <div

@@ -23,7 +23,7 @@ portal 到 body 的快速编辑器、插入菜单一起换肤）；`src/index.cs
 
 | 类别 | 来源令牌 | 使用方式 |
 | --- | --- | --- |
-| 主题预设 | classic 原版绿（默认，最初配色）、ice 冰湖青、azure 晴空蓝、mint 薄荷绿、lilac 晨雾紫、blush 樱花粉、custom | 右上角「配色」按钮切换；写入 localStorage 的 ladderlab.theme.v1，刷新后保留 |
+| 主题预设 | blush 樱花粉（默认）、classic 原版绿（最初配色）、ice 冰湖青、azure 晴空蓝、mint 薄荷绿、lilac 晨雾紫、custom | 右上角「配色」按钮切换；写入 localStorage 的 ladderlab.theme.v1，刷新后保留；已保存的偏好优先于默认值 |
 | 框架色 | --frame、--frame-ink、--ground、--workbench | 应用外框、导航边界、工作区底色，以及图纸两侧可扩展的加深带 |
 | 纸面色 | --surface、--raised、--active | 程序纸面、工具区和选中状态 |
 | 边界 | --border、--rule、--control | 框架分隔、纸面细线和可操作控件边界 |
