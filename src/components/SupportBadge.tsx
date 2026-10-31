@@ -24,6 +24,7 @@ const REPO_API = 'https://api.github.com/repos/wakeup595626-cmyk/ladderlab'
 // 收款码不是应用外壳，只有真正打开打赏面板时才需要。放在 public 下按 URL
 // 懒加载，避免 Service Worker 给每位访客预缓存近百 KB 的图片。
 const ALIPAY_QR_URL = `${import.meta.env.BASE_URL}support-alipay.png`
+const WECHAT_QR_URL = `${import.meta.env.BASE_URL}support-wechat.png`
 /** Star 数只是锦上添花：缓存六小时，拉不到就只留图标，不影响编辑。 */
 const STAR_CACHE_KEY = 'ladderlab.star-count'
 const STAR_CACHE_TTL = 6 * 60 * 60 * 1000
@@ -44,6 +45,7 @@ type Point = { x: number; y: number }
 type Anchor = { x: number; y: number }
 type Viewport = { width: number; height: number }
 type Insets = { gap: number; bottom: number }
+type PayMethod = 'wechat' | 'alipay'
 type DragState = {
   pointerId: number
   captureTarget: Element
@@ -55,6 +57,32 @@ type DragState = {
   moved: boolean
   threshold: number
   pointerType: string
+}
+
+const PAY_DETAILS: Record<PayMethod, {
+  label: string
+  src: string
+  alt: string
+  caption: string
+  width: number
+  height: number
+}> = {
+  wechat: {
+    label: '微信',
+    src: WECHAT_QR_URL,
+    alt: '微信收款二维码，收款人显示为「Wake up(**树)」',
+    caption: '打开微信「扫一扫」即可',
+    width: 640,
+    height: 715,
+  },
+  alipay: {
+    label: '支付宝',
+    src: ALIPAY_QR_URL,
+    alt: '支付宝收款二维码，收款人显示为「树」',
+    caption: '打开支付宝「扫一扫」即可',
+    width: 640,
+    height: 727,
+  },
 }
 
 const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max)
@@ -163,6 +191,8 @@ function formatStarCount(count: number): string {
  */
 export default function SupportBadge() {
   const [open, setOpen] = useState(false)
+  const [payMethod, setPayMethod] = useState<PayMethod>('wechat')
+  const [qrFailed, setQrFailed] = useState(false)
   const [stars, setStars] = useState<number | null>(readStarCount)
   const [anchor, setAnchor] = useState<Anchor>(() => readAnchor() ?? DEFAULT_ANCHOR)
   const [viewport, setViewport] = useState<Viewport>(readViewport)
@@ -231,6 +261,22 @@ export default function SupportBadge() {
     setOpen(false)
     if (restoreFocus) triggerRef.current?.focus()
   }, [])
+
+  const togglePanel = () => {
+    if (open) {
+      setOpen(false)
+      return
+    }
+    // 每次重新打开都回到微信，同时清掉上一轮可能出现的图片加载错误。
+    setPayMethod('wechat')
+    setQrFailed(false)
+    setOpen(true)
+  }
+
+  const choosePayMethod = (method: PayMethod) => {
+    setPayMethod(method)
+    setQrFailed(false)
+  }
 
   // 面板贴着浮标算位置：够高就往上翻，贴边就左右收，实在放不下才居中并允许内部滚动。
   useLayoutEffect(() => {
@@ -478,7 +524,7 @@ export default function SupportBadge() {
               event.preventDefault()
               return
             }
-            setOpen((value) => !value)
+            togglePanel()
           }}
         >
           <CoffeeIcon className="support-badge-icon" size={20} />
@@ -492,7 +538,7 @@ export default function SupportBadge() {
               event.preventDefault()
               return
             }
-            setOpen((value) => !value)
+            togglePanel()
           }}
         >
           请杯咖啡
@@ -529,15 +575,39 @@ export default function SupportBadge() {
           </p>
 
           <figure className="support-badge-scan">
-            <img
-              className="support-badge-qr"
-              src={ALIPAY_QR_URL}
-              alt="支付宝收款二维码，收款人显示为「树」"
-              width={640}
-              height={727}
-              draggable={false}
-            />
-            <figcaption>打开支付宝「扫一扫」即可</figcaption>
+            <div className="support-badge-pay" role="group" aria-label="选择收款方式">
+              {(Object.keys(PAY_DETAILS) as PayMethod[]).map((method) => (
+                <button
+                  key={method}
+                  type="button"
+                  className="support-badge-pay-option"
+                  aria-pressed={payMethod === method}
+                  onClick={() => choosePayMethod(method)}
+                >
+                  {PAY_DETAILS[method].label}
+                </button>
+              ))}
+            </div>
+            <div className="support-badge-qr-frame">
+              {qrFailed ? (
+                <p className="support-badge-qr-error" role="status">
+                  收款码加载失败，请刷新页面后重试
+                </p>
+              ) : (
+                <img
+                  key={payMethod}
+                  className="support-badge-qr"
+                  src={PAY_DETAILS[payMethod].src}
+                  alt={PAY_DETAILS[payMethod].alt}
+                  width={PAY_DETAILS[payMethod].width}
+                  height={PAY_DETAILS[payMethod].height}
+                  decoding="async"
+                  draggable={false}
+                  onError={() => setQrFailed(true)}
+                />
+              )}
+            </div>
+            <figcaption aria-live="polite">{PAY_DETAILS[payMethod].caption}</figcaption>
           </figure>
 
           <div className="support-badge-actions">

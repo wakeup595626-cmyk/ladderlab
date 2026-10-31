@@ -225,10 +225,10 @@ body:has([role='dialog'][aria-modal='true'], .qe-panel) .support-badge {
   text-wrap: pretty;
 }
 
-/* 二维码图片自带白色卡纸和蓝色描边，这里只做一块浅色托盘，避免再套一层边框。 */
+/* 二维码图片已经自带白色卡纸，这里只做一块浅色托盘，避免再套一层边框。 */
 .support-badge-scan {
   display: grid;
-  gap: 8px;
+  gap: 9px;
   justify-items: center;
   margin: 12px 0 0;
   padding: 12px 12px 10px;
@@ -236,13 +236,100 @@ body:has([role='dialog'][aria-modal='true'], .qe-panel) .support-badge {
   background: var(--raised);
 }
 
+.support-badge-pay {
+  display: grid;
+  width: 100%;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface);
+}
+
+.support-badge-pay-option {
+  min-width: 0;
+  min-height: 30px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    background-color var(--dur-quick) var(--ease-out),
+    border-color var(--dur-quick) var(--ease-out),
+    color var(--dur-quick) var(--ease-out),
+    box-shadow var(--dur-quick) var(--ease-out);
+}
+
+.support-badge-pay-option[aria-pressed='true'] {
+  border-color: color-mix(in srgb, var(--accent) 28%, var(--border));
+  background: var(--accent-wash);
+  color: var(--accent-ink);
+  box-shadow: 0 1px 2px rgba(21, 24, 22, 0.07);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .support-badge-pay-option:hover {
+    background: var(--active);
+    color: var(--frame-ink);
+  }
+
+  .support-badge-pay-option[aria-pressed='true']:hover {
+    border-color: color-mix(in srgb, var(--accent) 38%, var(--border));
+    background: var(--accent-wash);
+    color: var(--accent-ink);
+  }
+}
+
+.support-badge-pay-option:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.support-badge-qr-frame {
+  display: grid;
+  width: 168px;
+  height: 191px;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 7px;
+  background: #fff;
+}
+
 .support-badge-qr {
   display: block;
-  width: 168px;
-  max-width: 100%;
-  height: auto;
-  border-radius: 6px;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
   background: #fff;
+  animation: support-badge-qr-in 180ms var(--ease-out);
+}
+
+.support-badge-qr-error {
+  max-width: 136px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.55;
+  text-align: center;
+}
+
+@keyframes support-badge-qr-in {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 
 .support-badge-scan figcaption {
@@ -332,10 +419,18 @@ body:has([role='dialog'][aria-modal='true'], .qe-panel) .support-badge {
     --badge-gap: 8px;
     --badge-gap-bottom: calc(30px + 56px + 8px + env(safe-area-inset-bottom));
   }
+
+  .support-badge-pay-option {
+    min-height: 44px;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .support-badge-panel {
+    animation: none;
+  }
+
+  .support-badge-qr {
     animation: none;
   }
 

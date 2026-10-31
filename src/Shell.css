@@ -4465,6 +4465,15 @@ body[data-drag-kind] {
   }
 }
 
+/* 程序段导航是贴在图纸右侧的一条窄轨，桌面端把这段右内边留给它，
+   这样轨道始终落在空白里，不会压住程序段卡片右上角的「⋯」菜单。
+   只有出现导航（多于一个程序段）时才让出这段留白。 */
+@media (min-width: 721px) {
+  .wb-program-pane:has(.rung-nav) {
+    padding-right: 68px;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .wb-program-resizer::before,
   .wb-program-resizer-grip,
