@@ -143,7 +143,7 @@
   min-width: 0;
   flex: 1 1 auto;
   align-items: center;
-  gap: 7px;
+  gap: 8px;
 }
 
 .ll-rung-drag {
@@ -173,18 +173,26 @@
 }
 
 .ll-rung-marker {
-  width: 4px;
-  height: 18px;
+  width: 3px;
+  height: 20px;
   flex: 0 0 auto;
-  border-radius: 2px;
+  border-radius: 3px;
   background: var(--accent);
 }
 
 .ll-rung-index {
+  display: inline-flex;
+  height: 23px;
   flex: 0 0 auto;
-  color: var(--muted);
-  font: 600 12px/1.35 var(--sans);
+  align-items: center;
+  padding: 0 7px;
+  border: 1px solid color-mix(in srgb, var(--accent) 18%, var(--border));
+  border-radius: 5px;
+  background: var(--surface);
+  color: var(--accent-ink);
+  font: 650 11.5px/1 var(--sans);
   font-variant-numeric: tabular-nums;
+  letter-spacing: 0.012em;
   white-space: nowrap;
 }
 
@@ -202,7 +210,8 @@
   border-radius: var(--radius-control);
   background: transparent;
   color: var(--text);
-  font: 600 13px/1.4 var(--sans);
+  font: 640 13.5px/1.35 var(--sans);
+  letter-spacing: 0.004em;
   text-overflow: ellipsis;
 }
 

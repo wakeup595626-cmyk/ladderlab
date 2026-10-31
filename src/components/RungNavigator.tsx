@@ -121,6 +121,7 @@ export default function RungNavigator({ program, selection, paneRef, onSelect }:
         <button
           type="button"
           className="rung-nav-step"
+          data-step="previous"
           onClick={() => step(-1)}
           aria-label="上一程序段"
           title="上一程序段"
@@ -140,6 +141,7 @@ export default function RungNavigator({ program, selection, paneRef, onSelect }:
         <button
           type="button"
           className="rung-nav-step"
+          data-step="next"
           onClick={() => step(1)}
           aria-label="下一程序段"
           title="下一程序段"
