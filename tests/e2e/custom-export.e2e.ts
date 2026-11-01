@@ -66,8 +66,8 @@ test.describe('自定义工程导出验收', () => {
         kind: 'sfc',
         item: '顺序功能图',
         // 顺序功能图只写步骤号与动作/转移条件，不写「第 N 步」字样，也不
-        // 打印步骤位地址；两条转移信号按变量名出现：StartCycle、SkipRequest。
-        expected: ['0', '1', '2', '3', 'ConveyorRun', 'M5.0=1', 'AlarmLamp', 'M6.0=1', 'StartCycle', 'SkipRequest'],
+        // 打印步骤位地址。动作优先显示符号名，条件优先显示变量说明。
+        expected: ['0', '1', '2', '3', 'ConveyorRun', 'M3.0=1', 'AlarmLamp', 'M4.0=1', '启动按钮', '停止按钮'],
         exact: true,
       },
     ]

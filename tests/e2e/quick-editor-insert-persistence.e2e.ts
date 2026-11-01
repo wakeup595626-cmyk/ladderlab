@@ -9,6 +9,10 @@ function inlineInput(page: Page) {
   return page.locator('[data-inline-operand-editor] input[data-inline-input]')
 }
 
+function inlineAddressInput(page: Page) {
+  return page.locator('[data-inline-operand-editor] input[data-inline-address]')
+}
+
 async function openFirstSlotMenu(page: Page): Promise<void> {
   const slot = page.locator('.ll-rung').first().locator('.ll-slot').first()
   await slot.hover()
@@ -102,14 +106,16 @@ test('连续两次从画布加号插入，每次都聚焦新元件的操作数',
   await expect(inline).toBeVisible()
   const firstInserted = await inline.getAttribute('data-node-id')
   await expect(input).toBeFocused()
-  // 新插入的触点会拿到自动分配的位置地址（输入区或输出区），而不是空串。
-  await expect(input).toHaveValue(/^%[IQM]\d+\.\d$/)
+  // 操作数与地址现在是两个独立字段：自动选中的符号落在操作数，位地址落在地址栏。
+  await expect(input).toHaveValue(/\S+/)
+  await expect(inlineAddressInput(page)).toHaveValue(/^%[IQM]\d+\.\d$/)
 
   await insertFirstSlot(page, /常闭触点/)
   await expect(inline).toHaveCount(1)
   await expect(inline).toBeVisible()
   await expect(input).toBeFocused()
-  await expect(input).toHaveValue(/^%[IQM]\d+\.\d$/)
+  await expect(input).toHaveValue(/\S+/)
+  await expect(inlineAddressInput(page)).toHaveValue(/^%[IQM]\d+\.\d$/)
   expect(await inline.getAttribute('data-node-id')).not.toBe(firstInserted)
 
   expect(errors, errors.join('\n')).toEqual([])

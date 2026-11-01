@@ -4,7 +4,7 @@
   position: absolute;
   z-index: 26;
   display: flex;
-  width: min(302px, calc(100% - 16px));
+  width: min(344px, calc(100% - 16px));
   flex-direction: column;
   gap: 8px;
   padding: 10px 11px 9px;
@@ -134,8 +134,15 @@
 
 .inline-operand-field {
   display: flex;
+  min-width: 0;
   flex-direction: column;
   gap: 4px;
+}
+
+.inline-operand-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
+  gap: 8px;
 }
 
 .inline-operand-field > span {
@@ -165,53 +172,35 @@
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent);
 }
 
-.inline-operand.has-error .inline-operand-field input {
+.inline-operand-field input[aria-invalid='true'] {
   border-color: var(--negative);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--negative) 14%, transparent);
 }
 
+.inline-operand-field input:read-only {
+  background: color-mix(in srgb, var(--raised) 62%, transparent);
+  color: var(--muted);
+  cursor: default;
+}
+
 .inline-operand-hint {
-  min-height: 15px;
   margin: 0;
   color: var(--faint);
   font-size: 10px;
   line-height: 1.45;
 }
 
-.inline-operand-error,
-.inline-operand-warn {
+.inline-operand-error {
   color: var(--negative);
   font-weight: 500;
-}
-
-.inline-operand-warn {
-  color: var(--warning);
 }
 
 .inline-operand-foot {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
+  justify-content: flex-end;
   padding-top: 7px;
   border-top: 1px solid var(--rule);
-}
-
-.inline-operand-keys {
-  color: var(--faint);
-  font-size: 9.5px;
-  white-space: nowrap;
-}
-
-.inline-operand-keys kbd {
-  padding: 1px 4px;
-  border: 1px solid var(--border);
-  border-bottom-width: 2px;
-  border-radius: 4px;
-  background: var(--raised);
-  color: var(--muted);
-  font-family: var(--mono);
-  font-size: 9px;
 }
 
 .inline-operand-more {
@@ -261,6 +250,8 @@
     max-height: 42dvh;
     overflow-y: auto;
     visibility: visible;
+    opacity: 1;
+    pointer-events: auto;
   }
 
   .inline-operand::after {
@@ -269,6 +260,12 @@
 
   .inline-operand-head {
     cursor: default;
+  }
+}
+
+@media (max-width: 360px) {
+  .inline-operand-fields {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 

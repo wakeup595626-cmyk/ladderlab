@@ -5,7 +5,6 @@ import {
   useId,
   useImperativeHandle,
   useLayoutEffect,
-  useMemo,
   useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
@@ -14,7 +13,8 @@ import {
 import type { ContactKind, OutputKind, Program, Selection } from '../engine/types'
 import { getNodeAtPath } from '../state/programOps'
 import {
-  commitInlineOperand,
+  boundTagOf,
+  commitInlineOperandFields,
   inlineEditTarget,
   operandDisplay,
   operandKindOf,
@@ -30,6 +30,7 @@ import {
   readInlineEditorPlacement,
 } from '../lib/quickEditorPlacement'
 import type { QuickEditorBox, QuickEditorPoint } from '../lib/quickEditorPlacement'
+import { FIELD_LIMITS } from '../lib/limits'
 import { CloseIcon, GripIcon } from './Icons'
 import './InlineOperandEditor.css'
 
@@ -194,8 +195,23 @@ const InlineOperandEditor = forwardRef<InlineOperandEditorHandle, InlineOperandE
       : null
     const contact = node?.type === 'contact' ? node : null
     const expectedKind = target ? operandKindOf(program, selection.rungId, target) : null
+    const boundTag = target ? boundTagOf(program, selection.rungId, target) : null
     const currentReference = contact?.tag ?? (target?.kind === 'output' ? rung?.output.tag ?? '' : '')
-    const currentOperand = operandDisplay(program, currentReference) || currentReference
+    const parsedReference = currentReference && expectedKind
+      ? parseOperandInput(currentReference, expectedKind)
+      : null
+    const currentOperand = boundTag?.name
+      ?? (parsedReference?.kind === 'symbol' ? parsedReference.symbol : '')
+    const currentAddress = expectedKind === 'INSTANCE'
+      ? ''
+      : boundTag?.address
+        ?? (parsedReference?.kind === 'address'
+          ? parsedReference.address
+          : currentReference.includes('.') ? operandDisplay(program, currentReference) : '')
+    // 只有 T1.Q、Motor.1 这类符号派生引用没有独立地址；
+    // %M0.0 本身含小数点，仍然是可直接编辑的 PLC 地址。
+    const addressEditable = expectedKind !== 'INSTANCE'
+      && !(parsedReference?.kind === 'symbol' && parsedReference.symbol.includes('.'))
     const selectionKey = `${selection.rungId}:${selection.path?.join('.') ?? 'output'}`
     const title = contact
       ? CONTACT_NAMES[contact.kind]
@@ -209,24 +225,27 @@ const InlineOperandEditor = forwardRef<InlineOperandEditorHandle, InlineOperandE
         : expectedKind === 'BOOL'
           ? 'BOOL'
           : '只读'
-    const placeholder = expectedKind === 'INSTANCE'
+    const operandPlaceholder = expectedKind === 'INSTANCE'
       ? '例如 T1'
-      : expectedKind === 'INT'
-        ? '例如 MW10'
-        : '例如 m0.0 或 Motor'
+      : '变量名'
+    const addressPlaceholder = expectedKind === 'INT' ? '例如 MW10' : '例如 M0.0'
 
     const panelRef = useRef<HTMLDivElement>(null)
-    const inputRef = useRef<HTMLInputElement>(null)
+    const operandInputRef = useRef<HTMLInputElement>(null)
+    const addressInputRef = useRef<HTMLInputElement>(null)
     const dragRef = useRef<DragSession | null>(null)
     const pointRef = useRef<QuickEditorPoint | null>(null)
     const positionFrameRef = useRef(0)
-    const dirtyRef = useRef(false)
+    const operandDirtyRef = useRef(false)
+    const addressDirtyRef = useRef(false)
     const composingRef = useRef(false)
     const resetTargetRef = useRef('')
     const hintId = useId()
-    const inputId = useId()
-    const [draft, setDraft] = useState(currentOperand)
-    const [error, setError] = useState('')
+    const operandId = useId()
+    const addressId = useId()
+    const [draftOperand, setDraftOperand] = useState(currentOperand)
+    const [draftAddress, setDraftAddress] = useState(currentAddress)
+    const [error, setError] = useState<{ message: string; field: InlineOperandFocus } | null>(null)
     const [manualPoint, setManualPoint] = useState<QuickEditorPoint | null>(() => {
       try {
         return readInlineEditorPlacement(quickEditorStorage())
@@ -238,22 +257,6 @@ const InlineOperandEditor = forwardRef<InlineOperandEditorHandle, InlineOperandE
     const [position, setPosition] = useState<PositionedPanel | null>(null)
     const [dragging, setDragging] = useState(false)
 
-    const parsedDraft = useMemo(
-      () => (expectedKind ? parseOperandInput(draft, expectedKind) : null),
-      [draft, expectedKind],
-    )
-
-    const normalizedHint = useMemo(() => {
-      if (!parsedDraft || parsedDraft.kind === 'invalid') return ''
-      if (parsedDraft.kind === 'address') {
-        return parsedDraft.address === draft ? '' : `回车后规范为 ${parsedDraft.address}`
-      }
-      if (parsedDraft.kind === 'empty') {
-        return target?.kind === 'output' ? '留空会清空当前输出操作数' : '操作数不能为空'
-      }
-      return parsedDraft.symbol === draft ? '' : `符号名将保存为 ${parsedDraft.symbol}`
-    }, [draft, parsedDraft, target])
-
     useEffect(() => {
       manualPointRef.current = manualPoint
     }, [manualPoint])
@@ -261,19 +264,27 @@ const InlineOperandEditor = forwardRef<InlineOperandEditorHandle, InlineOperandE
     // 换元件时重置草稿；同一元件被程序更新（例如撤销）时，只有未改动的输入才跟随。
     useEffect(() => {
       if (resetTargetRef.current === selectionKey) {
-        if (!dirtyRef.current) setDraft(currentOperand)
+        if (!operandDirtyRef.current) setDraftOperand(currentOperand)
+        if (!addressDirtyRef.current) setDraftAddress(currentAddress)
         return
       }
       resetTargetRef.current = selectionKey
-      dirtyRef.current = false
-      setDraft(currentOperand)
-      setError('')
-    }, [currentOperand, selectionKey])
+      operandDirtyRef.current = false
+      addressDirtyRef.current = false
+      setDraftOperand(currentOperand)
+      setDraftAddress(currentAddress)
+      setError(null)
+    }, [currentAddress, currentOperand, selectionKey])
 
     useEffect(() => {
-      const frame = window.requestAnimationFrame(() => focusAndSelect(inputRef.current))
+      const frame = window.requestAnimationFrame(() => {
+        const preferred = focusTarget === 'address' && addressEditable
+          ? addressInputRef.current
+          : operandInputRef.current
+        focusAndSelect(preferred)
+      })
       return () => window.cancelAnimationFrame(frame)
-    }, [selectionKey, token])
+    }, [addressEditable, focusTarget, selectionKey, token])
 
     const reposition = useCallback(() => {
       const panel = panelRef.current
@@ -514,19 +525,41 @@ const InlineOperandEditor = forwardRef<InlineOperandEditorHandle, InlineOperandE
         onClose()
         return false
       }
-      const result = commitInlineOperand(program, selection.rungId, target, draft)
+      const result = commitInlineOperandFields(program, selection.rungId, target, {
+        operand: draftOperand,
+        address: draftAddress,
+        operandChanged: operandDirtyRef.current,
+        addressChanged: addressEditable && addressDirtyRef.current,
+      })
       if (!result.ok) {
-        setError(result.error)
-        window.requestAnimationFrame(() => focusAndSelect(inputRef.current))
+        const field = result.field ?? 'operand'
+        setError({ message: result.error, field })
+        window.requestAnimationFrame(() => {
+          focusAndSelect(field === 'address' && addressEditable
+            ? addressInputRef.current
+            : operandInputRef.current)
+        })
         return false
       }
-      setError('')
-      dirtyRef.current = false
+      setError(null)
+      operandDirtyRef.current = false
+      addressDirtyRef.current = false
       onProgram(result.program)
       onNotify(result.note)
       onClose()
       return true
-    }, [draft, expectedKind, onClose, onNotify, onProgram, program, selection.rungId, target])
+    }, [
+      addressEditable,
+      draftAddress,
+      draftOperand,
+      expectedKind,
+      onClose,
+      onNotify,
+      onProgram,
+      program,
+      selection.rungId,
+      target,
+    ])
 
     useImperativeHandle(ref, () => ({ submit }), [submit])
 
@@ -555,10 +588,7 @@ const InlineOperandEditor = forwardRef<InlineOperandEditorHandle, InlineOperandE
 
     if (!target || !expectedKind) return null
 
-    const warning = parsedDraft?.kind === 'empty' && target.kind === 'contact'
-      ? '操作数不能留空；可以直接输入变量名或地址。'
-      : ''
-    const titleId = `${inputId}-title`
+    const titleId = `${operandId}-title`
     const panelSide = position?.side ?? null
 
     return (
@@ -611,47 +641,81 @@ const InlineOperandEditor = forwardRef<InlineOperandEditorHandle, InlineOperandE
           </button>
         </header>
 
-        <label className="inline-operand-field">
-          <span>操作数或地址</span>
-          <input
-            id={inputId}
-            ref={inputRef}
-            type="text"
-            role="textbox"
-            data-inline-input="true"
-            value={draft}
-            placeholder={placeholder}
-            autoComplete="off"
-            autoCapitalize="off"
-            spellCheck={false}
-            aria-invalid={error ? true : undefined}
-            aria-describedby={hintId}
-            onChange={(event) => {
-              dirtyRef.current = true
-              setDraft(event.target.value)
-              if (error) setError('')
-            }}
-            onCompositionStart={() => {
-              composingRef.current = true
-            }}
-            onCompositionEnd={() => {
-              composingRef.current = false
-            }}
-          />
-        </label>
+        <div className="inline-operand-fields">
+          <label className="inline-operand-field" htmlFor={operandId}>
+            <span>操作数</span>
+            <input
+              id={operandId}
+              ref={operandInputRef}
+              type="text"
+              role="textbox"
+              data-inline-input="true"
+              data-inline-field="operand"
+              value={draftOperand}
+              maxLength={FIELD_LIMITS.tagName}
+              placeholder={operandPlaceholder}
+              autoComplete="off"
+              autoCapitalize="off"
+              spellCheck={false}
+              aria-invalid={error?.field === 'operand' ? true : undefined}
+              aria-describedby={error?.field === 'operand' ? hintId : undefined}
+              onChange={(event) => {
+                operandDirtyRef.current = true
+                setDraftOperand(event.target.value)
+                if (error?.field === 'operand') setError(null)
+              }}
+              onCompositionStart={() => {
+                composingRef.current = true
+              }}
+              onCompositionEnd={() => {
+                composingRef.current = false
+              }}
+            />
+          </label>
 
-        <p className="inline-operand-hint" id={hintId} aria-live="polite">
-          {error
-            ? <span className="inline-operand-error" role="alert">{error}</span>
-            : warning
-              ? <span className="inline-operand-warn">{warning}</span>
-              : normalizedHint || '输入 %M0.0、m0.0、MW10 或变量名；保存时自动规范化。'}
-        </p>
+          {expectedKind !== 'INSTANCE' && (
+            <label className="inline-operand-field" htmlFor={addressId}>
+              <span>地址</span>
+              <input
+                id={addressId}
+                ref={addressInputRef}
+                type="text"
+                role="textbox"
+                data-inline-address="true"
+                data-inline-field="address"
+                value={draftAddress}
+                maxLength={FIELD_LIMITS.address}
+                placeholder={addressPlaceholder}
+                autoComplete="off"
+                autoCapitalize="off"
+                spellCheck={false}
+                readOnly={!addressEditable}
+                aria-readonly={!addressEditable || undefined}
+                aria-invalid={error?.field === 'address' ? true : undefined}
+                aria-describedby={error?.field === 'address' ? hintId : undefined}
+                onChange={(event) => {
+                  addressDirtyRef.current = true
+                  setDraftAddress(event.target.value)
+                  if (error?.field === 'address') setError(null)
+                }}
+                onCompositionStart={() => {
+                  composingRef.current = true
+                }}
+                onCompositionEnd={() => {
+                  composingRef.current = false
+                }}
+              />
+            </label>
+          )}
+        </div>
+
+        {error && (
+          <p className="inline-operand-hint" id={hintId} aria-live="polite">
+            <span className="inline-operand-error" role="alert">{error.message}</span>
+          </p>
+        )}
 
         <footer className="inline-operand-foot">
-          <span className="inline-operand-keys">
-            <kbd>Enter</kbd> 确认 · <kbd>Esc</kbd> 取消
-          </span>
           <button
             type="button"
             className="inline-operand-more"

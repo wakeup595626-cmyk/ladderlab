@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import { starterProgram } from '../engine/samples'
-import { changeOutputKind } from '../state/programOps'
-import { commitOperandInput, operandDisplay, operandKindOf } from './operandCommit'
+import { changeOutputKind, updateContact } from '../state/programOps'
+import {
+  commitInlineOperandFields,
+  commitOperandInput,
+  operandDisplay,
+  operandKindOf,
+} from './operandCommit'
 
 function contactTag(program: ReturnType<typeof starterProgram>, path: number[]): string {
   const node = program.rungs[0].nodes[path[0]]
@@ -139,5 +144,159 @@ describe('operandKindOf', () => {
     expect(operandKindOf(timer, rungId, { kind: 'output' })).toBe('INSTANCE')
     const move = changeOutputKind(program, rungId, 'MOVE')
     expect(operandKindOf(move, rungId, { kind: 'output' })).toBe('INT')
+  })
+})
+
+describe('commitInlineOperandFields', () => {
+  it('只改操作数时保留原地址', () => {
+    const program = starterProgram()
+    const rungId = program.rungs[0].id
+    const result = commitInlineOperandFields(program, rungId, { kind: 'contact', path: [0] }, {
+      operand: 'RunLamp',
+      address: '%I0.0',
+      operandChanged: true,
+      addressChanged: false,
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(contactTag(result.program, [0])).toBe('RunLamp')
+    expect(result.program.tags.find((tag) => tag.name === 'RunLamp')?.address).toBe('%I0.0')
+  })
+
+  it('只改地址时规范成 %M99.6 并保留变量名', () => {
+    const program = starterProgram()
+    const rungId = program.rungs[0].id
+    const result = commitInlineOperandFields(program, rungId, { kind: 'contact', path: [0] }, {
+      operand: 'StartBtn',
+      address: ' m99.6 ',
+      operandChanged: false,
+      addressChanged: true,
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(contactTag(result.program, [0])).toBe('StartBtn')
+    expect(result.program.tags.find((tag) => tag.name === 'StartBtn')?.address).toBe('%M99.6')
+  })
+
+  it('同时修改操作数和地址时一次性写入', () => {
+    const program = starterProgram()
+    const rungId = program.rungs[0].id
+    const result = commitInlineOperandFields(program, rungId, { kind: 'contact', path: [0] }, {
+      operand: 'Conveyor',
+      address: 'm120.4',
+      operandChanged: true,
+      addressChanged: true,
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(contactTag(result.program, [0])).toBe('Conveyor')
+    expect(result.program.tags.find((tag) => tag.name === 'Conveyor')?.address).toBe('%M120.4')
+  })
+
+  it('地址冲突时聚焦地址字段且不产生半截修改', () => {
+    const program = starterProgram()
+    const rungId = program.rungs[0].id
+    const result = commitInlineOperandFields(program, rungId, { kind: 'contact', path: [1] }, {
+      operand: 'StopBtn',
+      address: '%I0.0',
+      operandChanged: false,
+      addressChanged: true,
+    })
+
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.field).toBe('address')
+    expect(result.error).toMatch(/占用|冲突/)
+    expect(program.tags.find((tag) => tag.name === 'StopBtn')?.address).toBe('%I0.1')
+    expect(contactTag(program, [1])).toBe('StopBtn')
+  })
+
+  it('改绑到已有变量时复用变量且不重复建表项', () => {
+    const program = starterProgram()
+    const rungId = program.rungs[0].id
+    const result = commitInlineOperandFields(program, rungId, { kind: 'contact', path: [0] }, {
+      operand: 'StopBtn',
+      address: '%I0.0',
+      operandChanged: true,
+      addressChanged: false,
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(contactTag(result.program, [0])).toBe('StopBtn')
+    expect(result.program.tags).toHaveLength(program.tags.length)
+  })
+
+  it('定时器实例只改实例名，不写地址', () => {
+    const program = starterProgram()
+    const rungId = program.rungs[0].id
+    const timer = changeOutputKind(program, rungId, 'TON')
+    const result = commitInlineOperandFields(timer, rungId, { kind: 'output' }, {
+      operand: 'T9',
+      address: '',
+      operandChanged: true,
+      addressChanged: false,
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.program.rungs[0].output.tag).toBe('T9')
+  })
+
+  it('未绑定元件可同时填写新操作数与地址', () => {
+    const source = starterProgram()
+    const rungId = source.rungs[0].id
+    const program = updateContact(source, rungId, [0], { tag: '' })
+    const result = commitInlineOperandFields(program, rungId, { kind: 'contact', path: [0] }, {
+      operand: 'Pump',
+      address: 'm130.7',
+      operandChanged: true,
+      addressChanged: true,
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(contactTag(result.program, [0])).toBe('Pump')
+    expect(result.program.tags.find((tag) => tag.name === 'Pump')?.address).toBe('%M130.7')
+    expect(result.program.tags).toHaveLength(program.tags.length + 1)
+  })
+
+  it('派生引用不能单独修改地址', () => {
+    const source = starterProgram()
+    const rungId = source.rungs[0].id
+    const program = updateContact(source, rungId, [0], { tag: 'T1.Q' })
+    const result = commitInlineOperandFields(program, rungId, { kind: 'contact', path: [0] }, {
+      operand: 'T1.Q',
+      address: '%M140.0',
+      operandChanged: false,
+      addressChanged: true,
+    })
+
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.field).toBe('address')
+    expect(result.error).toMatch(/派生操作数/)
+  })
+
+  it('未绑定的直接地址仍可修改地址，不会被误判为派生引用', () => {
+    const source = starterProgram()
+    const rungId = source.rungs[0].id
+    const program = updateContact(source, rungId, [0], { tag: '%M0.0' })
+    const result = commitInlineOperandFields(program, rungId, { kind: 'contact', path: [0] }, {
+      operand: '',
+      address: 'm150.2',
+      operandChanged: false,
+      addressChanged: true,
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    const reference = contactTag(result.program, [0])
+    expect(reference).not.toBe('%M0.0')
+    expect(result.program.tags.find((tag) => tag.name === reference)?.address).toBe('%M150.2')
+    expect(operandDisplay(result.program, reference)).toBe('%M150.2')
   })
 })

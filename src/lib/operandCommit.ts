@@ -10,6 +10,7 @@ import {
 } from '../state/programOps'
 import { parseOperandInput } from './operandInput'
 import type { OperandInputKind } from './operandInput'
+import { FIELD_LIMITS } from './limits'
 
 /** 一个操作数编辑目标：序号触点（按树路径定位）或程序段输出。 */
 export type OperandEditTarget =
@@ -18,7 +19,15 @@ export type OperandEditTarget =
 
 export type OperandCommitResult =
   | { ok: true; program: Program; operand: string; note: string }
-  | { ok: false; error: string }
+  | { ok: false; error: string; field?: 'operand' | 'address' }
+
+/** 画布气泡里两根字段各自的提交状态；未动过的字段不会被预填值误写回去。 */
+export interface InlineOperandFieldsInput {
+  operand: string
+  address: string
+  operandChanged: boolean
+  addressChanged: boolean
+}
 
 const INSTANCE_KINDS: ReadonlySet<OutputKind> = new Set<OutputKind>(['TON', 'TOF', 'TONR', 'CTU'])
 const INTEGER_KINDS: ReadonlySet<OutputKind> = new Set<OutputKind>([
@@ -102,8 +111,31 @@ export function inlineEditTarget(program: Program, selection: Selection): Operan
     : null
 }
 
-function fail(error: string): OperandCommitResult {
-  return { ok: false, error }
+function fail(error: string, field?: 'operand' | 'address'): OperandCommitResult {
+  return field ? { ok: false, error, field } : { ok: false, error }
+}
+
+function referenceOf(
+  program: Program,
+  rungId: string,
+  target: OperandEditTarget,
+): string {
+  const rung = program.rungs.find((item) => item.id === rungId)
+  if (!rung) return ''
+  if (target.kind === 'output') return rung.output.tag
+  const node = getNodeAtPath(program, rungId, target.path)
+  return node?.type === 'contact' ? node.tag : ''
+}
+
+function writeReference(
+  program: Program,
+  rungId: string,
+  target: OperandEditTarget,
+  reference: string,
+): Program {
+  return target.kind === 'output'
+    ? updateOutput(program, rungId, { tag: reference })
+    : updateContact(program, rungId, target.path, { tag: reference })
 }
 
 type BindResult =
@@ -236,4 +268,293 @@ export function commitInlineOperand(
   }
 
   return commitOperandInput(program, rungId, target, raw, kind)
+}
+
+/**
+ * 画布气泡的双字段提交：操作数负责变量名，地址负责同一个变量的 PLC 地址。
+ * 两个字段都留空时保持原样；出错时不产生半截修改，并把焦点交还对应输入框。
+ */
+export function commitInlineOperandFields(
+  program: Program,
+  rungId: string,
+  target: OperandEditTarget,
+  fields: InlineOperandFieldsInput,
+): OperandCommitResult {
+  const kind = operandKindOf(program, rungId, target)
+  if (!kind) return fail('找不到要编辑的元件，请重新点选。')
+
+  const isOutput = target.kind === 'output'
+  const bound = boundTagOf(program, rungId, target)
+  const currentReference = referenceOf(program, rungId, target)
+
+  if (!fields.operandChanged && !fields.addressChanged) {
+    return {
+      ok: true,
+      program,
+      operand: bound?.name ?? currentReference,
+      note: '操作数未变化',
+    }
+  }
+
+  if (kind === 'INSTANCE') {
+    if (!fields.operandChanged) {
+      return {
+        ok: true,
+        program,
+        operand: currentReference,
+        note: '实例名未变化',
+      }
+    }
+    const result = commitOperandInput(program, rungId, target, fields.operand, kind)
+    return result.ok ? result : fail(result.error, 'operand')
+  }
+
+  let nextAddress = ''
+  if (fields.addressChanged) {
+    const parsedAddress = parseOperandInput(fields.address, kind)
+    if (parsedAddress.kind === 'empty') return fail('地址不能为空。', 'address')
+    if (parsedAddress.kind === 'invalid') return fail(parsedAddress.error, 'address')
+    if (parsedAddress.kind !== 'address') {
+      return fail('地址栏要填写 M4.0、%M4.0 或 MW10 这样的 PLC 地址。', 'address')
+    }
+    nextAddress = parsedAddress.address
+  }
+
+  const parsedOperand = fields.operandChanged
+    ? parseOperandInput(fields.operand, kind)
+    : null
+  if (parsedOperand?.kind === 'invalid') return fail(parsedOperand.error, 'operand')
+
+  // 操作数框仍兼容直接输入地址：这是旧版气泡的快捷路径，也方便键盘连续录入。
+  if (parsedOperand?.kind === 'address') {
+    if (fields.addressChanged && nextAddress !== parsedOperand.address) {
+      return fail('操作数栏和地址栏填写了不同的地址，请统一后再提交。', 'operand')
+    }
+    if (!bound) {
+      const result = commitOperandInput(program, rungId, target, parsedOperand.address, kind)
+      return result.ok ? result : fail(result.error, 'operand')
+    }
+    if (bound.address === parsedOperand.address) {
+      return {
+        ok: true,
+        program,
+        operand: parsedOperand.address,
+        note: '操作数未变化',
+      }
+    }
+    const problem = tagAddressProblem(program, bound.id, parsedOperand.address)
+    if (problem) return fail(problem, 'address')
+    const updated = updateTag(program, bound.id, { address: parsedOperand.address })
+    if (updated === program) return fail('地址没有写入，请检查格式或是否与现有变量冲突。', 'address')
+    return {
+      ok: true,
+      program: updated,
+      operand: parsedOperand.address,
+      note: `地址已改为 ${parsedOperand.address}，所有引用同步更新`,
+    }
+  }
+
+  if (parsedOperand?.kind === 'empty') {
+    if (!isOutput) return fail('操作数不能为空，请输入变量名或地址。', 'operand')
+    if (fields.addressChanged) return fail('清空输出操作数时不要同时修改地址。', 'address')
+    return {
+      ok: true,
+      program: updateOutput(program, rungId, { tag: '' }),
+      operand: '',
+      note: '已清空输出操作数',
+    }
+  }
+
+  const symbol = parsedOperand?.kind === 'symbol' ? parsedOperand.symbol : ''
+
+  if (bound) {
+    if (!parsedOperand) {
+      if (bound.address === nextAddress) {
+        return { ok: true, program, operand: bound.name, note: '操作数未变化' }
+      }
+      const problem = tagAddressProblem(program, bound.id, nextAddress)
+      if (problem) return fail(problem, 'address')
+      const updated = updateTag(program, bound.id, { address: nextAddress })
+      if (updated === program) {
+        return fail('地址没有写入，请检查格式或是否与现有变量冲突。', 'address')
+      }
+      return {
+        ok: true,
+        program: updated,
+        operand: nextAddress,
+        note: `地址已改为 ${nextAddress}，所有引用同步更新`,
+      }
+    }
+
+    if (symbol === bound.name) {
+      if (!fields.addressChanged) {
+        return { ok: true, program, operand: bound.name, note: '操作数未变化' }
+      }
+      const problem = tagAddressProblem(program, bound.id, nextAddress)
+      if (problem) return fail(problem, 'address')
+      const updated = updateTag(program, bound.id, { address: nextAddress })
+      if (updated === program) {
+        return fail('地址没有写入，请检查格式或是否与现有变量冲突。', 'address')
+      }
+      return {
+        ok: true,
+        program: updated,
+        operand: nextAddress,
+        note: `地址已改为 ${nextAddress}，所有引用同步更新`,
+      }
+    }
+
+    const existing = program.tags.find((tag) => tag.name === symbol)
+    if (existing && existing.id !== bound.id) {
+      if (existing.kind !== kind) {
+        return fail(`“${existing.name}”是 ${existing.kind} 变量，不能当作 ${kind} 操作数使用。`, 'operand')
+      }
+      if (fields.addressChanged && existing.address !== nextAddress) {
+        const problem = tagAddressProblem(program, existing.id, nextAddress)
+        if (problem) return fail(problem, 'address')
+        const updated = updateTag(program, existing.id, { address: nextAddress })
+        if (updated === program) {
+          return fail('地址没有写入，请检查格式或是否与现有变量冲突。', 'address')
+        }
+        const rebound = writeReference(updated, rungId, target, existing.name)
+        return {
+          ok: true,
+          program: rebound,
+          operand: existing.name,
+          note: `已绑定 ${existing.name}，地址改为 ${nextAddress}`,
+        }
+      }
+      const rebound = writeReference(program, rungId, target, existing.name)
+      return {
+        ok: true,
+        program: rebound,
+        operand: existing.name,
+        note: `已绑定 ${existing.name}`,
+      }
+    }
+
+    if (symbol.includes('.')) {
+      if (fields.addressChanged) {
+        return fail('派生操作数没有独立地址；请改为基础变量名后再修改地址。', 'address')
+      }
+      const checked = bindSymbol(program, kind, symbol)
+      if (!checked.ok) return fail(checked.error, 'operand')
+      return {
+        ok: true,
+        program: writeReference(checked.program, rungId, target, symbol),
+        operand: symbol,
+        note: `已绑定 ${symbol}`,
+      }
+    }
+
+    if (!symbol.trim() || symbol.length > FIELD_LIMITS.tagName) {
+      return fail(`操作数名称不能为空，且最多 ${FIELD_LIMITS.tagName} 个字符。`, 'operand')
+    }
+    if (fields.addressChanged) {
+      const problem = tagAddressProblem(program, bound.id, nextAddress)
+      if (problem) return fail(problem, 'address')
+    }
+    const updated = updateTag(program, bound.id, {
+      name: symbol,
+      ...(fields.addressChanged ? { address: nextAddress } : {}),
+    })
+    if (updated === program) {
+      return fail('操作数没有写入，请换一个变量名或检查地址冲突。', 'operand')
+    }
+    return {
+      ok: true,
+      program: updated,
+      operand: symbol,
+      note: fields.addressChanged
+        ? `已把变量重命名为 ${symbol}，地址改为 ${nextAddress}`
+        : `已把变量重命名为 ${symbol}`,
+    }
+  }
+
+  // 以下处理元件尚未绑定变量（空操作数、派生引用或旧工程遗留引用）。
+  if (parsedOperand?.kind === 'symbol') {
+    if (symbol.includes('.') && fields.addressChanged) {
+      return fail('派生操作数没有独立地址；请改为基础变量名后再修改地址。', 'address')
+    }
+
+    const existing = program.tags.find((tag) => tag.name === symbol)
+    if (existing) {
+      if (existing.kind !== kind) {
+        return fail(`“${existing.name}”是 ${existing.kind} 变量，不能当作 ${kind} 操作数使用。`, 'operand')
+      }
+      if (fields.addressChanged && existing.address !== nextAddress) {
+        const problem = tagAddressProblem(program, existing.id, nextAddress)
+        if (problem) return fail(problem, 'address')
+        const updated = updateTag(program, existing.id, { address: nextAddress })
+        if (updated === program) {
+          return fail('地址没有写入，请检查格式或是否与现有变量冲突。', 'address')
+        }
+        return {
+          ok: true,
+          program: writeReference(updated, rungId, target, existing.name),
+          operand: existing.name,
+          note: `已绑定 ${existing.name}，地址改为 ${nextAddress}`,
+        }
+      }
+      return {
+        ok: true,
+        program: writeReference(program, rungId, target, existing.name),
+        operand: existing.name,
+        note: `已绑定 ${existing.name}`,
+      }
+    }
+
+    if (fields.addressChanged) {
+      if (!symbol.trim() || symbol.length > FIELD_LIMITS.tagName) {
+        return fail(`操作数名称不能为空，且最多 ${FIELD_LIMITS.tagName} 个字符。`, 'operand')
+      }
+      const addressed = ensureAddressTag(program, nextAddress, kind)
+      if ('error' in addressed) return fail(addressed.error, 'address')
+      const existed = program.tags.some((tag) => tag.id === addressed.tag.id)
+      if (existed) {
+        return fail(
+          `地址 ${nextAddress} 已被变量“${addressed.tag.name}”占用；请直接使用该变量名或换一个地址。`,
+          'address',
+        )
+      }
+      const renamed = updateTag(addressed.program, addressed.tag.id, { name: symbol })
+      if (renamed === addressed.program) {
+        return fail(`无法新建变量“${symbol}”，请换一个名字。`, 'operand')
+      }
+      return {
+        ok: true,
+        program: writeReference(renamed, rungId, target, symbol),
+        operand: symbol,
+        note: `已建立变量 ${symbol}（${nextAddress}）`,
+      }
+    }
+
+    const result = commitOperandInput(program, rungId, target, symbol, kind)
+    return result.ok ? result : fail(result.error, 'operand')
+  }
+
+  const currentParsed = parseOperandInput(currentReference, kind)
+  const currentIsDerived = currentParsed.kind === 'symbol' && currentParsed.symbol.includes('.')
+  if (!currentIsDerived) {
+    const addressed = ensureAddressTag(program, nextAddress, kind)
+    if ('error' in addressed) return fail(addressed.error, 'address')
+    const existed = program.tags.some((tag) => tag.id === addressed.tag.id)
+    let updated = addressed.program
+    let reference = addressed.tag.name
+    if (!existed && currentParsed.kind === 'symbol') {
+      const renamed = updateTag(updated, addressed.tag.id, { name: currentReference })
+      if (renamed !== updated) {
+        updated = renamed
+        reference = currentReference
+      }
+    }
+    return {
+      ok: true,
+      program: writeReference(updated, rungId, target, reference),
+      operand: reference,
+      note: `已绑定 ${reference}（${nextAddress}）`,
+    }
+  }
+
+  return fail('派生操作数没有独立地址；请先填写基础变量名再修改地址。', 'address')
 }

@@ -9,11 +9,16 @@ function inlineInput(page: Page) {
   return inlineEditor(page).locator('input[data-inline-input]')
 }
 
+function inlineAddress(page: Page) {
+  return inlineEditor(page).locator('input[data-inline-address]')
+}
+
 async function openFirstContact(page: Page) {
   const contact = page.locator('.ll-node[data-node-id]').first()
   await contact.click()
   const inline = inlineEditor(page)
   await expect(inline).toBeVisible()
+  await expect.poll(() => inline.evaluate((element) => getComputedStyle(element).opacity)).toBe('1')
   await expect(inlineInput(page)).toBeFocused()
   return contact
 }
@@ -57,7 +62,58 @@ test('单击元件只打开就地操作数，完整参数保持关闭且画布�
   expect(errors, errors.join('\n')).toEqual([])
 })
 
-test('操作数地址自动规范为百分号大写且回车提交后刷新仍保留', async ({ page }) => {
+test('就地气泡同时显示操作数与地址，不显示常驻说明文字', async ({ page }) => {
+  const errors = trackPageErrors(page)
+  await openHome(page)
+  await loadCourseExperiment(page, '02 定时器与计数器')
+
+  await openFirstContact(page)
+  const inline = inlineEditor(page)
+  await expect(inline.getByText('操作数', { exact: true })).toBeVisible()
+  await expect(inline.getByText('地址', { exact: true })).toBeVisible()
+  await expect(inlineInput(page)).toHaveValue(/\S+/)
+  await expect(inlineAddress(page)).toHaveValue(/^%[IQM]/)
+  await expect(inline.getByRole('button', { name: '更多参数' })).toBeVisible()
+  await expect(inline).not.toContainText('Enter')
+  await expect(inline).not.toContainText('Esc')
+  await expect(inline).not.toContainText('保存时自动规范化')
+  await expect(inline).not.toContainText('回车后规范为')
+
+  expect(errors, errors.join('\n')).toEqual([])
+})
+
+test('操作数与地址可分别修改，回车后各自保留', async ({ page }) => {
+  const errors = trackPageErrors(page)
+  await openHome(page)
+  await loadCourseExperiment(page, '02 定时器与计数器')
+
+  const contact = await openFirstContact(page)
+  const nodeId = await contact.getAttribute('data-node-id')
+  expect(nodeId).toBeTruthy()
+  const originalAddress = await inlineAddress(page).inputValue()
+
+  await inlineInput(page).fill('RunLamp')
+  await inlineInput(page).press('Enter')
+  await expect(inlineEditor(page)).toBeHidden()
+
+  await contact.click()
+  await expect(inlineInput(page)).toHaveValue('RunLamp')
+  await expect(inlineAddress(page)).toHaveValue(originalAddress)
+
+  await inlineAddress(page).fill('m99.6')
+  await inlineAddress(page).press('Enter')
+  await expect(inlineEditor(page)).toBeHidden()
+  await expect(page.locator(`.ll-node[data-node-id="${nodeId}"]`))
+    .toHaveAttribute('data-operand', '%M99.6')
+
+  await contact.click()
+  await expect(inlineInput(page)).toHaveValue('RunLamp')
+  await expect(inlineAddress(page)).toHaveValue('%M99.6')
+
+  expect(errors, errors.join('\n')).toEqual([])
+})
+
+test('地址栏自动规范为百分号大写且回车提交后刷新仍保留', async ({ page }) => {
   const errors = trackPageErrors(page)
   await openHome(page)
   await loadCourseExperiment(page, '02 定时器与计数器')
@@ -74,7 +130,7 @@ test('操作数地址自动规范为百分号大写且回车提交后刷新仍�
   ]
 
   for (const example of examples) {
-    const input = inlineInput(page)
+    const input = inlineAddress(page)
     await input.fill(example.input)
     await input.press('Enter')
     await expect(inlineEditor(page)).toBeHidden()
@@ -102,7 +158,7 @@ test('非法 BOOL 地址保持编辑态、聚焦并显示可读错误', async ({
 
   const contact = await openFirstContact(page)
   const originalOperand = await contact.getAttribute('data-operand')
-  const input = inlineInput(page)
+  const input = inlineAddress(page)
   await input.fill('%MW10')
   await input.press('Enter')
 
