@@ -207,6 +207,47 @@ test('双击元件或用「更多参数」打开完整属性，单击始终只�
   expect(errors, errors.join('\n')).toEqual([])
 })
 
+test('点击图纸空白处关闭就地操作数与地址气泡', async ({ page }) => {
+  const errors = trackPageErrors(page)
+  await openHome(page)
+  await loadCourseExperiment(page, '02 定时器与计数器')
+
+  await openFirstContact(page)
+  const inline = inlineEditor(page)
+  await expect(inline).toBeVisible()
+
+  // 点气泡内部不能关闭，否则两个输入框之间切换会丢草稿。
+  await inline.click({ position: { x: 20, y: 20 } })
+  await expect(inline).toBeVisible()
+
+  // 找到首段图纸中真正没有元件、线路、插入点和段头的留白位置。
+  const blankPoint = await page.evaluate(() => {
+    const diagram = document.querySelector<SVGElement>('.ll-diagram')
+    if (!diagram) return null
+    const box = diagram.getBoundingClientRect()
+    const blocked = 'button, input, textarea, select, a, summary, [role="button"], '
+      + '[role="menu"], [data-node-id], [data-output-id], .ll-slot, .ll-merge-chip, '
+      + '.ll-node-grip, [data-drag-handle], .ll-rung-header'
+    for (let y = box.top + 8; y < box.bottom; y += 12) {
+      for (let x = box.left + 8; x < box.right; x += 12) {
+        const element = document.elementFromPoint(x, y)
+        if (
+          element
+          && element.closest('.ll-diagram')
+          && !element.closest(blocked)
+        ) return { x, y }
+      }
+    }
+    return null
+  })
+  if (!blankPoint) throw new Error('图纸中找不到可点击的空白位置')
+  await page.mouse.click(blankPoint.x, blankPoint.y)
+  await expect(inline).toBeHidden()
+  await expect(page.locator('.ll-node.is-selected, .ll-output.is-selected')).toHaveCount(0)
+
+  expect(errors, errors.join('\n')).toEqual([])
+})
+
 test('拖到自选位置后就地编辑器在重新打开时回到记录位置', async ({ page }) => {
   const errors = trackPageErrors(page)
   await page.setViewportSize({ width: 1440, height: 900 })

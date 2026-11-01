@@ -3729,9 +3729,9 @@ export default function App() {
   }
 
   /**
-   * 只有界面留白会取消选中并收起常驻落点。顶栏、侧栏、收藏条、变量表、
-   * 弹层和图纸内的交互控件都不算留白；图纸空白由画布自己的点击处理。
-   * 参数框是独立编辑面，点留白只清选区和落点，不替用户结束正在看的编辑。
+   * 只有界面留白会取消选中并收起常驻落点与就地编辑气泡。顶栏、侧栏、
+   * 收藏条、变量表、弹层和参数框内部都不算留白；图纸空白由画布自己的
+   * 点击处理，这样点空白和点编辑器内部不会互相误伤。
    */
   const clearSelectionOnBlankPointerDown = (event: {
     button: number
@@ -3748,12 +3748,10 @@ export default function App() {
       + '.wb-context-resizer, .wb-program-resizer',
     )) return
     const active = document.activeElement
-    // 就地操作数输入框失焦就等于丢掉草稿，所以点到界面留白时保留它的焦点。
-    const editingOperand = active instanceof HTMLElement
-      && active.closest('[data-inline-operand-editor]') !== null
-    if (active instanceof HTMLElement && active !== document.body && !editingOperand) {
-      active.blur()
-    }
+    if (active instanceof HTMLElement && active !== document.body) active.blur()
+    // 点留白属于明确放弃编辑，不再把焦点送回过期元件。
+    quickEditReturnFocusRef.current = null
+    setQuickEdit(null)
     setSelection(null)
     setInsertCursor(null)
     dismissFavoriteTargetPin()
@@ -4068,12 +4066,13 @@ export default function App() {
                 isDragging={Boolean(drag.drag)}
                 onSelect={(next) => {
                   // 点元件或线路只切换编辑目标，不打断已经选好的插入游标；
-                  // 只有真正点到图纸留白才收起常驻落点。就地编辑气泡不跟着
-                  // 选区消失：它只在用户点 × / 按 Esc / 成功提交时收起。
+                  // 真正点到图纸留白时收起常驻落点、选区和就地编辑气泡。
                   if (!next) {
                     setInsertCursor(null)
                     setSelection(null)
                     dismissFavoriteTargetPin()
+                    quickEditReturnFocusRef.current = null
+                    setQuickEdit(null)
                     return
                   }
                   setSelection(next)
