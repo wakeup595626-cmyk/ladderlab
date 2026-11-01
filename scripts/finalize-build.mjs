@@ -69,6 +69,32 @@ const files = walkFiles(assetsDir)
   .sort()
 writeFileSync(manifestPath, `${JSON.stringify({ format: 1, files }, null, 2)}\n`, 'utf8')
 
+/**
+ * 首屏正文全部使用 IBM Plex Sans 变量字体，但浏览器只有解析完 CSS 才会
+ * 发现 @font-face 里的字体文件；慢网下这段串行等待会把首屏文字推迟
+ * 400-600ms。字体文件名带内容哈希，只能在构建后按真实产物注入 preload。
+ */
+function injectFontPreload() {
+  const html = readFileSync(indexHtmlPath, 'utf8')
+  const font = readdirSync(assetsDir).find((name) => /^ibm-plex-sans-var-.+\.woff2$/.test(name))
+  if (!font) throw new Error('finalize-build: 找不到首屏主字体 ibm-plex-sans-var-*.woff2')
+  const fontHref = `./assets/${font}`
+  if (!html.includes(fontHref)) {
+    const tag = `    <link rel="preload" as="font" type="font/woff2" crossorigin href="${fontHref}" />\n`
+    const marker = '    <script type="module"'
+    if (!html.includes(marker)) throw new Error('finalize-build: 没有找到注入字体 preload 的位置')
+    writeFileSync(indexHtmlPath, html.replace(marker, tag + marker), 'utf8')
+  }
+  // font 请求是 CORS 模式，preload 必须带 crossorigin 才能命中同一次请求，
+  // 否则浏览器会把字体下载两遍。
+  const finalHtml = readFileSync(indexHtmlPath, 'utf8')
+  if (!finalHtml.includes(`rel="preload" as="font" type="font/woff2" crossorigin href="${fontHref}"`)) {
+    throw new Error('finalize-build: 字体 preload 未写入 index.html')
+  }
+}
+
+injectFontPreload()
+
 /** 只统计 index.html 真正预加载的入口 JS/CSS；懒加载块和按需图片不在首屏预算内。 */
 function checkInitialAssetBudgets() {
   const html = readFileSync(indexHtmlPath, 'utf8')
