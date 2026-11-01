@@ -34,7 +34,7 @@ async function findWorkbenchBlank(page: Page) {
   })
 }
 
-test('单击只打开就地操作数，画布操作不关闭，双击才打开完整参数', async ({ page }) => {
+test('单击只打开就地操作数，点留白关闭，双击才打开完整参数', async ({ page }) => {
   const errors = trackPageErrors(page)
 
   await openHome(page)
@@ -67,13 +67,22 @@ test('单击只打开就地操作数，画布操作不关闭，双击才打开�
   const canvasBlank = await findCanvasBlank(page)
   expect(canvasBlank).not.toBeNull()
   await page.mouse.click(canvasBlank!.x, canvasBlank!.y)
+  // 点图纸留白属于明确放弃编辑，气泡应收起。
+  await expect(inline).toBeHidden()
+  await expect(page.locator('.ll-node.is-selected, .ll-output.is-selected')).toHaveCount(0)
+
+  // 重新打开后，点窗口留白同样收起气泡。
+  await firstNode.click()
   await expect(inline).toBeVisible()
   await expect(inline).toHaveAttribute('data-rung-id', initialTarget.rung!)
   await expect(inline).toHaveAttribute('data-node-id', initialTarget.node!)
-
   const workbenchBlank = await findWorkbenchBlank(page)
   expect(workbenchBlank).not.toBeNull()
   await page.mouse.click(workbenchBlank!.x, workbenchBlank!.y)
+  await expect(inline).toBeHidden()
+
+  // 线路、段号和输出元件都是正常编辑操作，不应被当成留白。
+  await firstNode.click()
   await expect(inline).toBeVisible()
   await expect(inline).toHaveAttribute('data-rung-id', initialTarget.rung!)
 
