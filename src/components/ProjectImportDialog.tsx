@@ -5,6 +5,7 @@ import type { LadderNode, Program } from '../engine/types'
 import { createLatestRequestGate, MAX_IMPORT_BYTES, parseProgramStructureText } from '../lib/io'
 import type { ProgramIssue } from '../lib/io'
 import { useModalFocus } from '../lib/useModalFocus'
+import { usePresence } from '../lib/usePresence'
 import { CloseIcon, ImportIcon } from './Icons'
 import './ProjectImportDialog.css'
 
@@ -33,11 +34,17 @@ function countNodes(nodes: LadderNode[]): number {
 }
 
 export default function ProjectImportDialog({ open, onClose, onImport }: ProjectImportDialogProps) {
-  if (!open) return null
-  return <ProjectImportDialogContent onClose={onClose} onImport={onImport} />
+  const { present, closing } = usePresence(open, 180)
+  if (!present) return null
+  return <ProjectImportDialogContent open={open} closing={closing} onClose={onClose} onImport={onImport} />
 }
 
-function ProjectImportDialogContent({ onClose, onImport }: Omit<ProjectImportDialogProps, 'open'>) {
+interface ProjectImportDialogContentProps extends Omit<ProjectImportDialogProps, 'open'> {
+  open: boolean
+  closing: boolean
+}
+
+function ProjectImportDialogContent({ open, closing, onClose, onImport }: ProjectImportDialogContentProps) {
   const [preview, setPreview] = useState<ImportPreview | null>(null)
   const [error, setError] = useState('')
   const [dragging, setDragging] = useState(false)
@@ -45,7 +52,8 @@ function ProjectImportDialogContent({ onClose, onImport }: Omit<ProjectImportDia
   const [pastedText, setPastedText] = useState('')
   const fileInputRef = useRef<HTMLInputElement>(null)
   const firstButtonRef = useRef<HTMLButtonElement>(null)
-  const dialogRef = useModalFocus<HTMLElement>(true, onClose, firstButtonRef)
+  // 内容组件只在 present 时挂载，effect 首次运行时容器已经存在。
+  const dialogRef = useModalFocus<HTMLElement>(open, onClose, firstButtonRef)
   const requestGate = useRef(createLatestRequestGate()).current
 
   const inspectText = (text: string, source: string, size: number | null, requestId = requestGate.begin()) => {
@@ -95,7 +103,8 @@ function ProjectImportDialogContent({ onClose, onImport }: Omit<ProjectImportDia
 
   return (
     <div
-      className="project-import-backdrop"
+      className={`project-import-backdrop${closing ? ' is-closing' : ''}`}
+      data-state={closing ? 'closing' : 'open'}
       role="presentation"
       onPointerDown={(event) => {
         if (event.target !== event.currentTarget) return
@@ -107,11 +116,12 @@ function ProjectImportDialogContent({ onClose, onImport }: Omit<ProjectImportDia
         ref={dialogRef}
         className="project-import-dialog"
         role="dialog"
-        aria-modal="true"
+        aria-modal={open ? 'true' : undefined}
+        inert={closing}
         aria-labelledby="project-import-title"
         tabIndex={-1}
       >
-        <header className="project-import-head">
+        <div className="project-import-head">
           <div>
             <h2 id="project-import-title">导入工程</h2>
             <p>使用通用的 LadderLab 工程文件，在其他电脑或浏览器中继续编辑。</p>
@@ -119,7 +129,7 @@ function ProjectImportDialogContent({ onClose, onImport }: Omit<ProjectImportDia
           <button type="button" className="icon-button" onClick={onClose} aria-label="关闭导入工程">
             <CloseIcon size={18} />
           </button>
-        </header>
+        </div>
 
         {!preview && (
           <>

@@ -204,8 +204,8 @@ export default function InstructionBar({
       list.scrollTo({ left: 0, behavior })
       return
     }
-    // 留一点重叠，滚动后仍能看出前后是哪几条。
-    list.scrollBy({ left: Math.max(120, list.clientWidth * 0.8), behavior })
+    // 一次翻过当前一屏，避免窄屏上 0.8 屏的步长只挪出半张卡。
+    list.scrollBy({ left: Math.max(120, list.clientWidth - 8), behavior })
   }, [listScroll.atEnd])
 
   return (
@@ -305,6 +305,7 @@ export default function InstructionBar({
                   type="button"
                   className="wb-instruction-button"
                   data-drag-handle
+                  data-drag-axis="pan-x"
                   disabled={!allowed}
                   title={allowed
                     ? entry.detail.replace(/。$/, '') + '。' + placement

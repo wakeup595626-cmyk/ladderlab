@@ -506,12 +506,37 @@ async function checkReducedMotion(page) {
   const offenders = await page.evaluate(() => {
     const out = []
     const seen = new Set()
+    // Reduced motion keeps a short colour/opacity confirmation, which is
+    // feedback rather than movement. Spatial and layout properties must not
+    // transition at all.
+    const safeProperties = new Set([
+      'color',
+      'background-color',
+      'border-color',
+      'border-top-color',
+      'border-right-color',
+      'border-bottom-color',
+      'border-left-color',
+      'outline-color',
+      'text-decoration-color',
+      'text-emphasis-color',
+      'column-rule-color',
+      'caret-color',
+      'fill',
+      'stroke',
+      'opacity',
+      'box-shadow',
+    ])
     for (const el of document.querySelectorAll('body *')) {
       const style = getComputedStyle(el)
       const durations = style.transitionDuration.split(',').map((value) => Number.parseFloat(value) || 0)
       const longest = Math.max(0, ...durations)
       const properties = style.transitionProperty
       if (longest <= 0.05 || properties === 'none') continue
+      const propertyList = properties.split(',').map((value) => value.trim()).filter(Boolean)
+      const unsafeProperties = propertyList.filter((property) => !safeProperties.has(property))
+      const safeFeedback = unsafeProperties.length === 0 && longest <= 0.12
+      if (safeFeedback) continue
       const key = `${style.transitionDuration}|${properties}`
       if (seen.has(key)) continue
       seen.add(key)
@@ -519,6 +544,7 @@ async function checkReducedMotion(page) {
         selector: `${el.tagName.toLowerCase()}.${String(el.className ?? '').split(/\s+/).filter(Boolean).slice(0, 2).join('.')}`.replace(/\.$/, ''),
         duration: style.transitionDuration,
         property: properties.slice(0, 48),
+        unsafeProperties,
       })
     }
     out.sort((a, b) => Number.parseFloat(b.duration) - Number.parseFloat(a.duration))
@@ -527,10 +553,10 @@ async function checkReducedMotion(page) {
   settle(
     'reduced-motion',
     offenders.length === 0,
-    '开启「减少动态效果」后不再播放过渡',
+    '开启「减少动态效果」后只保留短促的颜色反馈',
     offenders.length === 0
-      ? '所有元素 transition-duration ≤ 50ms'
-      : `${offenders.length} 组元素仍在过渡，最长 ${offenders[0].duration}（${offenders[0].selector}）`,
+      ? '颜色/透明度反馈 ≤ 120ms，位移与尺寸过渡为 0'
+      : `${offenders.length} 组元素仍有空间或长时过渡，最长 ${offenders[0].duration}（${offenders[0].selector}）`,
     offenders.slice(0, 8),
   )
   return offenders

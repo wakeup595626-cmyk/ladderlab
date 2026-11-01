@@ -756,19 +756,19 @@
 
 @media (prefers-reduced-motion: no-preference) {
   .wb-shell > .wb-topbar {
-    animation: ll-chrome-in 360ms var(--ease-out) both;
+    animation: ll-chrome-in 200ms var(--ease-out) both;
   }
 
   .wb-shell > .wb-instruction-strip {
-    animation: ll-chrome-in 400ms 50ms var(--ease-out) both;
+    animation: ll-chrome-in 220ms 30ms var(--ease-out) both;
   }
 
   .wb-shell > .wb-workbench {
-    animation: ll-workbench-in 440ms 95ms var(--ease-out) both;
+    animation: ll-workbench-in 240ms 40ms var(--ease-out) both;
   }
 
   .wb-shell > .wb-statusbar {
-    animation: ll-chrome-in 360ms 130ms var(--ease-out) both;
+    animation: ll-chrome-in 200ms 60ms var(--ease-out) both;
   }
 }
 
@@ -974,11 +974,14 @@
     min-height: 58px;
   }
 
-  .wb-instruction-card,
   .wb-instruction-button,
   .wb-instruction-construct,
   .wb-construct-button {
     height: 44px;
+  }
+
+  .wb-instruction-card {
+    height: 46px;
   }
 
   .wb-construct-button {
@@ -987,22 +990,6 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .inspector-tabs::before,
-  .inspector-tabs::after,
-  .wb-tabbar.mobile-tabbar::after,
-  .wb-tabbar.mobile-tabbar::before,
-  .wb-instruction-follow,
-  .wb-instruction-card,
-  .wb-construct-button,
-  .wb-instruction-button,
-  .mobile-tab-action {
-    transition: none;
-  }
-
-  .wb-theme-button-icon {
-    transition: none;
-  }
-
   .ll-energy-spark,
   .ll-power-state.is-on i::after,
   .ll-insert-cursor-halo,

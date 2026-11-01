@@ -1,5 +1,13 @@
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "ignorePatterns": [
+    "_audit_*/**",
+    "_e2e_out_*/**",
+    "_review_tmp/**",
+    "dist/**",
+    "ladderlab/**",
+    "node_modules/**"
+  ],
   "plugins": ["react", "typescript", "oxc"],
   "rules": {
     "react/rules-of-hooks": "error",

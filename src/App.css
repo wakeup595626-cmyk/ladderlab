@@ -543,6 +543,8 @@
   color: var(--text-soft);
   text-align: left;
   cursor: grab;
+  /* 行主体优先纵向滚动；横向滑动仍可拖入画布。 */
+  touch-action: pan-y;
 }
 
 .instruction-row:hover:not(:disabled) {
@@ -2110,6 +2112,10 @@
 
 .library-backdrop {
   z-index: 90;
+}
+
+.library-backdrop.is-closing {
+  pointer-events: none;
 }
 
 .confirm-backdrop {
@@ -3932,6 +3938,15 @@ body[data-drag-kind] * {
       opacity: 0;
       transform: scale(0.98);
     }
+  }
+
+  .library-backdrop.is-closing {
+    opacity: 0;
+  }
+
+  .library-backdrop.is-closing .library-dialog {
+    opacity: 0;
+    transform: scale(0.97);
   }
 
   @media (max-width: 720px) {

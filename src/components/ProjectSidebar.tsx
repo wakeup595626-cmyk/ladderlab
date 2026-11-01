@@ -199,6 +199,7 @@ export default function ProjectSidebar({
                     type="button"
                     className="instruction-row"
                     data-drag-handle
+                    data-drag-axis="pan-y"
                     disabled={!allowed}
                     aria-label={allowed ? entry.label + '：' + placement : entry.label + ' 当前不可用'}
                     title={title}
@@ -215,7 +216,7 @@ export default function ProjectSidebar({
                       onStartDrag(event, payload, entry.label)
                     }}
                   >
-                    <span className="instruction-grip" data-drag-handle title="拖动" aria-hidden="true">
+                    <span className="instruction-grip" data-drag-handle data-drag-axis="none" title="拖动" aria-hidden="true">
                       <GripIcon size={16} />
                     </span>
                     <span className="instruction-symbol mono">{entry.symbol}</span>

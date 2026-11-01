@@ -1,6 +1,7 @@
 import { useRef } from 'react'
 import type { RecoveryBackup } from '../lib/storage'
 import { useModalFocus } from '../lib/useModalFocus'
+import { usePresence } from '../lib/usePresence'
 import { CloseIcon, LayersIcon, TrashIcon } from './Icons'
 import './ProjectImportDialog.css'
 import './RecoveryBackupsDialog.css'
@@ -39,24 +40,29 @@ export default function RecoveryBackupsDialog({
   open,
   ...props
 }: RecoveryBackupsDialogProps) {
-  if (!open) return null
-  return <RecoveryBackupsDialogContent {...props} />
+  const { present, closing } = usePresence(open, 180)
+  if (!present) return null
+  return <RecoveryBackupsDialogContent open={open} closing={closing} {...props} />
 }
 
 function RecoveryBackupsDialogContent({
+  open,
+  closing,
   backups,
   onClose,
   onDownload,
   onRestore,
   onDelete,
   onClearAll,
-}: Omit<RecoveryBackupsDialogProps, 'open'>) {
+}: RecoveryBackupsDialogProps & { closing: boolean }) {
   const closeRef = useRef<HTMLButtonElement>(null)
-  const dialogRef = useModalFocus<HTMLElement>(true, onClose, closeRef)
+  // 内容组件只在 present 时挂载，effect 首次运行时容器已经存在。
+  const dialogRef = useModalFocus<HTMLElement>(open, onClose, closeRef)
 
   return (
     <div
-      className="project-import-backdrop"
+      className={`project-import-backdrop${closing ? ' is-closing' : ''}`}
+      data-state={closing ? 'closing' : 'open'}
       role="presentation"
       onPointerDown={(event) => {
         if (event.target !== event.currentTarget) return
@@ -68,11 +74,12 @@ function RecoveryBackupsDialogContent({
         ref={dialogRef}
         className="project-import-dialog recovery-backups-dialog"
         role="dialog"
-        aria-modal="true"
+        aria-modal={open ? 'true' : undefined}
+        inert={closing}
         aria-labelledby="recovery-backups-title"
         tabIndex={-1}
       >
-        <header className="project-import-head">
+        <div className="project-import-head">
           <div>
             <h2 id="recovery-backups-title">本机安全副本</h2>
             <p>
@@ -89,7 +96,7 @@ function RecoveryBackupsDialogContent({
           >
             <CloseIcon size={18} />
           </button>
-        </header>
+        </div>
 
         {backups.length === 0 ? (
           <div className="recovery-backups-empty">

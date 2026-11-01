@@ -8,6 +8,10 @@
   background: color-mix(in srgb, var(--frame-ink) 34%, transparent);
 }
 
+.project-import-backdrop.is-closing {
+  pointer-events: none;
+}
+
 .project-import-dialog {
   display: flex;
   width: min(540px, 100%);
@@ -351,5 +355,38 @@
   .project-import-confirm,
   .project-import-back {
     min-height: 44px;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .project-import-backdrop {
+    transition: opacity 180ms var(--ease-out);
+  }
+
+  .project-import-dialog {
+    transform-origin: center;
+    transition:
+      opacity 180ms var(--ease-out),
+      transform 180ms var(--ease-out);
+  }
+
+  @starting-style {
+    .project-import-backdrop {
+      opacity: 0;
+    }
+
+    .project-import-dialog {
+      opacity: 0;
+      transform: translateY(6px) scale(0.985);
+    }
+  }
+
+  .project-import-backdrop.is-closing {
+    opacity: 0;
+  }
+
+  .project-import-backdrop.is-closing .project-import-dialog {
+    opacity: 0;
+    transform: translateY(6px) scale(0.985);
   }
 }

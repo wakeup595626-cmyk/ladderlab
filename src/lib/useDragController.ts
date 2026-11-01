@@ -27,6 +27,13 @@ interface PendingDrag {
   pointerId: number
   active: boolean
   touch: boolean
+  /**
+   * 原生滚动优先的方向：
+   * - pan-y：纵向手势交给页面滚动，横向手势才开始拖动；
+   * - pan-x：横向手势交给列表滚动，纵向手势才开始拖动；
+   * - none：任何方向都直接拖动（画布手柄等）。
+   */
+  axis: 'pan-x' | 'pan-y' | 'none'
 }
 
 function targetKey(target: DropTarget | null): string {
@@ -84,10 +91,12 @@ export function useDragController(
   const start = useCallback((event: ReactPointerEvent, payload: DragPayload, label: string) => {
     if (event.button !== 0 || pendingRef.current) return
     const touch = event.pointerType !== 'mouse'
-    if (touch) {
-      const handle = event.target instanceof Element ? event.target.closest('[data-drag-handle]') : null
-      if (!handle) return
-    }
+    const handle = event.target instanceof Element
+      ? event.target.closest('[data-drag-handle]')
+      : null
+    if (touch && !handle) return
+    const axisHint = handle?.getAttribute('data-drag-axis')
+    const axis = axisHint === 'pan-x' || axisHint === 'pan-y' ? axisHint : 'none'
 
     const pending: PendingDrag = {
       payload,
@@ -97,6 +106,7 @@ export function useDragController(
       pointerId: event.pointerId,
       active: false,
       touch,
+      axis,
     }
     pendingRef.current = pending
 
@@ -113,13 +123,25 @@ export function useDragController(
 
     // A drawer may still be unmounting on the first move. Walk the visual
     // stack so the canvas below it can become a valid drop target at once.
-    const updateFromPoint = (x: number, y: number) => {
+    // Returns whether the pointer is now driving a drag; callers must only
+    // cancel the native gesture once that is true.
+    const updateFromPoint = (x: number, y: number): boolean => {
       const current = pendingRef.current
-      if (!current) return
+      if (!current) return false
       const dx = x - current.startX
       const dy = y - current.startY
       if (!current.active) {
-        if (Math.hypot(dx, dy) < 6) return
+        if (Math.hypot(dx, dy) < 6) return false
+        // 触摸手势先尊重使用者的滚动意图：在滚动方向上不要抢走原生手势，
+        // 只有垂直/水平拖拽方向明确后才进入拖放。
+        if (current.touch) {
+          const horizontal = Math.abs(dx) > Math.abs(dy)
+          if ((current.axis === 'pan-y' && !horizontal)
+            || (current.axis === 'pan-x' && horizontal)) {
+            finish(false)
+            return false
+          }
+        }
         current.active = true
         onDragStartRef.current?.()
         document.body.dataset.dragKind = current.payload.type
@@ -134,15 +156,17 @@ export function useDragController(
         targetRef.current = next
         setTarget(next)
       }
+      return true
     }
 
     const touchMove = (native: TouchEvent) => {
       if (!pendingRef.current) return
       const point = native.touches[0]
       if (!point) return
-      // The gesture belongs to the drag handle: keep the page still.
-      native.preventDefault()
-      updateFromPoint(point.clientX, point.clientY)
+      // 先判定方向再决定是否冻结页面：滚动方向会让 updateFromPoint
+      // 结束拖拽并返回 false，此时调用 preventDefault 会连原生滚动一起吞掉。
+      const dragging = updateFromPoint(point.clientX, point.clientY)
+      if (dragging && native.cancelable) native.preventDefault()
     }
 
     const touchEnd = (native: TouchEvent) => {

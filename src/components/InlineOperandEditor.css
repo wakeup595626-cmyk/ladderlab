@@ -269,6 +269,24 @@
   }
 }
 
+/* 触摸设备上图标按钮和输入框保持 44px 命中区；卡片本身在手机上
+   已限制为 42dvh 并可内部滚动，不会把画布挤没。 */
+@media (pointer: coarse) {
+  .inline-operand-close {
+    width: 44px;
+    height: 44px;
+  }
+
+  .inline-operand-field input {
+    height: 44px;
+  }
+
+  .inline-operand-more {
+    min-height: 44px;
+    padding-inline: 12px;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .inline-operand,
   .inline-operand.has-error {

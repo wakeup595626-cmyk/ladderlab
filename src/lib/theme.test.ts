@@ -76,6 +76,8 @@ function expectReadable(tokens: ThemeTokens, label: string): void {
   expect(contrastRatio(tokens.text, tokens.surface), `${label} text/surface`).toBeGreaterThanOrEqual(7)
   expect(contrastRatio(tokens.muted, tokens.surface), `${label} muted/surface`).toBeGreaterThanOrEqual(4.5)
   expect(contrastRatio(tokens.faint, tokens.surface), `${label} faint/surface`).toBeGreaterThanOrEqual(4.5)
+  expect(contrastRatio(tokens.muted, tokens.ground), `${label} muted/ground`).toBeGreaterThanOrEqual(4.5)
+  expect(contrastRatio(tokens.faint, tokens.ground), `${label} faint/ground`).toBeGreaterThanOrEqual(4.5)
   expect(contrastRatio(tokens.faint, tokens.raised), `${label} faint/raised`).toBeGreaterThanOrEqual(4.5)
   expect(contrastRatio(tokens.accent, '#ffffff'), `${label} accent/white`).toBeGreaterThanOrEqual(4.5)
   expect(contrastRatio(tokens.accentInk, tokens.accentWash), `${label} accentInk/wash`).toBeGreaterThanOrEqual(4.5)
@@ -156,7 +158,7 @@ describe('主题预设', () => {
       inputRule: '#a3ada5',
       text: '#151816',
       muted: '#49504b',
-      faint: '#697069',
+      faint: '#687069',
       accent: '#0f6b7a',
       accentInk: '#0a4c58',
       accentWash: '#e3eef0',

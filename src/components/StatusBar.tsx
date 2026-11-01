@@ -4,7 +4,7 @@ interface StatusBarProps {
   running: boolean
   simTime: number
   compileResult: CompileResult
-  lastSavedAt: number | null
+  lastDraftSavedAt: number | null
   savePending: boolean
   saveError: string | null
   saveBlocked: boolean
@@ -21,29 +21,29 @@ export default function StatusBar({
   running,
   simTime,
   compileResult,
-  lastSavedAt,
+  lastDraftSavedAt,
   savePending,
   saveError,
   saveBlocked,
 }: StatusBarProps) {
-  const savedTime = lastSavedAt ? savedTimeFormatter.format(lastSavedAt) : null
+  const savedTime = lastDraftSavedAt ? savedTimeFormatter.format(lastDraftSavedAt) : null
   const saveState = saveBlocked
     ? {
         className: 'save-state is-blocked',
-        text: '自动保存已暂停',
+        text: '草稿自动保存已暂停',
         title: '请先处理页面顶部的恢复或多标签冲突提示；处理前不会覆盖原数据',
       }
     : saveError
-      ? { className: 'save-state is-error', text: '自动保存失败', title: saveError }
+      ? { className: 'save-state is-error', text: '草稿保存失败', title: saveError }
       : savePending
-        ? { className: 'save-state is-pending', text: '正在保存…', title: '编辑内容正在写入本机浏览器' }
+        ? { className: 'save-state is-pending', text: '正在保存草稿…', title: '编辑内容正在写入本机浏览器草稿' }
       : savedTime
         ? {
             className: 'save-state is-saved',
-            text: `已保存 ${savedTime}`,
-            title: `最近一次保存：${savedTime}`,
+            text: `草稿已自动保存 ${savedTime}`,
+            title: `最近一次草稿保存：${savedTime}；命名项目请点顶栏「保存」`,
           }
-        : { className: 'save-state', text: '等待自动保存', title: '编辑后会短暂延迟再写入本机浏览器' }
+        : { className: 'save-state', text: '等待草稿保存', title: '编辑后会短暂延迟写入本机浏览器；命名项目需点顶栏「保存」' }
 
   return (
     <footer className="status-bar wb-statusbar">
@@ -59,6 +59,11 @@ export default function StatusBar({
       {compileResult.errors.length > 0 && (
         <span className="status-error">{compileResult.errors.length} 个错误</span>
       )}
+      {/* PRODUCT.md 的品牌承诺：这句话必须在主界面持续可见，
+          不能只藏在「关于」弹窗里。桌面与手机都保留完整三部分。 */}
+      <span className="status-disclaimer">
+        教学仿真器 · 非西门子官方产品 · 不兼容 S7 工程文件
+      </span>
       <span className="status-spacer" />
       <span className={saveState.className} title={saveState.title}>
         {saveState.text}

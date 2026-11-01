@@ -18,6 +18,7 @@ import type {
   SavedProjectRestoreExpectation,
 } from '../lib/projectLibrary'
 import { useModalFocus } from '../lib/useModalFocus'
+import { usePresence } from '../lib/usePresence'
 import { CloseIcon, ExportIcon, ImportIcon } from './Icons'
 import './ProjectImportDialog.css'
 import './ProjectBackupDialog.css'
@@ -90,29 +91,37 @@ function restoreExpectations(
 }
 
 export default function ProjectBackupDialog({ open, ...props }: ProjectBackupDialogProps) {
-  if (!open) return null
-  return <ProjectBackupDialogContent {...props} />
+  const { present, closing } = usePresence(open, 180)
+  if (!present) return null
+  return <ProjectBackupDialogContent open={open} closing={closing} {...props} />
 }
 
 function ProjectBackupDialogContent({
+  open,
+  closing,
   projects,
   brokenCount = 0,
   onClose,
   onRestore,
   onRestored,
-}: Omit<ProjectBackupDialogProps, 'open'>) {
+}: ProjectBackupDialogProps & { closing: boolean }) {
   const [step, setStep] = useState<Step>({ kind: 'menu' })
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [dragging, setDragging] = useState(false)
   const [busy, setBusy] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const firstButtonRef = useRef<HTMLButtonElement>(null)
   // 恢复写盘期间禁止关闭：请求已经发出，中途关窗会让用户看不到真实结果。
   const requestClose = () => {
     if (!busy) onClose()
   }
-  const dialogRef = useModalFocus<HTMLElement>(true, requestClose, firstButtonRef)
+  const exportButtonRef = useRef<HTMLButtonElement>(null)
+  const restoreButtonRef = useRef<HTMLButtonElement>(null)
+  // 空工程库时“导出整包备份”是禁用的；把初始焦点给唯一可用的恢复入口，
+  // 而不是退到右上角关闭按钮。
+  const preferredFirstRef = projects.length === 0 ? restoreButtonRef : exportButtonRef
+  // 内容组件只在 present 时挂载，effect 首次运行时容器已经存在。
+  const dialogRef = useModalFocus<HTMLElement>(open, requestClose, preferredFirstRef)
 
   const handleExport = () => {
     try {
@@ -217,7 +226,8 @@ function ProjectBackupDialogContent({
 
   return (
     <div
-      className="project-import-backdrop"
+      className={`project-import-backdrop${closing ? ' is-closing' : ''}`}
+      data-state={closing ? 'closing' : 'open'}
       role="presentation"
       onPointerDown={(event) => {
         if (event.target !== event.currentTarget) return
@@ -229,11 +239,12 @@ function ProjectBackupDialogContent({
         ref={dialogRef}
         className="project-import-dialog"
         role="dialog"
-        aria-modal="true"
+        aria-modal={open ? 'true' : undefined}
+        inert={closing}
         aria-labelledby="project-backup-title"
         tabIndex={-1}
       >
-        <header className="project-import-head">
+        <div className="project-import-head">
           <div>
             <h2 id="project-backup-title">整包备份</h2>
             <p>把本机项目库整体导出成一个文件；换电脑或重装浏览器后可以按工程逐个恢复。</p>
@@ -241,7 +252,7 @@ function ProjectBackupDialogContent({
           <button type="button" className="icon-button" onClick={requestClose} aria-label="关闭整包备份" disabled={busy}>
             <CloseIcon size={18} />
           </button>
-        </header>
+        </div>
 
         {step.kind === 'menu' && (
           <div
@@ -252,7 +263,7 @@ function ProjectBackupDialogContent({
             onDrop={handleDrop}
           >
             <button
-              ref={firstButtonRef}
+              ref={exportButtonRef}
               type="button"
               className="project-backup-action"
               onClick={handleExport}
@@ -270,6 +281,7 @@ function ProjectBackupDialogContent({
             </button>
 
             <button
+              ref={restoreButtonRef}
               type="button"
               className="project-backup-action"
               onClick={() => fileInputRef.current?.click()}

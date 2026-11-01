@@ -1,4 +1,4 @@
-import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type {
   CSSProperties,
@@ -6,7 +6,9 @@ import type {
   KeyboardEvent as ReactKeyboardEvent,
   MouseEvent as ReactMouseEvent,
   PointerEvent as ReactPointerEvent,
+  ReactElement,
   ReactNode,
+  RefObject,
   SetStateAction,
 } from 'react'
 import type {
@@ -24,6 +26,17 @@ import type { FavoriteInsertTarget } from '../lib/insertTarget'
 import { FIELD_LIMITS } from '../lib/limits'
 import { contentRungs, isBlankRung } from '../engine/rungInvariant'
 import { parallelBranchOffsets } from '../lib/parallelLayout'
+import {
+  buildPrefixOffsets,
+  buildRungChunks,
+  buildRungSpans,
+  mergedRenderedIndexes,
+  rangeForViewport,
+  sameRenderedRange,
+  sortedIndexes,
+  type RenderedRange,
+  type RungLayoutSnapshot,
+} from '../lib/virtualRungLayout'
 import {
   GripIcon,
   MoreIcon,
@@ -83,6 +96,8 @@ export interface LadderCanvasProps {
   /** 当前正在取点的并联分支；由工作区持有，切换图纸或换落点时统一清除。 */
   mergeArmed?: MergeArmed | null
   onMergeArmedChange?: Dispatch<SetStateAction<MergeArmed | null>>
+  /** 只读段高快照，供程序段导航在占位区内计算真实段号。 */
+  layoutRef?: RefObject<RungLayoutSnapshot | null>
 }
 
 export interface MergeArmed {
@@ -1821,6 +1836,8 @@ interface RungSectionProps {
   /** 图纸统一宽度：由画布测一次往下传，避免每段各挂一个 ResizeObserver。 */
   availableWidth: number
   segmentLabel: string
+  /** 只有屏幕附近、且拿到全局火花槽的程序段才创建无限动画节点。 */
+  spark: boolean
   context: DrawContext
   onDuplicateRung: (rungId: string) => void
   onCopyRung: (rungId: string) => void
@@ -1867,6 +1884,7 @@ function RungSection({
   total,
   availableWidth,
   segmentLabel,
+  spark,
   context,
   onDuplicateRung,
   onCopyRung,
@@ -1882,7 +1900,10 @@ function RungSection({
   const cancelRenameRef = useRef(false)
   const seenNodesRef = useRef<Set<string> | null>(null)
   const seenOutputRef = useRef<string | null>(null)
+  const menuRef = useRef<HTMLDetailsElement>(null)
   const [titleDraft, setTitleDraft] = useState<string | null>(null)
+  const [menuOpen, setMenuOpen] = useState(false)
+  const [menuLayout, setMenuLayout] = useState({ flipped: false, maxHeight: 0 })
   const placeholder = isBlankRung(rung)
   const titleValue = titleDraft ?? rung.label
   const metrics = metricsFor(availableWidth)
@@ -1922,6 +1943,41 @@ function RungSection({
   // 整段选择是显式状态，避免和“选中输出线圈”的 path:null 混淆。
   const wholeRungSelected = rungSelected && context.selection?.wholeRung === true
   const favoriteTargetHere = context.insertTarget?.rungId === rung.id
+
+  // 低高度窗口里菜单会超出可视区。打开后按 summary 的上下剩余空间决定
+  // 向下还是向上展开，并把实际可用高度写进 max-height 让面板内部滚动。
+  const positionMenu = useCallback(() => {
+    const details = menuRef.current
+    if (!details?.open) return
+    const summary = details.querySelector<HTMLElement>(':scope > summary')
+    const panel = details.querySelector<HTMLElement>('.ll-rung-menu-panel')
+    if (!summary || !panel) return
+    const rect = summary.getBoundingClientRect()
+    const viewport = window.visualViewport
+    const viewportTop = viewport?.offsetTop ?? 0
+    const viewportHeight = viewport?.height ?? window.innerHeight
+    const margin = 8
+    const spaceBelow = Math.max(0, viewportTop + viewportHeight - rect.bottom - margin)
+    const spaceAbove = Math.max(0, rect.top - viewportTop - margin)
+    const naturalHeight = panel.scrollHeight + 2
+    const flipped = naturalHeight > spaceBelow && spaceAbove > spaceBelow
+    const maxHeight = Math.max(96, Math.min(naturalHeight, flipped ? spaceAbove : spaceBelow))
+    setMenuLayout({ flipped, maxHeight })
+  }, [])
+
+  useEffect(() => {
+    if (!menuOpen) return
+    const reposition = () => positionMenu()
+    window.addEventListener('resize', reposition)
+    window.visualViewport?.addEventListener('resize', reposition)
+    window.visualViewport?.addEventListener('scroll', reposition)
+    return () => {
+      window.removeEventListener('resize', reposition)
+      window.visualViewport?.removeEventListener('resize', reposition)
+      window.visualViewport?.removeEventListener('scroll', reposition)
+    }
+  }, [menuOpen, positionMenu])
+
   useLayoutEffect(() => {
     const container = scrollRef.current
     if (!container) return
@@ -1974,6 +2030,7 @@ function RungSection({
         favoriteTargetHere ? 'is-favorite-target' : '',
       ].filter(Boolean).join(' ')}
       data-rung-id={rung.id}
+      data-rung-index={index}
       aria-label={placeholder
         ? '新程序段：在插入点添加元件后自动生成下一段'
         : segmentLabel + '：' + (rung.label || '未命名')}
@@ -2080,11 +2137,16 @@ function RungSection({
             </span>
           )}
           <details
+            ref={menuRef}
             className="ll-rung-menu"
             data-no-rung-drag
             onToggle={(event) => {
               const details = event.currentTarget
-              if (!details.open) return
+              setMenuOpen(details.open)
+              if (!details.open) {
+                setMenuLayout({ flipped: false, maxHeight: 0 })
+                return
+              }
               // 先同步聚焦：键盘用户紧接着按 End/ArrowDown 时，按键要能落到菜单项上。
               // 下一帧再补一次，兜住 content-visibility 尚未生效导致首次 focus 落空的情况。
               const focusFirstItem = () => {
@@ -2094,7 +2156,10 @@ function RungSection({
                 first.focus()
               }
               focusFirstItem()
-              window.requestAnimationFrame(focusFirstItem)
+              window.requestAnimationFrame(() => {
+                positionMenu()
+                focusFirstItem()
+              })
             }}
             onBlur={(event) => {
               if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
@@ -2110,11 +2175,13 @@ function RungSection({
             <summary aria-label="程序段操作" title="程序段操作">
               <MoreIcon size={19} />
             </summary>
-            <div
-              className="ll-rung-menu-panel"
-              role="menu"
-              aria-label="程序段操作"
-              onKeyDown={(event) => {
+            {menuOpen && (
+              <div
+                className={'ll-rung-menu-panel' + (menuLayout.flipped ? ' is-flipped' : '')}
+                style={menuLayout.maxHeight > 0 ? { maxHeight: menuLayout.maxHeight } : undefined}
+                role="menu"
+                aria-label="程序段操作"
+                onKeyDown={(event) => {
                 if (event.key === 'Escape') {
                   event.preventDefault()
                   const details = event.currentTarget.closest('details')
@@ -2134,8 +2201,8 @@ function RungSection({
                 else if (event.key === 'ArrowUp') next = index < 0 ? items.length - 1 : (index - 1 + items.length) % items.length
                 else if (event.key === 'End') next = items.length - 1
                 items[next]?.focus()
-              }}
-            >
+                }}
+              >
               <button
                 type="button"
                 role="menuitem"
@@ -2243,11 +2310,18 @@ function RungSection({
               >
                 删除程序段
               </button>
-            </div>
+              </div>
+            )}
           </details>
         </div>
       </header>
 
+      {placeholder && (
+        <div className="ll-empty-hint" aria-hidden="true">
+          <span className="ll-empty-hint-plus">+</span>
+          <span>点 + 插入常开触点</span>
+        </div>
+      )}
       <div className="ll-svg-scroll" ref={scrollRef}>
         <svg
           className="ll-diagram"
@@ -2299,7 +2373,7 @@ function RungSection({
               </g>
             </>
           )}
-          {powered && !placeholder && (
+          {powered && !placeholder && spark && (
             <g className="ll-energy" aria-hidden="true">
               <rect
                 className="ll-energy-spark"
@@ -2333,10 +2407,11 @@ function sameRungSection(previous: Readonly<RungSectionProps>, next: Readonly<Ru
     || previous.total !== next.total
     || previous.availableWidth !== next.availableWidth
     || previous.segmentLabel !== next.segmentLabel
+    || previous.spark !== next.spark
     || previous.rungClipboardCount !== next.rungClipboardCount
     || Boolean(previous.onRenameRung) !== Boolean(next.onRenameRung)
     || Boolean(previous.onDeleteNode) !== Boolean(next.onDeleteNode)
-    || previous.context.runtime !== next.context.runtime
+    || !sameRuntimeForRung(previous.context.runtime, next.context.runtime, next.rung)
     || previous.context.tags !== next.context.tags
     || contextLocalSelection(previous.context.selection, next.rung.id)
       !== contextLocalSelection(next.context.selection, next.rung.id)
@@ -2357,6 +2432,63 @@ function sameRungSection(previous: Readonly<RungSectionProps>, next: Readonly<Ru
   return !previousInsert && !nextInsert
     ? true
     : previous.context.insertTargetLabel === next.context.insertTargetLabel
+}
+
+function sameNodeRuntime(
+  previous: Runtime,
+  next: Runtime,
+  node: LadderNode,
+): boolean {
+  if ((previous.nodePower[node.id] ?? false) !== (next.nodePower[node.id] ?? false)) {
+    return false
+  }
+  if (node.type === 'contact') return true
+  return node.branches.every((branch) => branch.every(
+    (child) => sameNodeRuntime(previous, next, child),
+  ))
+}
+
+/**
+ * 扫描运行时每拍都会生成新的 Runtime 对象，但绝大多数程序段看到的能流、
+ * 计时值和计数都没有变化。只比较本段真正渲染的运行时字段，避免 1000 段
+ * 在每次 tick 全部重新提交 DOM。
+ */
+function sameRuntimeForRung(
+  previous: Runtime,
+  next: Runtime,
+  rung: Program['rungs'][number],
+): boolean {
+  if ((previous.rungPower[rung.id] ?? false) !== (next.rungPower[rung.id] ?? false)) {
+    return false
+  }
+  if ((previous.outputPower[rung.output.id] ?? false)
+    !== (next.outputPower[rung.output.id] ?? false)) return false
+  if (!rung.nodes.every((node) => sameNodeRuntime(previous, next, node))) return false
+
+  const output = rung.output
+  if (['TON', 'TOF', 'TONR'].includes(output.kind)) {
+    const before = previous.timers[output.tag]
+    const after = next.timers[output.tag]
+    if ((before?.et ?? 0) !== (after?.et ?? 0) || (before?.q ?? false) !== (after?.q ?? false)) {
+      return false
+    }
+  }
+  if (output.kind === 'CTU') {
+    const before = previous.counters[output.tag]
+    const after = next.counters[output.tag]
+    if ((before?.cv ?? 0) !== (after?.cv ?? 0) || (before?.q ?? false) !== (after?.q ?? false)) {
+      return false
+    }
+  }
+  if (output.kind === 'PATTERN'
+    && (previous.patterns[output.id]?.index ?? 0) !== (next.patterns[output.id]?.index ?? 0)) {
+    return false
+  }
+  if ((output.kind === 'SET' || output.kind === 'RESET')
+    && (previous.bools[output.tag] ?? false) !== (next.bools[output.tag] ?? false)) {
+    return false
+  }
+  return true
 }
 
 function contextLocalSelection(selection: Selection | null, rungId: string) {
@@ -2382,6 +2514,10 @@ function contextLocalDrop(target: DropTarget | null, rungId: string, index: numb
 }
 
 const MemoRungSection = memo(RungSection, sameRungSection)
+
+const VIRTUALIZE_AFTER_RUNGS = 160
+const VIRTUAL_OVERSCAN_RUNGS = 6
+const VIRTUAL_RUNG_ESTIMATE_PX = 176
 
 interface SlotMenuProps {
   request: SlotMenuRequest
@@ -2634,7 +2770,12 @@ export default function LadderCanvas({
   availableWidth,
   mergeArmed = null,
   onMergeArmedChange,
+  layoutRef,
 }: LadderCanvasProps) {
+  const canvasRef = useRef<HTMLDivElement>(null)
+  const [visibleRungIds, setVisibleRungIds] = useState<ReadonlySet<string>>(
+    () => new Set<string>(),
+  )
   const [dragSource, setDragSource] = useState<string | null>(null)
   const [slotMenu, setSlotMenu] = useState<SlotMenuRequest | null>(null)
   const setMergeArmed = useCallback<Dispatch<SetStateAction<MergeArmed | null>>>(
@@ -2680,13 +2821,194 @@ export default function LadderCanvas({
   const draggingRungId = isDragging && dragSource?.startsWith('rung:')
     ? dragSource.slice(5)
     : null
-  const draggingRungIndex = draggingRungId
-    ? program.rungs.findIndex((rung) => rung.id === draggingRungId)
-    : -1
+  const rungIds = useMemo(() => program.rungs.map((rung) => rung.id), [program.rungs])
+  const indexById = useMemo(
+    () => new Map(rungIds.map((id, index) => [id, index] as const)),
+    [rungIds],
+  )
+  const draggingRungIndex = draggingRungId ? indexById.get(draggingRungId) ?? -1 : -1
   const contentIndexById = useMemo(
     () => new Map(contentRungs(program).map((rung, index) => [rung.id, index + 1] as const)),
     [program],
   )
+
+  // 超长工程只挂载视口附近、当前选中段以及正在插入/拖拽的段落。
+  // 其余段保留实测高度占位，滚动条长度保持连续；这比 content-visibility
+  // 更彻底，因为它不再把上万个 SVG 路径送进样式树。
+  const [rungHeights, setRungHeights] = useState<Readonly<Record<string, number>>>({})
+  const virtualized = availableWidth === undefined
+    && program.rungs.length > VIRTUALIZE_AFTER_RUNGS
+  const prefixOffsets = useMemo(
+    () => buildPrefixOffsets(rungIds, rungHeights, VIRTUAL_RUNG_ESTIMATE_PX),
+    [rungHeights, rungIds],
+  )
+  useLayoutEffect(() => {
+    if (!layoutRef) return
+    layoutRef.current = { rungIds, prefixOffsets, indexById }
+    return () => {
+      if (layoutRef.current?.prefixOffsets === prefixOffsets) layoutRef.current = null
+    }
+  }, [indexById, layoutRef, prefixOffsets, rungIds])
+  const scrollViewportRef = useRef({
+    scrollTop: 0,
+    height: 900,
+    sheetContentTop: 0,
+    initialized: false,
+  })
+  const [renderedRange, setRenderedRange] = useState<RenderedRange>({
+    startIndex: 0,
+    endIndex: 0,
+  })
+  const renderedRangeRef = useRef<RenderedRange>(renderedRange)
+
+  useLayoutEffect(() => {
+    if (!virtualized) return
+    const pane = canvasRef.current?.closest<HTMLElement>('.wb-program-pane')
+    const sheet = sheetRef.current
+    if (!pane || !sheet) return
+    let frame = 0
+    const publishRange = () => {
+      const viewport = scrollViewportRef.current
+      const next = rangeForViewport(
+        prefixOffsets,
+        Math.max(0, viewport.scrollTop - viewport.sheetContentTop),
+        viewport.height,
+        VIRTUAL_RUNG_ESTIMATE_PX * VIRTUAL_OVERSCAN_RUNGS,
+      )
+      if (sameRenderedRange(next, renderedRangeRef.current)) return
+      renderedRangeRef.current = next
+      setRenderedRange(next)
+    }
+    const syncGeometry = () => {
+      frame = 0
+      const paneRect = pane.getBoundingClientRect()
+      const sheetRect = sheet.getBoundingClientRect()
+      const viewport = scrollViewportRef.current
+      viewport.height = Math.max(320, pane.clientHeight)
+      viewport.sheetContentTop = sheetRect.top - paneRect.top + pane.scrollTop
+      viewport.scrollTop = pane.scrollTop
+      viewport.initialized = true
+      publishRange()
+    }
+    const schedule = () => {
+      if (frame !== 0) return
+      frame = window.requestAnimationFrame(() => {
+        frame = 0
+        scrollViewportRef.current.scrollTop = pane.scrollTop
+        publishRange()
+      })
+    }
+    syncGeometry()
+    pane.addEventListener('scroll', schedule, { passive: true })
+    const observer = typeof ResizeObserver === 'undefined'
+      ? null
+      : new ResizeObserver(syncGeometry)
+    observer?.observe(pane)
+    observer?.observe(sheet)
+    return () => {
+      if (frame !== 0) window.cancelAnimationFrame(frame)
+      pane.removeEventListener('scroll', schedule)
+      observer?.disconnect()
+    }
+  }, [prefixOffsets, virtualized])
+
+  const selectionRungId = selection?.rungId
+  const insertTargetRungId = insertTarget?.rungId
+  const pendingFocusRungId = pendingFocus?.rungId
+  const pinnedRungIndexes = useMemo(() => [
+    selectionRungId ? indexById.get(selectionRungId) : undefined,
+    insertTargetRungId ? indexById.get(insertTargetRungId) : undefined,
+    draggingRungId ? indexById.get(draggingRungId) : undefined,
+    pendingFocusRungId ? indexById.get(pendingFocusRungId) : undefined,
+  ], [draggingRungId, indexById, insertTargetRungId, pendingFocusRungId, selectionRungId])
+
+  const renderedRungIndexes = useMemo(() => {
+    if (!virtualized) return new Set(rungIds.map((_, index) => index))
+    return mergedRenderedIndexes(renderedRange, pinnedRungIndexes, rungIds.length)
+  }, [pinnedRungIndexes, renderedRange, rungIds, virtualized])
+
+  const mountedRungIndexes = useMemo(
+    () => sortedIndexes(renderedRungIndexes),
+    [renderedRungIndexes],
+  )
+  const rungSpans = useMemo(
+    () => buildRungSpans(mountedRungIndexes, rungIds.length),
+    [mountedRungIndexes, rungIds.length],
+  )
+  const rungChunks = useMemo(
+    () => buildRungChunks(rungSpans, prefixOffsets),
+    [prefixOffsets, rungSpans],
+  )
+
+  useLayoutEffect(() => {
+    if (!virtualized) return
+    const sheet = sheetRef.current
+    if (!sheet) return
+    const measured: Record<string, number> = {}
+    sheet.querySelectorAll<HTMLElement>('.ll-rung[data-rung-id]').forEach((element) => {
+      const id = element.dataset.rungId
+      const height = element.getBoundingClientRect().height
+      if (id && height > 0) measured[id] = Math.round(height * 2) / 2
+    })
+    setRungHeights((previous) => {
+      let changed = false
+      const next = { ...previous }
+      for (const [id, height] of Object.entries(measured)) {
+        if (Math.abs((previous[id] ?? 0) - height) > 0.5) {
+          next[id] = height
+          changed = true
+        }
+      }
+      return changed ? next : previous
+    })
+  }, [renderedRungIndexes, sheetWidth, virtualized])
+
+  const renderedRungKey = useMemo(
+    () => mountedRungIndexes
+      .map((index) => rungIds[index])
+      .join('|'),
+    [mountedRungIndexes, rungIds],
+  )
+
+  // 火花只服务于视口附近的“通电感”。先找出屏幕附近（含 400px 预热区）
+  // 的程序段，再由下面的槽位计算限制为最多 8 个无限动画实例。
+  useEffect(() => {
+    const root = canvasRef.current
+    if (!root || typeof IntersectionObserver === 'undefined') return
+    const visible = new Set<string>()
+    const observer = new IntersectionObserver((entries) => {
+      let changed = false
+      for (const entry of entries) {
+        const id = (entry.target as HTMLElement).dataset.rungId
+        if (!id) continue
+        if (entry.isIntersecting && !visible.has(id)) {
+          visible.add(id)
+          changed = true
+        } else if (!entry.isIntersecting && visible.delete(id)) {
+          changed = true
+        }
+      }
+      if (changed) setVisibleRungIds(new Set(visible))
+    }, { rootMargin: '400px 0px' })
+    root.querySelectorAll<HTMLElement>('.ll-rung[data-rung-id]').forEach(
+      (element) => observer.observe(element),
+    )
+    return () => observer.disconnect()
+  }, [program.rungs, renderedRungKey])
+
+  const sparkRungIds = useMemo(() => {
+    const ids = new Set<string>()
+    // 测试环境或极旧浏览器没有 IO 时，仍保持有限的静态火花预算。
+    const candidates = visibleRungIds.size > 0
+      ? program.rungs.filter((rung) => visibleRungIds.has(rung.id))
+      : program.rungs
+    for (const rung of candidates) {
+      if (runtime.rungPower[rung.id] !== true) continue
+      ids.add(rung.id)
+      if (ids.size >= 8) break
+    }
+    return ids
+  }, [program.rungs, runtime.rungPower, visibleRungIds])
 
   // 选完元件后把焦点交给下一个 +，键盘用户和触屏都能连续往下加。
   // 这里按 DOM 里的 rung/chain/index 查找，避免并联嵌套时把路径拼错。
@@ -2884,14 +3206,84 @@ export default function LadderCanvas({
     beginDrag,
   }
 
+  const focusAcrossVirtualRungs = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== 'Tab' || event.altKey || event.ctrlKey || event.metaKey) return
+    const active = document.activeElement
+    const rung = active instanceof Element
+      ? active.closest<HTMLElement>('.ll-rung[data-rung-id]')
+      : null
+    if (!rung || !canvasRef.current?.contains(rung)) return
+
+    const rowIndex = Number(rung.dataset.rungIndex)
+    if (!Number.isInteger(rowIndex)) return
+    const candidates = Array.from(rung.querySelectorAll<HTMLElement | SVGElement>(
+      'button, input, select, textarea, a[href], summary, [tabindex]:not([tabindex="-1"])',
+    )).filter((element) => (
+      !element.matches(':disabled')
+      && !element.closest('[aria-hidden="true"], [inert]')
+      && element.getClientRects().length > 0
+    ))
+    const edge = event.shiftKey ? candidates[0] : candidates.at(-1)
+    if (!edge || active !== edge) return
+
+    const nextIndex = rowIndex + (event.shiftKey ? -1 : 1)
+    const nextRung = program.rungs[nextIndex]
+    if (!nextRung) return
+    event.preventDefault()
+
+    const pane = canvasRef.current?.closest<HTMLElement>('.wb-program-pane')
+    const rowSelector = `[data-rung-id="${CSS.escape(nextRung.id)}"]`
+    const alignRow = () => {
+      const row = pane?.querySelector<HTMLElement>(
+        `.ll-rung${rowSelector}, .ll-virtual-rung${rowSelector}`,
+      )
+      if (!pane || !row) return
+      const paneRect = pane.getBoundingClientRect()
+      const rowRect = row.getBoundingClientRect()
+      const margin = 18
+      if (rowRect.top < paneRect.top + margin) {
+        pane.scrollTop += rowRect.top - paneRect.top - margin
+      } else if (rowRect.bottom > paneRect.bottom - margin) {
+        pane.scrollTop += rowRect.bottom - paneRect.bottom + margin
+      }
+    }
+
+    onSelect({ rungId: nextRung.id, path: null, wholeRung: true })
+    alignRow()
+    let attempts = 0
+    const focusMountedRung = () => {
+      attempts += 1
+      alignRow()
+      const mounted = pane?.querySelector<HTMLElement>(`.ll-rung${rowSelector}`)
+      const focusable = mounted
+        ? Array.from(mounted.querySelectorAll<HTMLElement | SVGElement>(
+            'button, input, select, textarea, a[href], summary, [tabindex]:not([tabindex="-1"])',
+          )).filter((element) => (
+            !element.matches(':disabled')
+            && !element.closest('[aria-hidden="true"], [inert]')
+            && element.getClientRects().length > 0
+          ))
+        : []
+      const target = event.shiftKey ? focusable.at(-1) : focusable[0]
+      if (target) {
+        target.focus()
+        return
+      }
+      if (attempts < 12) window.requestAnimationFrame(focusMountedRung)
+    }
+    window.requestAnimationFrame(focusMountedRung)
+  }
+
   return (
     <>
       <div
+        ref={canvasRef}
         className={[
           'll-canvas',
           isDragging ? 'is-dragging' : '',
           draggingRungId ? 'is-rung-dragging' : '',
         ].filter(Boolean).join(' ')}
+        onKeyDown={focusAcrossVirtualRungs}
         onClick={(event) => {
           const target = event.target
           if (!(target instanceof Element) || target.closest(
@@ -2915,39 +3307,80 @@ export default function LadderCanvas({
         }}
       >
         <div
-          className={['ll-program-sheet', program.rungs.length > 40 ? 'is-long' : ''].filter(Boolean).join(' ')}
+          className={[
+            'll-program-sheet',
+            program.rungs.length > 40 ? 'is-long' : '',
+            virtualized ? 'is-virtualized' : '',
+          ].filter(Boolean).join(' ')}
+          data-virtualized={virtualized ? 'true' : undefined}
+          data-total-rungs={program.rungs.length}
           ref={sheetRef}
         >
-          {program.rungs.map((rung, index) => (
-            <Fragment key={rung.id}>
+          {rungChunks.flatMap((chunk) => {
+            if (chunk.kind === 'spacer') {
+              return [
+                <div
+                  key={`spacer-${chunk.startIndex}-${chunk.endIndex}-${chunk.height}`}
+                  className="ll-rung-spacer"
+                  data-rung-spacer-start={chunk.startIndex}
+                  data-rung-spacer-end={chunk.endIndex}
+                  style={{ height: chunk.height }}
+                  aria-hidden="true"
+                />,
+              ]
+            }
+
+            const { startIndex, endIndex } = chunk.span
+            const rows: ReactElement[] = [
               <RungDropzone
-                boundary={index}
+                key={`span-start-${startIndex}`}
+                boundary={startIndex}
                 dragging={Boolean(draggingRungId)}
-                active={dragTarget?.type === 'rung-boundary' && dragTarget.boundary === index}
-                noop={index === draggingRungIndex || index === draggingRungIndex + 1}
-              />
-              <MemoRungSection
-                rung={rung}
-                programRevision={program}
-                index={index}
-                total={contentIndexById.size}
-                availableWidth={sheetWidth}
-                segmentLabel={isBlankRung(rung)
-                  ? '新程序段'
-                  : '程序段 ' + (contentIndexById.get(rung.id) ?? 0)}
-                context={{ ...context, rungId: rung.id }}
-                onDuplicateRung={onDuplicateRung}
-                onCopyRung={onCopyRung}
-                onCutRung={onCutRung}
-                onPasteRung={onPasteRung}
-                rungClipboardCount={rungClipboardCount}
-                onDeleteRung={onDeleteRung}
-                onMoveRung={onMoveRung}
-                onRenameRung={onRenameRung}
-                onDeleteNode={onDeleteNode}
-              />
-            </Fragment>
-          ))}
+                active={dragTarget?.type === 'rung-boundary'
+                  && dragTarget.boundary === startIndex}
+                noop={startIndex === draggingRungIndex
+                  || startIndex === draggingRungIndex + 1}
+              />,
+            ]
+            for (let index = startIndex; index <= endIndex; index += 1) {
+              const rung = program.rungs[index]
+              if (!rung) continue
+              rows.push(
+                <MemoRungSection
+                    key={rung.id}
+                    rung={rung}
+                    programRevision={program}
+                    index={index}
+                    total={contentIndexById.size}
+                    availableWidth={sheetWidth}
+                    segmentLabel={isBlankRung(rung)
+                      ? '新程序段'
+                      : '程序段 ' + (contentIndexById.get(rung.id) ?? 0)}
+                    spark={sparkRungIds.has(rung.id)}
+                    context={{ ...context, rungId: rung.id }}
+                    onDuplicateRung={onDuplicateRung}
+                    onCopyRung={onCopyRung}
+                    onCutRung={onCutRung}
+                    onPasteRung={onPasteRung}
+                    rungClipboardCount={rungClipboardCount}
+                    onDeleteRung={onDeleteRung}
+                    onMoveRung={onMoveRung}
+                    onRenameRung={onRenameRung}
+                    onDeleteNode={onDeleteNode}
+                />,
+                <RungDropzone
+                  key={`rung-after-${rung.id}`}
+                  boundary={index + 1}
+                  dragging={Boolean(draggingRungId)}
+                  active={dragTarget?.type === 'rung-boundary'
+                    && dragTarget.boundary === index + 1}
+                  noop={index + 1 === draggingRungIndex
+                    || index + 1 === draggingRungIndex + 1}
+                />,
+              )
+            }
+            return rows
+          })}
           <RungDropzone
             boundary={program.rungs.length}
             dragging={Boolean(draggingRungId)}

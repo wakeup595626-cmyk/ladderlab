@@ -2,6 +2,7 @@ import { useRef, useState } from 'react'
 import { COURSE_LABS } from '../engine/courseLabs'
 import { SAMPLES } from '../engine/samples'
 import { useModalFocus } from '../lib/useModalFocus'
+import { usePresence } from '../lib/usePresence'
 import { CloseIcon, SearchIcon } from './Icons'
 
 export interface LibraryDialogProps {
@@ -11,14 +12,28 @@ export interface LibraryDialogProps {
 }
 
 export default function LibraryDialog({ open, onClose, onLoadSample }: LibraryDialogProps) {
-  if (!open) return null
-  return <LibraryDialogContent onClose={onClose} onLoadSample={onLoadSample} />
+  const { present, closing } = usePresence(open, 180)
+  if (!present) return null
+  return (
+    <LibraryDialogContent
+      open={open}
+      closing={closing}
+      onClose={onClose}
+      onLoadSample={onLoadSample}
+    />
+  )
 }
 
-function LibraryDialogContent({ onClose, onLoadSample }: Omit<LibraryDialogProps, 'open'>) {
+function LibraryDialogContent({
+  open,
+  closing,
+  onClose,
+  onLoadSample,
+}: LibraryDialogProps & { closing: boolean }) {
   const [query, setQuery] = useState('')
   const searchRef = useRef<HTMLInputElement>(null)
-  const dialogRef = useModalFocus<HTMLElement>(true, onClose, searchRef)
+  // 内容组件只在 present 时挂载，effect 首次运行时容器已经存在。
+  const dialogRef = useModalFocus<HTMLElement>(open, onClose, searchRef)
 
   const normalizedQuery = query.trim().toLocaleLowerCase()
   const matches = (name: string, description: string) =>
@@ -30,7 +45,8 @@ function LibraryDialogContent({ onClose, onLoadSample }: Omit<LibraryDialogProps
 
   return (
     <div
-      className="library-backdrop"
+      className={`library-backdrop${closing ? ' is-closing' : ''}`}
+      data-state={closing ? 'closing' : 'open'}
       role="presentation"
       onPointerDown={(event) => {
         if (event.target !== event.currentTarget) return
@@ -38,7 +54,15 @@ function LibraryDialogContent({ onClose, onLoadSample }: Omit<LibraryDialogProps
         onClose()
       }}
     >
-      <section ref={dialogRef} className="library-dialog" role="dialog" aria-modal="true" aria-labelledby="library-title" tabIndex={-1}>
+      <section
+        ref={dialogRef}
+        className="library-dialog"
+        role="dialog"
+        aria-modal={open ? 'true' : undefined}
+        inert={closing}
+        aria-labelledby="library-title"
+        tabIndex={-1}
+      >
       <header className="library-head" role="none">
           <div>
             <h2 id="library-title">实验与示例</h2>

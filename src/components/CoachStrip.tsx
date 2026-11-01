@@ -14,7 +14,7 @@ export default function CoachStrip({ onDismiss, onStartDemo }: CoachStripProps) 
         <span><b>3</b> 运行后切换变量</span>
       </p>
       <p className="wb-coach-compact">
-        点线路上的 + 加元件，点元件即可改参数
+        先点导线选插入点，再点 + 加元件；点元件即可改参数
       </p>
       <div className="wb-coach-actions">
         <button type="button" className="wb-coach-demo" onClick={onStartDemo}>载入启保停示例</button>

@@ -6,6 +6,7 @@ import type { Program } from '../engine/types'
 import type { BrokenSavedProject, SavedProject } from '../lib/projectLibrary'
 import { formatProjectTime } from '../lib/projectSummary'
 import { useModalFocus } from '../lib/useModalFocus'
+import { usePresence } from '../lib/usePresence'
 import {
   BookIcon,
   CloseIcon,
@@ -69,17 +70,21 @@ export default function ProjectDrawer({
   onAbout,
 }: ProjectDrawerProps) {
   const closeRef = useRef<HTMLButtonElement>(null)
+  const { present, closing } = usePresence(open, 300)
   const activeProfile = getProfile(program.profile)
-  const drawerRef = useModalFocus<HTMLDivElement>(open, onClose, closeRef)
+  // present 只负责退场视觉；打开状态一结束就立刻释放焦点陷阱。
+  // 首次打开时 present 比 open 晚一帧，必须等容器真正挂载后再启动陷阱。
+  const drawerRef = useModalFocus<HTMLDivElement>(open && present, onClose, closeRef)
   const brokenProjectRecords = brokenProjects.filter((record) => record.kind === 'project')
   const brokenTombstoneRecords = brokenProjects.filter((record) => record.kind === 'tombstone')
   const brokenRecordCount = brokenProjectRecords.length + brokenTombstoneRecords.length
 
-  if (!open) return null
+  if (!present) return null
 
   return (
     <div
-      className="wb-drawer-backdrop is-left"
+      className={`wb-drawer-backdrop is-left${closing ? ' is-closing' : ''}`}
+      data-state={closing ? 'closing' : 'open'}
       role="presentation"
       onPointerDown={(event) => {
         if (event.target !== event.currentTarget) return
@@ -91,7 +96,8 @@ export default function ProjectDrawer({
         ref={drawerRef}
         className="wb-project-drawer"
         role="dialog"
-        aria-modal="true"
+        aria-modal={open ? 'true' : undefined}
+        inert={closing}
         aria-labelledby="project-drawer-title"
       >
         <div className="wb-drawer-head">
@@ -154,7 +160,7 @@ export default function ProjectDrawer({
             <span>
               {savedProjects.length + brokenRecordCount > 0
                 ? `${savedProjects.length} 个${brokenRecordCount > 0 ? ` · ${brokenRecordCount} 条异常` : ''}`
-                : '未保存'}
+                : '0 个命名项目'}
             </span>
           </div>
 
@@ -165,7 +171,7 @@ export default function ProjectDrawer({
               <FolderIcon size={20} />
               <p>还没有命名项目</p>
               <small>
-                点击顶栏「保存」，给当前工程起一个名称{signedIn ? '，随后同步到当前账号' : ''}。
+                自动草稿只保护本页编辑；点击顶栏「保存」命名后，才会进入项目库{signedIn ? '并同步到当前账号' : ''}。
               </small>
             </div>
           ) : (

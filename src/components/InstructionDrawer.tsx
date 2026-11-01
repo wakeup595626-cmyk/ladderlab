@@ -24,6 +24,7 @@ interface InstructionDrawerProps {
   onOpenGuide: () => void
   onClose: () => void
   dragging?: boolean
+  closing?: boolean
 }
 
 export default function InstructionDrawer({
@@ -44,6 +45,7 @@ export default function InstructionDrawer({
   onOpenGuide,
   onClose,
   dragging = false,
+  closing = false,
 }: InstructionDrawerProps) {
   // 抽屉里第一个可聚焦控件是程序段下拉；直接落在下拉上会让手机立刻弹出
   // 原生选择器。初始焦点放在标题上，先读出「全部指令」再让用户自己 Tab。
@@ -54,6 +56,7 @@ export default function InstructionDrawer({
     <div
       ref={drawerRef}
       className={'wb-instruction-drawer-backdrop' + (dragging ? ' is-dragging' : '')}
+      data-state={closing ? 'closing' : 'open'}
       role="dialog"
       aria-modal="true"
       aria-label="全部指令"

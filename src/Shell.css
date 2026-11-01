@@ -702,7 +702,8 @@ body[data-drag-kind] {
   font-size: 13px;
   white-space: nowrap;
   cursor: grab;
-  touch-action: none;
+  /* 收藏条水平滚动优先；纵向滑动才拖入画布。 */
+  touch-action: pan-x;
 }
 
 .wb-instruction-button:hover:not(:disabled) {
@@ -930,6 +931,10 @@ body[data-drag-kind] {
   font-weight: 600;
 }
 
+.wb-compile-banner-short {
+  display: none;
+}
+
 .wb-compile-banner button {
   min-height: 32px;
   margin-left: auto;
@@ -940,6 +945,44 @@ body[data-drag-kind] {
   color: var(--negative);
   font-size: 12.5px;
   cursor: pointer;
+}
+
+/* 横屏手机只剩约 390px 高：错误条必须保持单行，把高度还给图纸。
+   文案缩成“N 个错误”，44px 的查看诊断仍是完整触控目标。 */
+@media (max-height: 480px) {
+  .wb-program-inner {
+    gap: 6px;
+  }
+
+  .wb-compile-banner {
+    min-height: 44px;
+    gap: 8px;
+    padding: 0 8px;
+    font-size: 12px;
+    line-height: 1.2;
+    white-space: nowrap;
+  }
+
+  .wb-compile-banner strong {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .wb-compile-banner-long {
+    display: none;
+  }
+
+  .wb-compile-banner-short {
+    display: inline;
+  }
+
+  .wb-compile-banner button {
+    min-height: 44px;
+    flex: 0 0 auto;
+    padding: 0 8px;
+    font-size: 12px;
+  }
 }
 
 /* ----------------------------------------------------------- status bar */
@@ -990,6 +1033,10 @@ body[data-drag-kind] {
 .wb-drawer-backdrop.is-left {
   display: flex;
   justify-content: flex-start;
+}
+
+.wb-drawer-backdrop.is-closing {
+  pointer-events: none;
 }
 
 .wb-project-drawer {
@@ -1320,8 +1367,8 @@ body[data-drag-kind] {
 
 .wb-saved-project-delete {
   display: grid;
-  width: 34px;
-  flex: 0 0 34px;
+  width: 44px;
+  flex: 0 0 44px;
   place-items: center;
   border: 0;
   border-left: 1px solid transparent;
@@ -2124,6 +2171,58 @@ body[data-drag-kind] {
   display: none;
 }
 
+/* Tablet widths have room for one compact sentence beside the actions. The
+   full three-step path needs a full width and pushed these buttons into a
+   vertical stack between 721px and 900px. */
+@media (min-width: 721px) and (max-width: 900px) {
+  /* 768 宽时标题和分支/合并组会把收藏列表压到只剩几十像素。
+     标题保留在无障碍树里，构造入口仍可从画布选中元件后使用。 */
+  .wb-instruction-intro {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .wb-instruction-construct {
+    display: none;
+  }
+
+  .wb-coach {
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 8px 12px;
+  }
+
+  .wb-coach-path {
+    display: none;
+  }
+
+  .wb-coach-compact {
+    display: block;
+    min-width: 0;
+    flex: 1 1 auto;
+    margin: 0;
+    color: var(--accent-ink);
+    font-size: 12px;
+    line-height: 1.4;
+  }
+
+  .wb-coach-actions {
+    width: auto;
+    flex: 0 0 auto;
+    justify-content: flex-end;
+    margin-left: 0;
+  }
+
+  .wb-coach-dismiss {
+    white-space: nowrap;
+  }
+}
+
 @media (max-width: 720px) {
   .wb-coach {
     flex-wrap: nowrap;
@@ -2350,7 +2449,7 @@ body[data-drag-kind] {
 
 @media (pointer: coarse) {
   .wb-shell .wb-instruction-button:not(:disabled) {
-    touch-action: none;
+    touch-action: pan-x;
   }
 
   .wb-shell .wb-project-button,
@@ -3923,6 +4022,14 @@ body[data-drag-kind] {
     transition: transform var(--dur-sheet) var(--ease-drawer);
   }
 
+  .wb-drawer-backdrop.is-closing {
+    opacity: 0;
+  }
+
+  .wb-drawer-backdrop.is-closing .wb-project-drawer {
+    transform: translateX(-100%);
+  }
+
   .wb-context-layer {
     overflow: hidden;
   }
@@ -3933,6 +4040,34 @@ body[data-drag-kind] {
 
   .wb-context-panel[role="dialog"] {
     transition: transform var(--dur-sheet) var(--ease-drawer);
+  }
+
+  .wb-instruction-drawer-backdrop .project-sidebar {
+    transition:
+      opacity var(--dur-base) var(--ease-out),
+      transform var(--dur-base) var(--ease-out);
+  }
+
+  .wb-instruction-drawer-backdrop[data-state='closing'] {
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .wb-instruction-drawer-backdrop[data-state='closing'] .project-sidebar {
+    opacity: 0;
+    transform: translateY(10px) scale(0.985);
+  }
+
+  .wb-context-layer[data-state='closing'] {
+    pointer-events: none;
+  }
+
+  .wb-context-layer[data-state='closing'] .wb-context-scrim {
+    opacity: 0;
+  }
+
+  .wb-context-layer[data-state='closing'] .wb-context-panel[role="dialog"] {
+    transform: translateX(100%);
   }
 
   @starting-style {
@@ -3947,6 +4082,18 @@ body[data-drag-kind] {
 
     .wb-context-panel[role="dialog"] {
       transform: translateX(100%);
+    }
+  }
+}
+
+@media (max-width: 720px) and (prefers-reduced-motion: no-preference) {
+  .wb-drawer-backdrop.is-closing .wb-project-drawer {
+    transform: translateY(100%);
+  }
+
+  @starting-style {
+    .wb-project-drawer {
+      transform: translateY(100%);
     }
   }
 }
@@ -4540,6 +4687,21 @@ body[data-drag-kind] {
   .wb-program-resizer-grip,
   .wb-program-resizer-tip {
     transition: none;
+  }
+}
+
+/* 平板横屏常见「宽视口 + 粗指针」：保留 56px 顶栏的气泡感，
+   但把实际可点控件抬到 44px，避免鼠标桌面被无谓放大。 */
+@media (min-width: 721px) and (pointer: coarse) {
+  .wb-shell {
+    --control-height: 44px;
+    /* The segmented top bar owns 1px borders on both sides. A 46px outer
+       box is what makes the buttons inside a real 44px target. */
+    --topbar-control-h: 46px;
+  }
+
+  .wb-instruction-card {
+    min-height: 44px;
   }
 }
 
@@ -5366,7 +5528,11 @@ body[data-drag-kind] {
 
 .wb-theme-menu .wb-theme-option[aria-checked='true'] .wb-theme-option-note {
   color: var(--accent-ink);
-  opacity: 0.82;
+}
+
+.wb-theme-menu .wb-theme-option:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .wb-theme-menu .wb-theme-option.is-custom {
@@ -5401,6 +5567,14 @@ body[data-drag-kind] {
 @media (max-width: 360px) {
   .tag-table-head {
     display: none;
+  }
+
+  /* This selector has to outrank the legacy last-child ellipsis rule above. */
+  .wb-theme-menu .wb-theme-option > .wb-theme-option-text > .wb-theme-option-note {
+    overflow: visible;
+    text-overflow: clip;
+    white-space: normal;
+    line-height: 1.3;
   }
 
   .tag-card {
@@ -5934,5 +6108,79 @@ body[data-drag-kind] {
 .qe-head h2:focus,
 .qe-head h2:focus-visible {
   outline: none;
+}
+
+/* ------------------------------------------------ 持续品牌声明 */
+
+/* 产品承诺要求主界面持续可见，因此把它放进状态栏而不是只留在「关于」。
+   桌面与运行状态同排；手机换成第二行，保证三段文字都能完整读到。 */
+.wb-statusbar .status-disclaimer {
+  /* App.css 里有一条旧的窄屏 display:none；产品承诺要求在所有主界面
+     持续可见，这里用更高优先级明确恢复，而不是依赖样式表顺序碰运气。 */
+  display: inline;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.01em;
+}
+
+@media (max-width: 720px) {
+  .wb-statusbar.status-bar {
+    height: auto;
+    min-height: 46px;
+    flex-basis: auto;
+    flex-wrap: wrap;
+    align-content: center;
+    gap: 1px 10px;
+    padding-block: 4px;
+  }
+
+  .wb-statusbar .status-disclaimer {
+    order: 10;
+    flex: 1 0 100%;
+    font-size: 10.5px;
+    line-height: 15px;
+    text-align: center;
+    white-space: normal;
+  }
+}
+
+/* 320×568 一类短屏：抽屉整体滚动，页脚不再被 flex 裁掉；
+   头部保持粘住，滚动到项目列表深处也能随时关闭。 */
+@media (max-width: 720px), (max-height: 620px) {
+  .wb-project-drawer {
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+  }
+
+  .wb-project-drawer > .wb-drawer-head {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+  }
+
+  .wb-project-drawer > .wb-saved-section {
+    flex: 0 0 auto;
+    overflow: visible;
+  }
+
+  .wb-project-drawer > .wb-saved-section .wb-saved-projects {
+    flex: 0 0 auto;
+    overflow: visible;
+  }
+
+  .wb-project-drawer > .wb-drawer-section:last-child {
+    margin-top: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wb-instruction-drawer-backdrop,
+  .wb-instruction-drawer-backdrop .project-sidebar,
+  .wb-context-scrim,
+  .wb-context-panel[role='dialog'] {
+    transition: none;
+  }
 }
 

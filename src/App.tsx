@@ -34,6 +34,7 @@ import InlineOperandEditor, { type InlineOperandFocus } from './components/Inlin
 import LadderCanvas, { type MergeArmed, type SlotRef } from './components/LadderCanvas'
 import LibraryDialog from './components/LibraryDialog'
 import { useMediaQuery } from './lib/useMediaQuery'
+import { usePresence } from './lib/usePresence'
 import {
   persistThemePreference,
   readThemePreference,
@@ -63,6 +64,7 @@ import { instructionLabel, type InstructionFamily } from './components/instructi
 const ProgramImageExporter = lazy(() => import('./components/ProgramImageExporter'))
 import { compile } from './engine/compile'
 import { normalizeReference } from './engine/references'
+import type { RungLayoutSnapshot } from './lib/virtualRungLayout'
 import { blankProgram, buildSample } from './engine/samples'
 import {
   contentRungs,
@@ -200,6 +202,123 @@ interface HistoryState {
   past: Program[]
   present: Program
   future: Program[]
+}
+
+interface RecoveredCanvasTarget {
+  rungId: string
+  path: number[] | null
+  nodeId: string | null
+}
+
+function collectNodeLocations(program: Program) {
+  const locations: Array<{ rungId: string; rungIndex: number; nodeId: string; path: number[] }> = []
+  const walk = (rungId: string, rungIndex: number, nodes: LadderNode[], prefix: number[]) => {
+    nodes.forEach((node, index) => {
+      const path = [...prefix, index]
+      locations.push({ rungId, rungIndex, nodeId: node.id, path })
+      if (node.type === 'parallel') {
+        node.branches.forEach((branch, branchIndex) => {
+          walk(rungId, rungIndex, branch, [...path, branchIndex])
+        })
+      }
+    })
+  }
+  program.rungs.forEach((rung, rungIndex) => walk(rung.id, rungIndex, rung.nodes, []))
+  return locations
+}
+
+/**
+ * 撤销/重做时优先把键盘焦点送到“刚恢复出来”的对象。
+ * 删除后 selection 会落到相邻段，而恢复的快照里其实带着被删元件；
+ * 若只切换 program，视觉选中框与真实 DOM 焦点就会分叉。
+ */
+function findHistoryCanvasTarget(
+  destination: Program,
+  source: Program,
+  preferred: Selection | null,
+): RecoveredCanvasTarget | null {
+  const firstContentRung = (program: Program) => contentRungs(program)[0]
+  if (!preferred) {
+    const fallback = firstContentRung(destination)
+    return fallback ? { rungId: fallback.id, path: null, nodeId: null } : null
+  }
+
+  const sourceNodeIds = new Set(collectNodeLocations(source).map((item) => item.nodeId))
+  const sourceRungIds = new Set(source.rungs.map((rung) => rung.id))
+  const preferredIndex = destination.rungs.findIndex((rung) => rung.id === preferred.rungId)
+  const preferredSourceIndex = source.rungs.findIndex((rung) => rung.id === preferred.rungId)
+  const destinationNodes = collectNodeLocations(destination)
+  const recovered = destinationNodes
+    .filter((item) => !sourceNodeIds.has(item.nodeId))
+    .sort((left, right) => {
+      const leftDistance = preferredIndex >= 0 ? Math.abs(left.rungIndex - preferredIndex) : left.rungIndex
+      const rightDistance = preferredIndex >= 0 ? Math.abs(right.rungIndex - preferredIndex) : right.rungIndex
+      return leftDistance - rightDistance || left.path.join('.').localeCompare(right.path.join('.'))
+    })[0]
+  if (recovered) {
+    return { rungId: recovered.rungId, path: recovered.path, nodeId: recovered.nodeId }
+  }
+  const recoveredRung = destination.rungs.find((rung) => (
+    !isBlankRung(rung) && !sourceRungIds.has(rung.id)
+  ))
+  if (recoveredRung) {
+    return { rungId: recoveredRung.id, path: null, nodeId: null }
+  }
+
+  const existing = destination.rungs.find((rung) => rung.id === preferred.rungId)
+  if (existing) {
+    const sourceNode = preferred.path
+      ? getNodeAtPath(source, preferred.rungId, preferred.path)
+      : null
+    const sameNode = sourceNode
+      ? destinationNodes.find((item) => item.nodeId === sourceNode.id)
+      : undefined
+    if (sameNode) {
+      return { rungId: sameNode.rungId, path: sameNode.path, nodeId: sameNode.nodeId }
+    }
+
+    // 重做“删除”是反向变化，目标快照里不会凭空多出节点；此时沿原路径
+    // 找同段最近的存活元件，避免视觉选择与 DOM 焦点一起掉到 body。
+    const sourcePath = preferred.path
+    const nearest = sourcePath
+      ? destinationNodes
+          .filter((item) => item.rungId === preferred.rungId)
+          .sort((left, right) => {
+            const sourceParent = sourcePath.slice(0, -1)
+            const branchRank = Number(!samePath(left.path.slice(0, -1), sourceParent))
+              - Number(!samePath(right.path.slice(0, -1), sourceParent))
+            if (branchRank !== 0) return branchRank
+            const sourceTail = sourcePath.at(-1) ?? 0
+            const leftTail = left.path.at(-1) ?? 0
+            const rightTail = right.path.at(-1) ?? 0
+            const sameParent = samePath(left.path.slice(0, -1), sourceParent)
+            const sideRank = sameParent
+              ? Number(leftTail < sourceTail) - Number(rightTail < sourceTail)
+              : 0
+            return sideRank || Math.abs(leftTail - sourceTail) - Math.abs(rightTail - sourceTail)
+          })[0]
+      : undefined
+    return nearest
+      ? { rungId: nearest.rungId, path: nearest.path, nodeId: nearest.nodeId }
+      : { rungId: preferred.rungId, path: null, nodeId: null }
+  }
+
+  if (preferredSourceIndex >= 0) {
+    for (let distance = 1; distance < source.rungs.length; distance += 1) {
+      const neighbor = [
+        source.rungs[preferredSourceIndex - distance],
+        source.rungs[preferredSourceIndex + distance],
+      ].find((rung) => (
+        rung
+        && !isBlankRung(rung)
+        && destination.rungs.some((item) => item.id === rung.id && !isBlankRung(item))
+      ))
+      if (neighbor) return { rungId: neighbor.id, path: null, nodeId: null }
+    }
+  }
+
+  const fallback = firstContentRung(destination)
+  return fallback ? { rungId: fallback.id, path: null, nodeId: null } : null
 }
 
 interface ToastState {
@@ -537,6 +656,10 @@ export default function App() {
     present: initialProgram,
     future: [],
   })
+  const historyRef = useRef(history)
+  useLayoutEffect(() => {
+    historyRef.current = history
+  }, [history])
   const [runtime, setRuntime] = useState<Runtime>(() => createRuntime(initialProgram))
   const [running, setRunning] = useState(false)
   const [speed, setSpeed] = useState(50)
@@ -622,6 +745,9 @@ export default function App() {
   const [insertCursor, setInsertCursor] = useState<InsertSlotRef | null>(null)
   const [mergeArmed, setMergeArmed] = useState<MergeArmed | null>(null)
   const [inspectorOpen, setInspectorOpen] = useState(false)
+  // 手机端的两层覆盖面板需要保留到退场结束：直接卸载会把 CSS 过渡截断。
+  const instructionDrawerPresence = usePresence(mobilePanel === 'instructions', 180)
+  const inspectorPresence = usePresence(inspectorOpen || mobilePanel === 'properties', 200)
   const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth)
   const [inspectorWidth, setInspectorWidth] = useState(() => {
     const initialViewportWidth = window.innerWidth
@@ -686,6 +812,7 @@ export default function App() {
   const [manualSaveStatus, setManualSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
   const manualSaveStatusTimerRef = useRef<number | null>(null)
   const editorRef = useRef<HTMLElement>(null)
+  const rungLayoutRef = useRef<RungLayoutSnapshot | null>(null)
   const programFrameRef = useRef<HTMLDivElement>(null)
   const tagsButtonRef = useRef<HTMLButtonElement>(null)
   const inspectorResizePointerRef = useRef<number | null>(null)
@@ -738,6 +865,70 @@ export default function App() {
   const appMountedRef = useRef(true)
   const program = history.present
   const compileResult = useMemo(() => compile(program), [program])
+  // 删除元件/程序段后，被聚焦的 SVG 节点会随 React 卸载。这里先记下
+  // 同一段里的相邻落点，等新程序提交后在 layout effect 里接回焦点。
+  const pendingCanvasFocusRef = useRef<{ rungId: string; nodeId: string | null } | null>(null)
+
+  useLayoutEffect(() => {
+    const pending = pendingCanvasFocusRef.current
+    if (!pending) return
+    let frame = 0
+    let attempts = 0
+    const restore = () => {
+    const rungElement = Array.from(document.querySelectorAll<HTMLElement>('.ll-rung'))
+      .find((element) => element.dataset.rungId === pending.rungId)
+    if (!rungElement) {
+      attempts += 1
+      if (attempts < 12) frame = window.requestAnimationFrame(restore)
+      else pendingCanvasFocusRef.current = null
+      return
+    }
+    const nodeTarget = pending.nodeId
+      ? Array.from(rungElement.querySelectorAll<HTMLElement>('.ll-node[data-node-id]'))
+          .find((element) => element.dataset.nodeId === pending.nodeId)
+      : undefined
+    if (pending.nodeId && !nodeTarget && attempts < 12) {
+      attempts += 1
+      frame = window.requestAnimationFrame(restore)
+      return
+    }
+    // 并联分支的 data-node-id 在外层分组上，真正可聚焦的是内部选择层。
+    const focusableNode = nodeTarget?.matches('[role="button"][tabindex="0"]')
+      ? nodeTarget
+      : nodeTarget?.querySelector<HTMLElement>('[role="button"][tabindex="0"]')
+    const target = focusableNode
+      ?? rungElement.querySelector<HTMLElement>('.ll-rung-drag:not(:disabled)')
+      ?? rungElement.querySelector<HTMLElement>('.ll-rung-name')
+    if (nodeTarget) {
+      const nodePath = nodeTarget.dataset.nodePath
+        ?.split('.')
+        .map((part) => Number(part))
+      if (nodePath?.every(Number.isInteger)) {
+        setSelection({ rungId: pending.rungId, path: nodePath })
+      }
+    }
+    pendingCanvasFocusRef.current = null
+    target?.focus()
+    }
+    restore()
+    return () => window.cancelAnimationFrame(frame)
+  }, [program])
+
+  /** 删除前按画布顺序找相邻元件：优先右侧，其次左侧；整段删空则回到段标题。 */
+  const queueCanvasFocusAfterNodeDelete = useCallback((rungId: string, deletedNodeIds: string[]) => {
+    const deleted = new Set(deletedNodeIds)
+    const rungElement = Array.from(document.querySelectorAll<HTMLElement>('.ll-rung'))
+      .find((element) => element.dataset.rungId === rungId)
+    const nodes = Array.from(
+      rungElement?.querySelectorAll<HTMLElement>('.ll-node[data-node-id]') ?? [],
+    )
+    const firstDeleted = nodes.findIndex((element) => deleted.has(element.dataset.nodeId ?? ''))
+    const ordered = firstDeleted >= 0
+      ? [...nodes.slice(firstDeleted + 1), ...nodes.slice(0, firstDeleted).reverse()]
+      : nodes
+    const target = ordered.find((element) => !deleted.has(element.dataset.nodeId ?? ''))
+    pendingCanvasFocusRef.current = { rungId, nodeId: target?.dataset.nodeId ?? null }
+  }, [])
 
   const showManualSaveStatus = useCallback((status: 'idle' | 'saving' | 'saved' | 'error', resetMs?: number) => {
     if (manualSaveStatusTimerRef.current !== null) {
@@ -1146,7 +1337,7 @@ export default function App() {
     saveDirtyRef.current = true
     setSaveError(result.error)
     if (lastSaveFailureRef.current !== result.error) {
-      notify(`自动保存失败：${result.error}`, { tone: 'error' })
+      notify(`草稿自动保存失败：${result.error}`, { tone: 'error' })
       lastSaveFailureRef.current = result.error
     }
 
@@ -1488,40 +1679,65 @@ export default function App() {
       : insertNodeAt(current, rungId, { chain, index }, node)
     if (next === current || !findNodePath(next, rungId, node.id)) return false
 
+    const restoredPath = findNodePath(next, rungId, node.id)
+    pendingCanvasFocusRef.current = { rungId, nodeId: node.id }
     commit(next)
-    setSelection({ rungId, path: findNodePath(next, rungId, node.id) })
+    setSelection({ rungId, path: restoredPath })
     return true
   }, [commit])
 
   const undo = useCallback(() => {
-    setHistory((previous) => {
-      const previousProgram = previous.past.at(-1)
-      if (!previousProgram) return previous
-      return {
-        past: previous.past.slice(0, -1).map(ensureTrailingBlankRung),
-        present: ensureTrailingBlankRung(previousProgram),
-        future: [
-          ensureTrailingBlankRung(previous.present),
-          ...previous.future.map(ensureTrailingBlankRung),
-        ].slice(0, HISTORY_LIMIT),
-      }
-    })
-  }, [])
+    const previous = historyRef.current
+    const previousProgram = previous.past.at(-1)
+    if (!previousProgram) return
+    const next: HistoryState = {
+      past: previous.past.slice(0, -1).map(ensureTrailingBlankRung),
+      present: ensureTrailingBlankRung(previousProgram),
+      future: [
+        ensureTrailingBlankRung(previous.present),
+        ...previous.future.map(ensureTrailingBlankRung),
+      ].slice(0, HISTORY_LIMIT),
+    }
+    // ref 先走一步，连按 Ctrl+Z 时不用等 React 提交也能拿到正确快照。
+    historyRef.current = next
+    latestProgramRef.current = next.present
+    setHistory(next)
+    const target = findHistoryCanvasTarget(next.present, previous.present, selection)
+    if (target) {
+      setSelection({
+        rungId: target.rungId,
+        path: target.path,
+        wholeRung: target.path === null,
+      })
+      pendingCanvasFocusRef.current = { rungId: target.rungId, nodeId: target.nodeId }
+    }
+  }, [selection])
 
   const redo = useCallback(() => {
-    setHistory((previous) => {
-      const nextProgram = previous.future[0]
-      if (!nextProgram) return previous
-      return {
-        past: [
-          ...previous.past.map(ensureTrailingBlankRung),
-          ensureTrailingBlankRung(previous.present),
-        ].slice(-HISTORY_LIMIT),
-        present: ensureTrailingBlankRung(nextProgram),
-        future: previous.future.slice(1).map(ensureTrailingBlankRung),
-      }
-    })
-  }, [])
+    const previous = historyRef.current
+    const nextProgram = previous.future[0]
+    if (!nextProgram) return
+    const next: HistoryState = {
+      past: [
+        ...previous.past.map(ensureTrailingBlankRung),
+        ensureTrailingBlankRung(previous.present),
+      ].slice(-HISTORY_LIMIT),
+      present: ensureTrailingBlankRung(nextProgram),
+      future: previous.future.slice(1).map(ensureTrailingBlankRung),
+    }
+    historyRef.current = next
+    latestProgramRef.current = next.present
+    setHistory(next)
+    const target = findHistoryCanvasTarget(next.present, previous.present, selection)
+    if (target) {
+      setSelection({
+        rungId: target.rungId,
+        path: target.path,
+        wholeRung: target.path === null,
+      })
+      pendingCanvasFocusRef.current = { rungId: target.rungId, nodeId: target.nodeId }
+    }
+  }, [selection])
 
   /** 删除程序段并给出可撤销提示；剪切、Delete 和菜单删除共用同一条路径。 */
   const deleteRungWithUndo = useCallback((rungId: string, message = '程序段已删除') => {
@@ -1541,6 +1757,9 @@ export default function App() {
       Math.min(remaining.length - 1, Math.max(0, contentIndex - 1))
     ] ?? preferredRung(next)
     setSelection(fallback ? { rungId: fallback.id, path: null, wholeRung: true } : null)
+    pendingCanvasFocusRef.current = fallback
+      ? { rungId: fallback.id, nodeId: null }
+      : null
     notify(message === '程序段已删除' ? `${segment}已删除` : message, {
       action: {
         label: '撤销',
@@ -1548,6 +1767,7 @@ export default function App() {
           if (!removed) return
           restoreRung(removed, index)
           setSelection({ rungId: removed.id, path: null, wholeRung: true })
+          pendingCanvasFocusRef.current = { rungId: removed.id, nodeId: null }
         },
       },
       focusAction: true,
@@ -2508,6 +2728,7 @@ export default function App() {
     if (next === program) return
     const chain = path.slice(0, -1)
     const index = path[path.length - 1]
+    queueCanvasFocusAfterNodeDelete(rungId, [node.id])
     const committed = commit(next)
     setSelection({ rungId, path: null })
     setQuickEdit(null)
@@ -2526,7 +2747,7 @@ export default function App() {
         },
       },
     })
-  }, [commit, notify, program, restoreNodeAt])
+  }, [commit, notify, program, queueCanvasFocusAfterNodeDelete, restoreNodeAt])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -2553,6 +2774,12 @@ export default function App() {
         if (existing.length === 0) return
         const next = deleteNodesAtPaths(program, selection.rungId, paths)
         if (next === program) return
+        queueCanvasFocusAfterNodeDelete(
+          selection.rungId,
+          existing
+            .map((path) => getNodeAtPath(program, selection.rungId, path)?.id)
+            .filter((id): id is string => Boolean(id)),
+        )
         event.preventDefault()
         commit(next)
         setSelection({ rungId: selection.rungId, path: null })
@@ -2561,12 +2788,37 @@ export default function App() {
         return
       }
       if (!selection?.path) return
+      // 选择状态与 DOM 焦点若因历史恢复或第三方界面操作暂时分叉，
+      // Delete 必须以用户实际聚焦的元件为准，避免删掉视野外的选中项。
+      const focusedNode = target instanceof Element
+        ? target.closest<HTMLElement>('.ll-node[data-node-id]')
+        : null
+      const focusedRung = focusedNode?.closest<HTMLElement>('.ll-rung[data-rung-id]')
+      const focusedPath = focusedNode?.dataset.nodePath?.split('.').map(Number)
+      if (
+        focusedRung?.dataset.rungId
+        && focusedPath?.every(Number.isInteger)
+        && (focusedRung.dataset.rungId !== selection.rungId
+          || focusedPath.join('.') !== selection.path.join('.'))
+      ) {
+        event.preventDefault()
+        removeNode(focusedRung.dataset.rungId, focusedPath)
+        return
+      }
       event.preventDefault()
       removeNode(selection.rungId, selection.path)
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [commit, deleteRungWithUndo, notify, program, removeNode, selection])
+  }, [
+    commit,
+    deleteRungWithUndo,
+    notify,
+    program,
+    queueCanvasFocusAfterNodeDelete,
+    removeNode,
+    selection,
+  ])
 
   const changeOutput = (kind: OutputKind, targetRungId = insertTarget?.rungId ?? null) => {
     if (!targetRungId) {
@@ -3738,6 +3990,12 @@ export default function App() {
     target: EventTarget | null
   }) => {
     if (event.button !== 0 || !(event.target instanceof Element)) return
+    // 菜单自身的 summary 在下面的“非留白”名单里；这里只额外收起可能
+    // 悬在菜单上的内联编辑卡片，菜单开合交给 details 自己处理。
+    if (event.target.closest('.ll-rung-menu > summary')) {
+      quickEditReturnFocusRef.current = null
+      setQuickEdit(null)
+    }
     if (event.target.closest(
       '.ll-canvas, .qe-panel, .inline-operand, .wb-context-panel, .wb-topbar, '
       + '.wb-instruction-strip, .wb-sidebar, .wb-inspector, .wb-statusbar, dialog, '
@@ -3933,6 +4191,7 @@ export default function App() {
                 program={program}
                 selection={selection}
                 paneRef={editorRef}
+                layoutRef={rungLayoutRef}
                 onSelect={(next) => {
                   // 跳段只改变当前编辑的程序段；已经选好的插入落点继续保留，
                   // 直到用户明确点到图纸空白处。
@@ -4051,7 +4310,10 @@ export default function App() {
 
               {compileResult.errors.length > 0 && (
                 <div className="wb-compile-banner" role="alert">
-                  <strong>有 {compileResult.errors.length} 个错误，仿真已暂停</strong>
+                  <strong>
+                    <span className="wb-compile-banner-long">有 {compileResult.errors.length} 个错误，仿真已暂停</span>
+                    <span className="wb-compile-banner-short">{compileResult.errors.length} 个错误</span>
+                  </strong>
                   <button type="button" onClick={() => openInspector('diagnostics')}>查看诊断</button>
                 </div>
               )}
@@ -4109,6 +4371,7 @@ export default function App() {
                 onMergeBranchAt={mergeBranch}
                 mergeArmed={mergeArmed}
                 onMergeArmedChange={setMergeArmed}
+                layoutRef={rungLayoutRef}
                 onNotice={notify}
                 onPasteAt={(slot) => pasteAt(slot)}
                 clipboardCount={clipboard?.kind === 'nodes' ? clipboard.nodes.length : 0}
@@ -4213,7 +4476,7 @@ export default function App() {
         running={running}
         simTime={runtime.simTime}
         compileResult={compileResult}
-        lastSavedAt={lastSavedAt}
+        lastDraftSavedAt={lastSavedAt}
         savePending={savePending}
         saveError={saveError}
         saveBlocked={Boolean(corruptProject) || Boolean(remoteConflict)}
@@ -4332,7 +4595,7 @@ export default function App() {
         }}
       />
 
-      {mobilePanel === 'instructions' && (
+      {instructionDrawerPresence.present && (
         <InstructionDrawer
           program={program}
           activeRungId={activeRungId}
@@ -4360,12 +4623,14 @@ export default function App() {
           }}
           onClose={() => setMobilePanel('none')}
           dragging={Boolean(drag.drag)}
+          closing={instructionDrawerPresence.closing}
         />
       )}
 
-      {(inspectorOpen || mobilePanel === 'properties') && (
+      {inspectorPresence.present && (
         <div
           className="wb-context-layer"
+          data-state={inspectorPresence.closing ? 'closing' : 'open'}
           role={inspectorDocked ? 'complementary' : undefined}
           aria-label={inspectorDocked ? '属性与变量面板' : undefined}
         >
