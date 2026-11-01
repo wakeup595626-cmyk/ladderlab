@@ -1,4 +1,5 @@
 export const QUICK_EDITOR_PLACEMENT_STORAGE_KEY = 'ladderlab.quick-editor.placement.v1'
+export const INLINE_EDITOR_PLACEMENT_STORAGE_KEY = 'ladderlab.inline-editor.placement.v1'
 export const QUICK_EDITOR_PLACEMENT_GAP = 8
 
 /** 防呆上限：手改 localStorage 或脏数据不能把面板甩到几十万像素之外。 */
@@ -54,8 +55,15 @@ export function quickEditorStorage():
 export function readQuickEditorPlacement(
   storage: ReadableStorage | null | undefined,
 ): QuickEditorPoint | null {
+  return readStoredPlacement(storage, QUICK_EDITOR_PLACEMENT_STORAGE_KEY)
+}
+
+function readStoredPlacement(
+  storage: ReadableStorage | null | undefined,
+  key: string,
+): QuickEditorPoint | null {
   try {
-    const raw = storage?.getItem(QUICK_EDITOR_PLACEMENT_STORAGE_KEY)
+    const raw = storage?.getItem(key)
     if (!raw) return null
     return normalizeQuickEditorPlacement(JSON.parse(raw))
   } catch {
@@ -67,10 +75,18 @@ export function persistQuickEditorPlacement(
   storage: WritableStorage | null | undefined,
   point: QuickEditorPoint,
 ): void {
+  persistStoredPlacement(storage, QUICK_EDITOR_PLACEMENT_STORAGE_KEY, point)
+}
+
+function persistStoredPlacement(
+  storage: WritableStorage | null | undefined,
+  key: string,
+  point: QuickEditorPoint,
+): void {
   try {
     const normalized = normalizeQuickEditorPlacement(point)
     if (!normalized) return
-    storage?.setItem(QUICK_EDITOR_PLACEMENT_STORAGE_KEY, JSON.stringify(normalized))
+    storage?.setItem(key, JSON.stringify(normalized))
   } catch {
     // 存储被禁用时拖动照常可用，只是不记忆位置。
   }
@@ -79,11 +95,38 @@ export function persistQuickEditorPlacement(
 export function clearQuickEditorPlacement(
   storage: ClearableStorage | null | undefined,
 ): void {
+  clearStoredPlacement(storage, QUICK_EDITOR_PLACEMENT_STORAGE_KEY)
+}
+
+function clearStoredPlacement(
+  storage: ClearableStorage | null | undefined,
+  key: string,
+): void {
   try {
-    storage?.removeItem(QUICK_EDITOR_PLACEMENT_STORAGE_KEY)
+    storage?.removeItem(key)
   } catch {
     // 同上：清不掉记忆不影响面板回到右侧停靠。
   }
+}
+
+/** 就地编辑气泡有独立落点：拖动过以后，换元件、插入新块和刷新都回到原位。 */
+export function readInlineEditorPlacement(
+  storage: ReadableStorage | null | undefined,
+): QuickEditorPoint | null {
+  return readStoredPlacement(storage, INLINE_EDITOR_PLACEMENT_STORAGE_KEY)
+}
+
+export function persistInlineEditorPlacement(
+  storage: WritableStorage | null | undefined,
+  point: QuickEditorPoint,
+): void {
+  persistStoredPlacement(storage, INLINE_EDITOR_PLACEMENT_STORAGE_KEY, point)
+}
+
+export function clearInlineEditorPlacement(
+  storage: ClearableStorage | null | undefined,
+): void {
+  clearStoredPlacement(storage, INLINE_EDITOR_PLACEMENT_STORAGE_KEY)
 }
 
 function finiteOr(value: unknown, fallback: number): number {

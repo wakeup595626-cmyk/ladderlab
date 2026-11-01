@@ -1436,7 +1436,12 @@ export function changeOutputKind(program: Program, rungId: string, kind: OutputK
   if (kind === 'COIL' || kind === 'SET' || kind === 'RESET') {
     const boolTag = next.tags.find((tag) => tag.kind === 'BOOL')
     if (!boolTag) return program
-    output = { id: base.id, kind, tag: boolTag.name }
+    // 线圈、置位、复位共用同一类 BOOL 操作数。切换这三种指令时保留用户
+    // 已经填好的变量；只有从定时器/计数器/整数指令切回来，或操作数原本
+    // 为空时，才回退到第一个 BOOL 变量作为默认值。
+    const isCoilFamily = base.kind === 'COIL' || base.kind === 'SET' || base.kind === 'RESET'
+    const keepOperand = isCoilFamily && base.tag.trim() !== ''
+    output = { id: base.id, kind, tag: keepOperand ? base.tag : boolTag.name }
   } else if (kind === 'CTU') {
     output = { id: base.id, kind, tag: nextInstanceName(next, 'C'), pv: 5, resetTag: '' }
   } else if (kind === 'TON' || kind === 'TOF' || kind === 'TONR') {

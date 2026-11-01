@@ -30,6 +30,7 @@ import { FolderIcon, GripIcon, LadderIcon, TagIcon } from './components/Icons'
 import Inspector, { type InspectorTab } from './components/Inspector'
 import InstructionBar from './components/InstructionBar'
 import InstructionDrawer from './components/InstructionDrawer'
+import InlineOperandEditor, { type InlineOperandFocus } from './components/InlineOperandEditor'
 import LadderCanvas, { type MergeArmed, type SlotRef } from './components/LadderCanvas'
 import LibraryDialog from './components/LibraryDialog'
 import { useMediaQuery } from './lib/useMediaQuery'
@@ -52,7 +53,6 @@ import type {
   ProgramImageFormat,
   ProgramImageMode,
 } from './components/ProgramImageExporter'
-import QuickEditor from './components/QuickEditor'
 import StatusBar from './components/StatusBar'
 import SupportBadge from './components/SupportBadge'
 import UpdateBanner from './components/UpdateBanner'
@@ -93,6 +93,7 @@ import type { ProgramIssue } from './lib/io'
 import { STRUCTURE_LIMITS } from './lib/limits'
 import { safeFileName } from './lib/filename'
 import { copyText } from './lib/clipboard'
+import { inlineEditTarget } from './lib/operandCommit'
 import {
   buildShareUrl,
   decodeProgramShareStructure,
@@ -443,7 +444,8 @@ function runtimeSignature(program: Program): string {
 
 interface QuickEditState {
   selection: Selection
-  autoFocus?: boolean
+  /** 气泡打开后先落到哪个输入框：操作数，或已绑定变量的地址。 */
+  focusTarget?: InlineOperandFocus
   focusToken?: number
 }
 
@@ -860,6 +862,27 @@ export default function App() {
       focusAction: options?.focusAction,
     })
   }, [])
+
+  /**
+   * 单击元件只打开就地操作数气泡：它绝对定位在元件旁，不占布局宽度，
+   * 也不拉起右侧参数面板，所以画布始终保持居中。
+   */
+  const openOperandEdit = useCallback((
+    next: Selection,
+    focusTarget: InlineOperandFocus = 'operand',
+  ) => {
+    if (!inlineEditTarget(program, next)) return
+    setSelection(next)
+    setQuickEdit({
+      selection: next,
+      focusTarget,
+      focusToken: ++quickEditFocusTokenRef.current,
+    })
+    setInspectorOpen(false)
+    if (window.matchMedia('(max-width: 1024px)').matches) {
+      setMobilePanel((panel) => (panel === 'properties' ? 'none' : panel))
+    }
+  }, [program])
 
   /** 打开账号面板时顺手点一下本机“未登录”项目数量，决定要不要展示迁移入口。 */
   const openAccount = useCallback(() => {
@@ -2107,15 +2130,6 @@ export default function App() {
       event.stopPropagation()
       if (event.repeat) return
       if (document.querySelector('[role="dialog"][aria-modal="true"]')) return
-      // QuickEditor 的名称/数值字段是「失焦才提交」。如果用户改完直接按
-      // Ctrl+S，先手动失焦把草稿写回 program，再等这一帧提交完才保存，
-      // 否则会把上一版内容存进项目库。
-      const active = document.activeElement
-      if (active instanceof HTMLElement && active.closest('.qe-panel')) {
-        active.blur()
-        window.setTimeout(() => { void requestSaveRef.current() }, 0)
-        return
-      }
       void requestSaveRef.current()
     }
     window.addEventListener('keydown', onKeyDown, true)
@@ -2328,7 +2342,7 @@ export default function App() {
       setFavoriteTargetRungId(slot.rungId)
       setQuickEdit({
         selection: selectionForNode,
-        autoFocus: true,
+        focusTarget: 'operand',
         focusToken: ++quickEditFocusTokenRef.current,
       })
       setMobilePanel('none')
@@ -2363,7 +2377,7 @@ export default function App() {
     setFavoriteTargetRungId(insertTarget.rungId)
     setQuickEdit({
       selection: selectionForNode,
-      autoFocus: true,
+      focusTarget: 'operand',
       focusToken: ++quickEditFocusTokenRef.current,
     })
     setMobilePanel('none')
@@ -2394,7 +2408,7 @@ export default function App() {
     // 博途放下元件后可以直接输入操作数；这里把焦点送到新元件的操作数字段。
     setQuickEdit({
       selection: selectionForNode,
-      autoFocus: true,
+      focusTarget: 'operand',
       focusToken: ++quickEditFocusTokenRef.current,
     })
     setMobilePanel('none')
@@ -2419,7 +2433,7 @@ export default function App() {
     if (opened.mode === 'sibling') {
       setQuickEdit({
         selection: selectionForNode,
-        autoFocus: true,
+        focusTarget: 'operand',
         focusToken: ++quickEditFocusTokenRef.current,
       })
     } else {
@@ -3503,11 +3517,7 @@ export default function App() {
 
   const quickSelection = quickEdit?.selection ?? null
   const quickEditValid = Boolean(
-    quickSelection
-      && program.rungs.some(
-        (rung) => rung.id === quickSelection.rungId
-          && (quickSelection.path === null || getNodeAtPath(program, rung.id, quickSelection.path) !== null),
-      ),
+    quickSelection && inlineEditTarget(program, quickSelection),
   )
   /**
    * 桌面参数框是悬浮组而非模态框，关闭时浏览器不会自动把焦点还给元件。
@@ -3557,8 +3567,8 @@ export default function App() {
     PROGRAM_SHEET_MAX_WIDTH,
     programSheetAvailableWidth,
   )
-  /** 手机端一次只允许一层底部面板；提示条需要知道它是否被面板占住了底部。 */
-  const sheetOpen = Boolean(quickEdit) || mobilePanel !== 'none'
+  /** 手机端一次只允许一层底部面板；就地编辑气泡悬浮在画布上，不算底部面板。 */
+  const sheetOpen = mobilePanel !== 'none'
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -3729,7 +3739,7 @@ export default function App() {
   }) => {
     if (event.button !== 0 || !(event.target instanceof Element)) return
     if (event.target.closest(
-      '.ll-canvas, .qe-panel, .wb-context-panel, .wb-topbar, '
+      '.ll-canvas, .qe-panel, .inline-operand, .wb-context-panel, .wb-topbar, '
       + '.wb-instruction-strip, .wb-sidebar, .wb-inspector, .wb-statusbar, dialog, '
       + 'button, input, textarea, select, label, a, summary, '
       + '[contenteditable="true"], [role="button"], [role="menu"], '
@@ -3738,7 +3748,12 @@ export default function App() {
       + '.wb-context-resizer, .wb-program-resizer',
     )) return
     const active = document.activeElement
-    if (active instanceof HTMLElement && active !== document.body) active.blur()
+    // 就地操作数输入框失焦就等于丢掉草稿，所以点到界面留白时保留它的焦点。
+    const editingOperand = active instanceof HTMLElement
+      && active.closest('[data-inline-operand-editor]') !== null
+    if (active instanceof HTMLElement && active !== document.body && !editingOperand) {
+      active.blur()
+    }
     setSelection(null)
     setInsertCursor(null)
     dismissFavoriteTargetPin()
@@ -3786,6 +3801,7 @@ export default function App() {
       data-mobile-panel={mobilePanel}
       data-sheet={sheetOpen ? 'open' : 'closed'}
       data-quick-edit={quickEdit ? 'open' : 'closed'}
+      data-inline-edit={quickEdit ? 'open' : 'closed'}
       data-inspector={inspectorVisible ? 'open' : 'closed'}
       data-inspector-resizing={resizingInspector ? 'true' : undefined}
       data-program-sheet-resizing={resizingProgramSheetSide ? 'true' : undefined}
@@ -4052,8 +4068,8 @@ export default function App() {
                 isDragging={Boolean(drag.drag)}
                 onSelect={(next) => {
                   // 点元件或线路只切换编辑目标，不打断已经选好的插入游标；
-                  // 只有真正点到图纸留白才收起常驻落点。参数框继续停在上一个
-                  // 编辑对象，直到用户点另一个元件、关闭它或按 Esc。
+                  // 只有真正点到图纸留白才收起常驻落点。就地编辑气泡不跟着
+                  // 选区消失：它只在用户点 × / 按 Esc / 成功提交时收起。
                   if (!next) {
                     setInsertCursor(null)
                     setSelection(null)
@@ -4061,29 +4077,22 @@ export default function App() {
                     return
                   }
                   setSelection(next)
-                  // 画布上选中谁，右边面板就跟到谁。正在看变量表时，点程序段
-                  // 标题只切换当前段并让变量表跟随；点具体元件仍回到属性，
-                  // 避免“选了 Motor 却停在变量表”的割裂感。
+                  // 正在看变量表时，点程序段标题只切换当前段并让变量表跟随；
+                  // 点具体元件仍把属性页设为下一次手动打开的目标页。
                   setInspectorTab((current) => (
                     current === 'tags' && next.wholeRung ? 'tags' : 'properties'
                   ))
-                  // 参数框打开时只有点选另一个具体元件才切换编辑对象。导线、
-                  // 程序段标题和空白画布不会替用户关闭面板；收起只由 × / Esc 触发。
-                  setQuickEdit((current) => (
-                    current && next.path && !(next.paths && next.paths.length > 1)
-                      ? { ...current, selection: next }
-                      : current
-                  ))
                 }}
-                onEdit={(next) => {
+                onEdit={(next, _element, focusTarget) => {
+                  // 只打开贴在元件旁边的操作数气泡，不占布局、不拉出右侧面板；
+                  // 需要指令类型、定时器参数等完整字段时再点气泡里的「更多参数」。
+                  openOperandEdit(next, focusTarget ?? 'operand')
+                }}
+                onEditDetails={(next) => {
+                  // 双击 / F2 是“完整参数”的显式入口，此时才打开右侧属性面板。
+                  setQuickEdit(null)
                   setSelection(next)
-                  setQuickEdit({ selection: next })
-                  // 点元件进入参数编辑时收起属性抽屉。桌面端只留就近参数框，
-                  // 手机端只留一层底部弹层，避免同名字段在屏幕上出现两份。
-                  setInspectorOpen(false)
-                  if (window.matchMedia('(max-width: 1024px)').matches) {
-                    setMobilePanel((panel) => (panel === 'properties' ? 'none' : panel))
-                  }
+                  openInspector('properties')
                 }}
                 onStartDrag={drag.start}
                 onRenameRung={(rungId, label) => commit(updateRungLabel(program, rungId, label))}
@@ -4140,28 +4149,21 @@ export default function App() {
         </main>
 
         {quickEdit && quickEditValid && (
-          <QuickEditor
+          <InlineOperandEditor
             program={program}
-            runtime={runtime}
-            compileResult={compileResult}
-            running={running}
             selection={quickEdit.selection}
-            autoFocus={quickEdit.autoFocus}
-            focusToken={quickEdit.focusToken}
+            focusTarget={quickEdit.focusTarget}
+            token={quickEdit.focusToken ?? 0}
             onProgram={commit}
+            onNotify={notify}
             onClose={() => {
               quickEditReturnFocusRef.current = quickEdit.selection
               setQuickEdit(null)
             }}
-            onNotify={notify}
-            onDeleteNode={() => {
-              if (quickEdit.selection.path) {
-                removeNode(quickEdit.selection.rungId, quickEdit.selection.path)
-              }
-            }}
-            onDeleteOutput={() => {
-              removeRung(quickEdit.selection.rungId)
+            onMoreDetails={() => {
+              // 切换到完整参数面板时收起气泡，避免两套编辑器同时挂在屏幕上。
               setQuickEdit(null)
+              openInspector('properties')
             }}
           />
         )}

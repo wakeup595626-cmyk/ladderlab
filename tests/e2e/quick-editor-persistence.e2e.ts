@@ -8,7 +8,8 @@ async function findCanvasBlank(page: Page) {
     const rect = canvas.getBoundingClientRect()
     const blocked = 'button, input, textarea, select, a, summary, [role="button"], '
       + '[role="menu"], [data-node-id], [data-output-id], .ll-slot, .ll-merge-chip, '
-      + '.ll-node-grip, [data-drag-handle], .ll-rung-header'
+      + '.ll-node-grip, [data-drag-handle], .ll-rung-header, '
+      + '[data-inline-operand-editor], .qe-panel'
     for (let y = Math.max(0, rect.top) + 12; y < Math.min(innerHeight, rect.bottom) - 12; y += 10) {
       for (let x = Math.max(0, rect.left) + 12; x < Math.min(innerWidth, rect.right) - 12; x += 10) {
         const hit = document.elementFromPoint(x, y)
@@ -33,7 +34,7 @@ async function findWorkbenchBlank(page: Page) {
   })
 }
 
-test('参数框在空白、导线和程序段标题上保持，只由元件切换、关闭或 Esc 结束', async ({ page }) => {
+test('单击只打开就地操作数，画布操作不关闭，双击才打开完整参数', async ({ page }) => {
   const errors = trackPageErrors(page)
 
   await openHome(page)
@@ -49,44 +50,64 @@ test('参数框在空白、导线和程序段标题上保持，只由元件切�
   const firstNode = page.locator('.ll-node[data-node-id]').first()
   await firstNode.click()
 
-  const panel = page.locator('.qe-panel')
-  await expect(panel).toBeVisible()
-  const initialLabel = await panel.getAttribute('aria-label')
-  expect(initialLabel).toMatch(/^编辑/)
+  const inline = page.locator('[data-inline-operand-editor]')
+  const input = inline.locator('input[data-inline-input]')
+  await expect(inline).toBeVisible()
+  await expect(inline).toHaveCount(1)
+  await expect(input).toBeFocused()
+  await expect(page.locator('#wb-context-panel')).toHaveCount(0)
+  const initialTarget = await inline.evaluate((element) => ({
+    rung: element.getAttribute('data-rung-id'),
+    node: element.getAttribute('data-node-id'),
+    path: element.getAttribute('data-node-path'),
+  }))
+  expect(initialTarget.rung).toBeTruthy()
+  expect(initialTarget.node).toBeTruthy()
 
   const canvasBlank = await findCanvasBlank(page)
   expect(canvasBlank).not.toBeNull()
   await page.mouse.click(canvasBlank!.x, canvasBlank!.y)
-  await expect(panel).toBeVisible()
-  await expect(panel).toHaveAttribute('aria-label', initialLabel!)
+  await expect(inline).toBeVisible()
+  await expect(inline).toHaveAttribute('data-rung-id', initialTarget.rung!)
+  await expect(inline).toHaveAttribute('data-node-id', initialTarget.node!)
 
   const workbenchBlank = await findWorkbenchBlank(page)
   expect(workbenchBlank).not.toBeNull()
   await page.mouse.click(workbenchBlank!.x, workbenchBlank!.y)
-  await expect(panel).toBeVisible()
-  await expect(panel).toHaveAttribute('aria-label', initialLabel!)
+  await expect(inline).toBeVisible()
+  await expect(inline).toHaveAttribute('data-rung-id', initialTarget.rung!)
 
   // 线路上叠加着产品刻意保留的 44px “+”触控热区；直接派发线路自身的
   // click，验证点击线路时状态层的持久化契约，而不让热区截获测试事件。
   await page.locator('.ll-slot-wire').first().dispatchEvent('click')
-  await expect(panel).toBeVisible()
-  await expect(panel).toHaveAttribute('aria-label', initialLabel!)
+  await expect(inline).toBeVisible()
+  await expect(inline).toHaveAttribute('data-rung-id', initialTarget.rung!)
 
   await page.locator('.ll-rung-index').first().click()
-  await expect(panel).toBeVisible()
-  await expect(panel).toHaveAttribute('aria-label', initialLabel!)
+  await expect(inline).toBeVisible()
+  await expect(inline).toHaveAttribute('data-rung-id', initialTarget.rung!)
 
   await page.locator('[data-output-id]').first().click()
-  await expect(panel).toBeVisible()
-  expect(await panel.getAttribute('aria-label')).not.toBe(initialLabel)
+  await expect(inline).toBeVisible()
+  await expect(inline).toHaveCount(1)
+  await expect(inline).toHaveAttribute('data-output-id', /.+/)
+  await expect(input).toBeFocused()
 
   await page.keyboard.press('Escape')
-  await expect(panel).toBeHidden()
+  await expect(inline).toBeHidden()
+  await expect(page.locator('#wb-context-panel')).toHaveCount(0)
 
   await firstNode.click()
-  await expect(panel).toBeVisible()
-  await panel.getByRole('button', { name: '关闭参数编辑' }).click()
-  await expect(panel).toBeHidden()
+  await expect(inline).toBeVisible()
+  await inline.getByRole('button', { name: '关闭操作数编辑' }).click()
+  await expect(inline).toBeHidden()
+
+  await firstNode.dblclick()
+  const details = page.locator('#wb-context-panel')
+  await expect(details).toBeVisible()
+  await expect(page.locator('[data-inline-operand-editor]')).toBeHidden()
+  await details.getByRole('button', { name: '关闭属性面板' }).click()
+  await expect(details).toBeHidden()
 
   expect(errors, errors.join('\n')).toEqual([])
 })

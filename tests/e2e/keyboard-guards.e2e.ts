@@ -74,8 +74,13 @@ test('中文输入法选词期间按 Enter 不提交字段', async ({ page }) =>
 
   await loadCourseExperiment(page, '02 定时器与计数器')
   await page.locator('.ll-node[data-node-id]').first().click()
-  const tagInput = page.locator('.qe-panel input.qe-input').first()
+  const inline = page.locator('[data-inline-operand-editor]')
+  const tagInput = inline.locator('input[data-inline-input]')
+  const nodeId = await inline.getAttribute('data-node-id')
+  expect(nodeId).toBeTruthy()
   await tagInput.click()
+  await tagInput.fill('%I96.5')
+  await tagInput.dispatchEvent('compositionstart')
   await tagInput.evaluate((element) => {
     const input = element as HTMLInputElement
     input.focus()
@@ -88,12 +93,15 @@ test('中文输入法选词期间按 Enter 不提交字段', async ({ page }) =>
       cancelable: true,
     }))
   })
-  const activeAfterEditorComposition = await page.evaluate(() => ({
-    tagName: document.activeElement?.tagName ?? '',
-    className: document.activeElement instanceof HTMLElement ? document.activeElement.className : '',
-  }))
-  expect(activeAfterEditorComposition.tagName).toBe('INPUT')
-  expect(activeAfterEditorComposition.className).toContain('qe-input')
+  await expect(inline).toBeVisible()
+  await expect(tagInput).toBeFocused()
+  await expect(page.locator('#wb-context-panel')).toHaveCount(0)
+
+  await tagInput.dispatchEvent('compositionend')
+  await page.keyboard.press('Enter')
+  await expect(inline).toBeHidden()
+  await expect(page.locator(`.ll-node[data-node-id="${nodeId}"]`))
+    .toHaveAttribute('data-operand', '%I96.5')
 
   expect(errors, errors.join('\n')).toEqual([])
 })

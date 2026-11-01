@@ -78,7 +78,7 @@ export function normalizeByteAddress(input: string): string | null {
 
 /** 判断输入是否在尝试写地址（而不是符号名），用于给出“格式不对”的精准提示。 */
 export function looksLikeAddress(input: string): boolean {
-  return /^%?[MIQ](?:[BWD]?\d)/i.test(input.trim())
+  return /^%?[MIQ](?:[BWD]?\d)/i.test(input.trim().replace(/\s+/g, ''))
 }
 
 export function byteAddressLength(width: ByteAddress['width']): number {

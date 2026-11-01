@@ -49,7 +49,14 @@ export interface LadderCanvasProps {
   onMoveRung: (rungId: string, delta: -1 | 1) => void
   dragTarget?: DropTarget | null
   isDragging?: boolean
-  onEdit?: (selection: Selection, anchor: DOMRect) => void
+  /** 单击元件：原地编辑操作数。 */
+  onEdit?: (
+    selection: Selection,
+    element: SVGGElement,
+    focusTarget?: 'operand' | 'address',
+  ) => void
+  /** 双击或按 F2：打开完整参数详情。 */
+  onEditDetails?: (selection: Selection, element: SVGGElement) => void
   onStartDrag?: (
     event: ReactPointerEvent<SVGGElement>,
     payload: DragPayload,
@@ -112,7 +119,12 @@ interface DrawContext {
   /** Shared node measurements for the current rung render. */
   measureMemo?: LayoutMemo
   onSelect: (selection: Selection) => void
-  onEdit?: (selection: Selection, anchor: DOMRect) => void
+  onEdit?: (
+    selection: Selection,
+    element: SVGGElement,
+    focusTarget?: 'operand' | 'address',
+  ) => void
+  onEditDetails?: (selection: Selection, element: SVGGElement) => void
   onOpenSlotMenu: (request: SlotMenuRequest) => void
   onMergeSlotClick: (slot: SlotRef, closeIndex: number) => void
   onMergeChipClick: (rungId: string, parallelPath: number[]) => void
@@ -134,6 +146,11 @@ export interface SlotMenuRequest extends SlotRef {
   scope: string
   anchor: DOMRect
   trigger?: Element | null
+  /**
+   * 打开菜单前正在就地输入的操作数输入框。用 Esc 收起菜单时把焦点还给它，
+   * 否则焦点会落到「+」上，用户得再点一次才能继续打字。
+   */
+  returnFocus?: HTMLElement | null
 }
 
 interface LadderMetrics {
@@ -494,6 +511,16 @@ function activateWithKeyboard(
   }
 }
 
+function activateDetailsWithKeyboard(
+  event: ReactKeyboardEvent<SVGGElement>,
+  action: () => void,
+) {
+  if (event.key === 'F2') {
+    event.preventDefault()
+    action()
+  }
+}
+
 function slotMatches(
   target: DropTarget | null,
   rungId: string,
@@ -787,7 +814,16 @@ function selectAndEdit(
   element: SVGGElement,
 ) {
   context.onSelect(selection)
-  context.onEdit?.(selection, element.getBoundingClientRect())
+  context.onEdit?.(selection, element, 'operand')
+}
+
+function selectDetails(
+  context: DrawContext,
+  selection: Selection,
+  element: SVGGElement,
+) {
+  context.onSelect(selection)
+  context.onEditDetails?.(selection, element)
 }
 
 function renderContact(
@@ -832,10 +868,11 @@ function renderContact(
       tabIndex={0}
       aria-label={
         CONTACT_LABELS[node.kind] + '，' + details.name + '，'
-        + details.address + '，点击编辑'
+        + details.address + '，单击编辑操作数，双击打开更多参数'
       }
       data-node-id={node.id}
       data-node-path={path.join('.')}
+      data-operand={details.bound ? details.address : details.name}
       onClick={(event) => {
         event.stopPropagation()
         // 和桌面软件一致：Ctrl/Cmd 逐项加选，Shift 选同一线路上的连续一段。
@@ -850,7 +887,16 @@ function renderContact(
         }
         selectAndEdit(context, selection, event.currentTarget)
       }}
+      onDoubleClick={(event) => {
+        event.preventDefault()
+        event.stopPropagation()
+        selectDetails(context, selection, event.currentTarget)
+      }}
       onKeyDown={(event) => {
+        activateDetailsWithKeyboard(
+          event,
+          () => selectDetails(context, selection, event.currentTarget),
+        )
         activateWithKeyboard(
           event,
           () => selectAndEdit(context, selection, event.currentTarget),
@@ -1530,22 +1576,34 @@ function renderOutput(
       ].filter(Boolean).join(' ')}
       data-drop={JSON.stringify({ type: 'output', rungId })}
       data-output-id={output.id}
+      data-operand={details.bound ? details.address : details.name}
       role="button"
       tabIndex={0}
       aria-label={
         placeholder
-          ? '输出，尚未绑定变量，点击编辑'
+          ? '输出，尚未绑定变量，单击编辑操作数，双击打开更多参数'
           : OUTPUT_LABELS[output.kind] + '输出，' + details.name + '，'
-            + details.address + '，点击编辑'
+            + details.address + '，单击编辑操作数，双击打开更多参数'
       }
       onClick={(event) => {
         event.stopPropagation()
         selectAndEdit(context, selection, event.currentTarget)
       }}
-      onKeyDown={(event) => activateWithKeyboard(
-        event,
-        () => selectAndEdit(context, selection, event.currentTarget),
-      )}
+      onDoubleClick={(event) => {
+        event.preventDefault()
+        event.stopPropagation()
+        selectDetails(context, selection, event.currentTarget)
+      }}
+      onKeyDown={(event) => {
+        activateDetailsWithKeyboard(
+          event,
+          () => selectDetails(context, selection, event.currentTarget),
+        )
+        activateWithKeyboard(
+          event,
+          () => selectAndEdit(context, selection, event.currentTarget),
+        )
+      }}
     >
       <title>
         {placeholder
@@ -2290,6 +2348,7 @@ function sameRungSection(previous: Readonly<RungSectionProps>, next: Readonly<Ru
     || contextLocalMerge(previous.context.mergeTarget, next.rung.id)
       !== contextLocalMerge(next.context.mergeTarget, next.rung.id)
     || Boolean(previous.context.onEdit) !== Boolean(next.context.onEdit)
+    || Boolean(previous.context.onEditDetails) !== Boolean(next.context.onEditDetails)
     || Boolean(previous.context.onExtendSelect) !== Boolean(next.context.onExtendSelect)
   ) return false
 
@@ -2558,6 +2617,7 @@ export default function LadderCanvas({
   dragTarget = null,
   isDragging = false,
   onEdit,
+  onEditDetails,
   onStartDrag,
   onRenameRung,
   onInsertAt,
@@ -2584,6 +2644,24 @@ export default function LadderCanvas({
   const [pendingFocus, setPendingFocus] = useState<SlotRef | null>(null)
   const [focusOpenBranch, setFocusOpenBranch] = useState(false)
   const [lastKind, setLastKind] = useState<ContactKind>('NO')
+  // 指针按下时浏览器的默认聚焦发生在事件派发之后，所以要在捕获阶段
+  // 先记下当时真正拿着焦点的元素，插入菜单收起时才知道该还给谁。
+  const focusBeforeSlotRef = useRef<HTMLElement | null>(null)
+  useEffect(() => {
+    const remember = () => {
+      const active = document.activeElement
+      focusBeforeSlotRef.current = active instanceof HTMLElement
+        && active.closest('[data-inline-operand-editor]') !== null
+        ? active
+        : null
+    }
+    window.addEventListener('pointerdown', remember, true)
+    window.addEventListener('keydown', remember, true)
+    return () => {
+      window.removeEventListener('pointerdown', remember, true)
+      window.removeEventListener('keydown', remember, true)
+    }
+  }, [])
   // 整张图纸共用一个宽度：1000 段工程也只挂一个 ResizeObserver、只读一次 clientWidth。
   const sheetRef = useRef<HTMLDivElement>(null)
   const [measuredSheetWidth, setMeasuredSheetWidth] = useState(0)
@@ -2655,10 +2733,20 @@ export default function LadderCanvas({
 
   const closeSlotMenu = (restoreFocus = true) => {
     const trigger = slotMenu?.trigger
+    const returnFocus = slotMenu?.returnFocus ?? null
     setSlotMenu(null)
-    if (!restoreFocus || !(trigger instanceof HTMLElement || trigger instanceof SVGElement)) return
+    if (!restoreFocus) return
     window.requestAnimationFrame(() => {
-      if (trigger.isConnected) trigger.focus()
+      // 插入菜单是就地编辑气泡里拉起来的，关掉后焦点应回到气泡输入框，
+      // 而不是跳回加号，否则用户接着打字就落空了。
+      if (returnFocus?.isConnected) {
+        returnFocus.focus({ preventScroll: true })
+        if (returnFocus instanceof HTMLInputElement) returnFocus.select()
+        return
+      }
+      if ((trigger instanceof HTMLElement || trigger instanceof SVGElement) && trigger.isConnected) {
+        trigger.focus()
+      }
     })
   }
 
@@ -2764,10 +2852,11 @@ export default function LadderCanvas({
       onSelect(next)
     },
     onEdit,
+    onEditDetails,
     onOpenSlotMenu: (request) => {
       setMergeArmed(null)
       onArmInsert?.({ rungId: request.rungId, chain: [...request.chain], index: request.index })
-      setSlotMenu(request)
+      setSlotMenu({ ...request, returnFocus: focusBeforeSlotRef.current })
     },
     onMergeSlotClick: (_slot, closeIndex) => {
       if (!mergeArmed) return
@@ -2986,7 +3075,16 @@ function renderParallel(
           event.stopPropagation()
           selectAndEdit(context, selection, event.currentTarget)
         }}
+        onDoubleClick={(event) => {
+          event.preventDefault()
+          event.stopPropagation()
+          selectDetails(context, selection, event.currentTarget)
+        }}
         onKeyDown={(event) => {
+          activateDetailsWithKeyboard(
+            event,
+            () => selectDetails(context, selection, event.currentTarget),
+          )
           activateWithKeyboard(
             event,
             () => selectAndEdit(context, selection, event.currentTarget),

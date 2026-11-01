@@ -38,14 +38,35 @@ async function expectGripsToFollowRung(page: Page, index: number): Promise<void>
   }).toBeLessThanOrEqual(1)
 }
 
+async function expectCanvasCentered(page: Page): Promise<void> {
+  await expect.poll(async () => {
+    const [canvasBox, sheetBox] = await Promise.all([
+      page.locator('.ll-canvas').boundingBox(),
+      page.locator('.ll-program-sheet').boundingBox(),
+    ])
+    if (!canvasBox || !sheetBox) return Number.POSITIVE_INFINITY
+    const centerDelta = Math.abs(
+      canvasBox.x + canvasBox.width / 2 - (sheetBox.x + sheetBox.width / 2),
+    )
+    const widthDelta = Math.abs(canvasBox.width - sheetBox.width)
+    return Math.max(centerDelta, widthDelta)
+  }).toBeLessThanOrEqual(1)
+}
+
 test('图纸两侧的调宽把手跟随当前编辑程序段', async ({ page }) => {
   const errors = trackPageErrors(page)
 
   await openHome(page)
   await loadCourseExperiment(page, '02 定时器与计数器')
 
+  await expectCanvasCentered(page)
   await expectGripsToFollowRung(page, 1)
   await expectGripsToFollowRung(page, 2)
+
+  // 单击元件后只出现绝对定位的就地气泡，不能把图纸往一侧挤偏。
+  await page.locator('.ll-node[data-node-id]').first().click()
+  await expect(page.locator('[data-inline-operand-editor]')).toBeVisible()
+  await expectCanvasCentered(page)
 
   expect(errors, errors.join('\n')).toEqual([])
 })

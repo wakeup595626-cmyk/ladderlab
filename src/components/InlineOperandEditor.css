@@ -1,0 +1,284 @@
+/* 画布内联操作数编辑：贴在元件旁边的一张小卡片，不占任何布局宽度，
+   因此图纸在选中前后始终保持同一条中心线。 */
+.inline-operand {
+  position: absolute;
+  z-index: 26;
+  display: flex;
+  width: min(302px, calc(100% - 16px));
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 11px 9px;
+  border: 1px solid var(--control);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.7) inset,
+    0 14px 34px rgba(48, 30, 38, 0.16),
+    0 3px 8px rgba(48, 30, 38, 0.08);
+  color: var(--text);
+  opacity: 0;
+  pointer-events: none;
+  transform-origin: 50% 100%;
+  animation: inline-operand-in 170ms cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+.inline-operand.is-positioned {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.inline-operand::after {
+  position: absolute;
+  bottom: -5px;
+  left: 50%;
+  width: 9px;
+  height: 9px;
+  border-right: 1px solid var(--control);
+  border-bottom: 1px solid var(--control);
+  background: var(--surface);
+  content: '';
+  transform: translateX(-50%) rotate(45deg);
+}
+
+.inline-operand.is-side-above::after {
+  top: auto;
+  bottom: -5px;
+}
+
+.inline-operand.is-side-below::after {
+  top: -5px;
+  bottom: auto;
+  border-top: 1px solid var(--control);
+  border-right: none;
+  border-bottom: none;
+  border-left: 1px solid var(--control);
+}
+
+.inline-operand.is-pinned::after {
+  display: none;
+}
+
+.inline-operand.is-dragging {
+  cursor: grabbing;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.7) inset,
+    0 20px 44px rgba(48, 30, 38, 0.2),
+    0 4px 12px rgba(48, 30, 38, 0.1);
+  transition: box-shadow 120ms ease;
+}
+
+.inline-operand.has-error {
+  border-color: color-mix(in srgb, var(--negative) 55%, var(--control));
+  animation: inline-operand-shake 220ms ease-out;
+}
+
+.inline-operand-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.inline-operand-grip {
+  display: grid;
+  flex: 0 0 auto;
+  color: var(--faint);
+  place-items: center;
+}
+
+.inline-operand-kicker {
+  flex: 0 0 auto;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: var(--accent-wash, color-mix(in srgb, var(--accent) 12%, transparent));
+  color: var(--accent);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.inline-operand-head strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 12.5px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inline-operand-close {
+  display: grid;
+  width: 26px;
+  height: 26px;
+  flex: 0 0 auto;
+  margin-left: auto;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  place-items: center;
+  transition: background-color 140ms ease, color 140ms ease, border-color 140ms ease;
+}
+
+.inline-operand-close:hover {
+  border-color: var(--border);
+  background: var(--raised);
+  color: var(--text);
+}
+
+.inline-operand-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.inline-operand-field > span {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.inline-operand-field input {
+  width: 100%;
+  height: 34px;
+  padding: 0 9px;
+  border: 1px solid var(--input-rule, var(--border));
+  border-radius: 7px;
+  background: var(--raised);
+  color: var(--text);
+  font-size: 14px;
+  letter-spacing: 0.01em;
+  outline: none;
+  transition: border-color 140ms ease, box-shadow 140ms ease, background-color 140ms ease;
+}
+
+.inline-operand-field input:focus {
+  border-color: var(--accent);
+  background: var(--surface);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+.inline-operand.has-error .inline-operand-field input {
+  border-color: var(--negative);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--negative) 14%, transparent);
+}
+
+.inline-operand-hint {
+  min-height: 15px;
+  margin: 0;
+  color: var(--faint);
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.inline-operand-error,
+.inline-operand-warn {
+  color: var(--negative);
+  font-weight: 500;
+}
+
+.inline-operand-warn {
+  color: var(--warning);
+}
+
+.inline-operand-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-top: 7px;
+  border-top: 1px solid var(--rule);
+}
+
+.inline-operand-keys {
+  color: var(--faint);
+  font-size: 9.5px;
+  white-space: nowrap;
+}
+
+.inline-operand-keys kbd {
+  padding: 1px 4px;
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  background: var(--raised);
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 9px;
+}
+
+.inline-operand-more {
+  min-height: 26px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 10.5px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: border-color 140ms ease, color 140ms ease, background-color 140ms ease;
+}
+
+.inline-operand-more:hover {
+  border-color: var(--accent);
+  background: var(--raised);
+  color: var(--accent);
+}
+
+@keyframes inline-operand-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes inline-operand-shake {
+  0%, 100% { transform: translateX(0); }
+  30% { transform: translateX(-3px); }
+  65% { transform: translateX(2px); }
+}
+
+@media (max-width: 720px) {
+  .inline-operand {
+    position: fixed;
+    right: 10px;
+    bottom: 12px;
+    left: 10px !important;
+    top: auto !important;
+    width: auto;
+    max-height: 42dvh;
+    overflow-y: auto;
+    visibility: visible;
+  }
+
+  .inline-operand::after {
+    display: none;
+  }
+
+  .inline-operand-head {
+    cursor: default;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .inline-operand,
+  .inline-operand.has-error {
+    animation: none;
+  }
+
+  .inline-operand * {
+    transition: none;
+  }
+}

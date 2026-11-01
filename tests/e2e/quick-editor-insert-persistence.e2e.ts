@@ -1,75 +1,15 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
 import { loadCourseExperiment, openHome, trackPageErrors } from './support'
 
-test('画布加号插入时保留右侧参数面板，并补全当前段上下文', async ({ page }) => {
-  const errors = trackPageErrors(page)
+function inlineEditor(page: Page) {
+  return page.locator('[data-inline-operand-editor]')
+}
 
-  await openHome(page)
-  await loadCourseExperiment(page, '02 定时器与计数器')
+function inlineInput(page: Page) {
+  return page.locator('[data-inline-operand-editor] input[data-inline-input]')
+}
 
-  await page.locator('.ll-node[data-node-id]').first().click()
-  const panel = page.locator('.qe-panel')
-  await expect(panel).toBeVisible()
-  const selectedLabel = await panel.getAttribute('aria-label')
-  expect(selectedLabel).toMatch(/^编辑/)
-  await expect(panel.getByRole('region', { name: '当前程序段概览' })).toBeVisible()
-  await expect(panel.getByText('本段运行读数')).toBeVisible()
-  await panel.evaluate((element) => {
-    (element as HTMLElement & { __qePersistProbe?: string }).__qePersistProbe = 'same-node'
-  })
-
-  const slot = page.locator('.ll-rung').first().locator('.ll-slot').first()
-  await slot.hover()
-  const hit = slot.locator('.ll-slot-plus-hit')
-  const hitBox = await hit.boundingBox()
-  expect(hitBox).not.toBeNull()
-  await page.mouse.click(hitBox!.x + hitBox!.width / 2, hitBox!.y + hitBox!.height / 2)
-
-  const menu = page.getByRole('menu')
-  await expect(menu).toBeVisible()
-  await expect(panel).toBeVisible()
-  await expect(panel).toHaveAttribute('aria-label', selectedLabel!)
-
-  // 先验证 Esc 只关插入菜单；参数面板必须继续停在原来的对象上。
-  await page.keyboard.press('Escape')
-  await expect(menu).toBeHidden()
-  await expect(panel).toBeVisible()
-  await expect(panel).toHaveAttribute('aria-label', selectedLabel!)
-  await expect.poll(() => page.evaluate(
-    () => document.activeElement?.getAttribute('aria-label'),
-  )).toContain('程序段 1')
-
-  await slot.hover()
-  const nextHitBox = await hit.boundingBox()
-  expect(nextHitBox).not.toBeNull()
-  await page.mouse.click(nextHitBox!.x + nextHitBox!.width / 2, nextHitBox!.y + nextHitBox!.height / 2)
-  await menu.getByRole('menuitem', { name: /常开触点/ }).click()
-
-  // 插入成功后参数面板原节点继续挂载，只切换编辑对象。
-  await expect(panel).toBeVisible()
-  await expect(panel).toHaveAttribute('aria-label', /^编辑常开触点/)
-  await expect(panel.getByRole('region', { name: '当前程序段概览' })).toBeVisible()
-  expect(await panel.evaluate((element) => (
-    element as HTMLElement & { __qePersistProbe?: string }
-  ).__qePersistProbe)).toBe('same-node')
-
-  // 只有面板自己的关闭按钮才收起它。
-  await panel.getByRole('button', { name: '关闭参数编辑' }).click()
-  await expect(panel).toBeHidden()
-
-  expect(errors, errors.join('\n')).toEqual([])
-})
-
-test('收藏指令插入后继续停在参数面板，并聚焦新操作数', async ({ page }) => {
-  const errors = trackPageErrors(page)
-
-  await openHome(page)
-  await loadCourseExperiment(page, '02 定时器与计数器')
-
-  await page.locator('.ll-node[data-node-id]').first().click()
-  const panel = page.locator('.qe-panel.is-dock')
-  await expect(panel).toBeVisible()
-
+async function openFirstSlotMenu(page: Page): Promise<void> {
   const slot = page.locator('.ll-rung').first().locator('.ll-slot').first()
   await slot.hover()
   const hit = slot.locator('.ll-slot-plus-hit')
@@ -77,6 +17,61 @@ test('收藏指令插入后继续停在参数面板，并聚焦新操作数', as
   expect(hitBox).not.toBeNull()
   await page.mouse.click(hitBox!.x + hitBox!.width / 2, hitBox!.y + hitBox!.height / 2)
   await expect(page.getByRole('menu')).toBeVisible()
+}
+
+async function insertFirstSlot(page: Page, name: RegExp): Promise<void> {
+  await openFirstSlotMenu(page)
+  await page.getByRole('menu').getByRole('menuitem', { name }).click()
+}
+
+test('画布加号插入后自动进入就地编辑，Esc 只收起插入菜单', async ({ page }) => {
+  const errors = trackPageErrors(page)
+
+  await openHome(page)
+  await loadCourseExperiment(page, '02 定时器与计数器')
+
+  const firstNode = page.locator('.ll-node[data-node-id]').first()
+  await firstNode.click()
+  const inline = inlineEditor(page)
+  const input = inlineInput(page)
+  const originalNodeId = await inline.getAttribute('data-node-id')
+  await expect(inline).toBeVisible()
+  await expect(input).toBeFocused()
+  await expect(page.locator('#wb-context-panel')).toHaveCount(0)
+
+  await openFirstSlotMenu(page)
+  await expect(inline).toBeVisible()
+  await expect(inline).toHaveAttribute('data-node-id', originalNodeId!)
+
+  // 先验证 Esc 只关插入菜单；就地编辑继续保持，不切回整块参数面板。
+  await page.keyboard.press('Escape')
+  await expect(page.getByRole('menu')).toBeHidden()
+  await expect(inline).toBeVisible()
+  await expect(input).toBeFocused()
+
+  await insertFirstSlot(page, /常开触点/)
+  await expect(page.getByRole('menu')).toBeHidden()
+  await expect(page.locator('#wb-context-panel')).toHaveCount(0)
+  await expect(inline).toBeVisible()
+  await expect(inline).toHaveCount(1)
+  await expect(input).toBeFocused()
+  await expect(inline).toHaveAttribute('data-node-id', /.+/)
+  expect(await inline.getAttribute('data-node-id')).not.toBe(originalNodeId)
+
+  await inline.getByRole('button', { name: '关闭操作数编辑' }).click()
+  await expect(inline).toBeHidden()
+
+  expect(errors, errors.join('\n')).toEqual([])
+})
+
+test('收藏指令插入后只打开就地编辑，并聚焦新操作数', async ({ page }) => {
+  const errors = trackPageErrors(page)
+
+  await openHome(page)
+  await loadCourseExperiment(page, '02 定时器与计数器')
+
+  await page.locator('.ll-node[data-node-id]').first().click()
+  await openFirstSlotMenu(page)
   await page.keyboard.press('Escape')
 
   const favorite = page
@@ -84,13 +79,11 @@ test('收藏指令插入后继续停在参数面板，并聚焦新操作数', as
     .getByRole('button', { name: /^常开触点，点击插入到程序段 1/ })
   await favorite.click()
 
-  await expect(panel).toBeVisible()
-  await expect(panel).toHaveAttribute('aria-label', /^编辑常开触点/)
-  await expect.poll(() => page.evaluate(() => (
-    document.activeElement instanceof HTMLElement
-    && document.activeElement.dataset.primary === 'true'
-  ))).toBe(true)
-  await expect(panel.getByRole('region', { name: '当前程序段概览' })).toBeVisible()
+  const inline = inlineEditor(page)
+  await expect(inline).toBeVisible()
+  await expect(inline).toHaveCount(1)
+  await expect(inlineInput(page)).toBeFocused()
+  await expect(page.locator('#wb-context-panel')).toHaveCount(0)
 
   expect(errors, errors.join('\n')).toEqual([])
 })
@@ -102,26 +95,22 @@ test('连续两次从画布加号插入，每次都聚焦新元件的操作数',
   await loadCourseExperiment(page, '02 定时器与计数器')
   await page.locator('.ll-node[data-node-id]').first().click()
 
-  const panel = page.locator('.qe-panel.is-dock')
-  const slot = page.locator('.ll-rung').first().locator('.ll-slot').first()
+  const inline = inlineEditor(page)
+  const input = inlineInput(page)
 
-  await slot.hover()
-  let hitBox = await slot.locator('.ll-slot-plus-hit').boundingBox()
-  expect(hitBox).not.toBeNull()
-  await page.mouse.click(hitBox!.x + hitBox!.width / 2, hitBox!.y + hitBox!.height / 2)
-  await page.getByRole('menu').getByRole('menuitem', { name: /常开触点/ }).click()
+  await insertFirstSlot(page, /常开触点/)
+  await expect(inline).toBeVisible()
+  const firstInserted = await inline.getAttribute('data-node-id')
+  await expect(input).toBeFocused()
+  // 新插入的触点会拿到自动分配的位置地址（输入区或输出区），而不是空串。
+  await expect(input).toHaveValue(/^%[IQM]\d+\.\d$/)
 
-  await expect(panel).toHaveAttribute('aria-label', /^编辑常开触点/)
-  await expect(panel.locator('input[data-primary="true"]')).toBeFocused()
-
-  await slot.hover()
-  hitBox = await slot.locator('.ll-slot-plus-hit').boundingBox()
-  expect(hitBox).not.toBeNull()
-  await page.mouse.click(hitBox!.x + hitBox!.width / 2, hitBox!.y + hitBox!.height / 2)
-  await page.getByRole('menu').getByRole('menuitem', { name: /常闭触点/ }).click()
-
-  await expect(panel).toHaveAttribute('aria-label', /^编辑常闭触点/)
-  await expect(panel.locator('input[data-primary="true"]')).toBeFocused()
+  await insertFirstSlot(page, /常闭触点/)
+  await expect(inline).toHaveCount(1)
+  await expect(inline).toBeVisible()
+  await expect(input).toBeFocused()
+  await expect(input).toHaveValue(/^%[IQM]\d+\.\d$/)
+  expect(await inline.getAttribute('data-node-id')).not.toBe(firstInserted)
 
   expect(errors, errors.join('\n')).toEqual([])
 })
@@ -132,59 +121,56 @@ for (const viewport of [
   { width: 1024, height: 768 },
   { width: 1440, height: 560 },
 ]) {
-  test(`右侧参数面板在 ${viewport.width}×${viewport.height} 时保留底部提示`, async ({ page }) => {
+  test(`完整参数在 ${viewport.width}×${viewport.height} 时可打开、可关闭且不超出视口`, async ({ page }) => {
     const errors = trackPageErrors(page)
     await page.setViewportSize(viewport)
 
     await openHome(page)
     await loadCourseExperiment(page, '02 定时器与计数器')
-    await page.locator('.ll-node[data-node-id]').first().click()
+    await page.locator('.ll-node[data-node-id]').first().dblclick()
 
-    const panel = page.locator('.qe-panel.is-dock')
-    const footer = panel.locator('.qe-foot')
+    const panel = page.locator('#wb-context-panel')
     await expect(panel).toBeVisible()
-    await expect(panel.getByRole('region', { name: '当前程序段概览' })).toBeVisible()
-    await expect(footer).toBeInViewport()
+    // 双击走的是“完整参数”入口，就地气泡应当让位给右侧属性面板。
+    await expect(page.locator('[data-inline-operand-editor]')).toBeHidden()
 
-    const panelBox = await panel.boundingBox()
-    const footerBox = await footer.boundingBox()
-    expect(panelBox).not.toBeNull()
-    expect(footerBox).not.toBeNull()
-    expect(footerBox!.y + footerBox!.height).toBeLessThanOrEqual(
-      Math.min(panelBox!.y + panelBox!.height, viewport.height) + 0.5,
-    )
+    if (viewport.width > 1024) {
+      const panelBox = await panel.boundingBox()
+      expect(panelBox).not.toBeNull()
+      expect(panelBox!.x).toBeGreaterThanOrEqual(0)
+      expect(panelBox!.y).toBeGreaterThanOrEqual(0)
+      expect(panelBox!.x + panelBox!.width).toBeLessThanOrEqual(viewport.width + 0.5)
+      expect(panelBox!.y + panelBox!.height).toBeLessThanOrEqual(viewport.height + 0.5)
+    }
 
-    const scroll = panel.locator('.qe-scroll')
-    await expect(scroll).toHaveCSS('overflow-y', 'auto')
-    const scrollMetrics = await scroll.evaluate((element) => ({
-      clientWidth: element.clientWidth,
-      scrollWidth: element.scrollWidth,
-    }))
-    expect(scrollMetrics.scrollWidth).toBeLessThanOrEqual(scrollMetrics.clientWidth)
+    await panel.getByRole('button', { name: '关闭属性面板' }).click()
+    await expect(panel).toBeHidden()
     expect(errors, errors.join('\n')).toEqual([])
   })
 }
 
-test('切换编辑对象时参数面板回到表单顶部', async ({ page }) => {
+test('切换单击目标时就地编辑跟随元件并重新聚焦，不出现第二个输入框', async ({ page }) => {
   const errors = trackPageErrors(page)
   await page.setViewportSize({ width: 1180, height: 700 })
 
   await openHome(page)
   await loadCourseExperiment(page, '02 定时器与计数器')
 
+  const inline = inlineEditor(page)
+  const input = inlineInput(page)
   await page.locator('.ll-rung').nth(1).locator('[data-output-id]').click()
-  const panel = page.locator('.qe-panel.is-dock')
-  const scroll = panel.locator('.qe-scroll')
-  await expect(panel).toBeVisible()
-  await expect(panel).toHaveAttribute('aria-label', /接通延时 TON/)
-  await scroll.evaluate((element) => {
-    element.scrollTop = element.scrollHeight
-  })
-  expect(await scroll.evaluate((element) => element.scrollTop)).toBeGreaterThan(0)
+  await expect(inline).toBeVisible()
+  await expect(inline).toHaveAttribute('data-output-id', /.+/)
+  await expect(input).toBeFocused()
+  const outputTarget = await inline.getAttribute('data-output-id')
 
   await page.locator('.ll-node[data-node-id]').first().click()
-  await expect(panel).toHaveAttribute('aria-label', /^编辑常闭触点/)
-  await expect.poll(() => scroll.evaluate((element) => element.scrollTop)).toBe(0)
+  await expect(inline).toHaveCount(1)
+  await expect(inline).toHaveAttribute('data-node-id', /.+/)
+  await expect(inline).not.toHaveAttribute('data-output-id', outputTarget!)
+  await expect(input).toBeFocused()
+  await expect(page.locator('#wb-context-panel')).toHaveCount(0)
 
   expect(errors, errors.join('\n')).toEqual([])
 })
+

@@ -169,15 +169,18 @@ function lastRung(page: Page) {
   return page.locator('.ll-rung:not(.is-placeholder)').last()
 }
 
-/**
- * 参数编辑浮层只在焦点落在它内部时响应 Esc；输入框回车提交后焦点已经回落到
- * body，所以这里统一用浮层自带的关闭按钮收起，避免浮层盖住画布上的插入点。
- */
+/** 收起当前层级的编辑浮层；就地操作数和完整参数面板不会同时出现。 */
 async function closePanel(page: Page): Promise<void> {
-  const panel = page.locator('.qe-panel')
-  if (await panel.count()) {
-    await panel.getByRole('button', { name: '关闭参数编辑' }).click()
-    await panel.waitFor({ state: 'detached' })
+  const inline = page.locator('[data-inline-operand-editor]')
+  if (await inline.count()) {
+    await inline.getByRole('button', { name: '关闭操作数编辑' }).click()
+    await inline.waitFor({ state: 'detached' })
+    return
+  }
+  const details = page.locator('#wb-context-panel')
+  if (await details.count()) {
+    await details.getByRole('button', { name: '关闭属性面板' }).click()
+    await details.waitFor({ state: 'detached' })
   }
 }
 
@@ -222,23 +225,38 @@ async function insertContact(page: Page, index: number, tag: string): Promise<vo
   await menu.waitFor({ state: 'visible' })
   await menu.getByRole('menuitem', { name: '常开触点' }).click()
 
-  const operand = page.locator('.qe-panel').getByLabel('操作数')
+  const inline = page.locator('[data-inline-operand-editor]')
+  await inline.waitFor({ state: 'visible' })
+  const operand = inline.locator('input[data-inline-input]')
   await operand.waitFor({ state: 'visible' })
   await operand.fill(tag)
   await operand.press('Enter')
+  await inline.waitFor({ state: 'detached' })
   await closePanel(page)
 }
 
-/** 点选刚画好的那个程序段的输出，改成置位/线圈并写入变量名。 */
+/**
+ * 先单击输出，在就地气泡里登记变量名（新符号自动建变量）；
+ * 再双击进入完整参数，只负责切换指令类型。
+ */
 async function setOutput(page: Page, spec: RungSpec['output']): Promise<void> {
-  await lastRung(page).locator('[data-output-id]').click()
-  const panel = page.locator('.qe-panel')
+  const output = lastRung(page).locator('[data-output-id]')
+
+  await output.click()
+  const inline = page.locator('[data-inline-operand-editor]')
+  await inline.waitFor({ state: 'visible' })
+  const operand = inline.locator('input[data-inline-input]')
+  await operand.waitFor({ state: 'visible' })
+  await operand.fill(spec.tag)
+  await operand.press('Enter')
+  await inline.waitFor({ state: 'detached' })
+
+  await output.dblclick()
+  const panel = page.locator('#wb-context-panel')
+  await panel.waitFor({ state: 'visible' })
   await panel.getByLabel('指令类型').selectOption({
     label: spec.kind === 'SET' ? '置位线圈' : spec.kind === 'RESET' ? '复位线圈' : '线圈',
   })
-  const target = panel.getByLabel('输出变量')
-  await target.fill(spec.tag)
-  await target.press('Enter')
   await closePanel(page)
 }
 

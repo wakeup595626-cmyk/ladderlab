@@ -47,9 +47,30 @@ export function exportButton(page: Page) {
   return page.getByRole('button', { name: /^导出工程/ })
 }
 
+/**
+ * 打开项目抽屉。桌面顶栏是「打开项目」，窄屏收在底部「项目」标签或
+ * 「文件」菜单里，所以这里按可见性逐级回退，避免移动端用例整条超时。
+ */
+export async function openProjectDialog(page: Page): Promise<void> {
+  const direct = page.getByRole('button', { name: '打开项目', exact: true }).first()
+  if (await direct.isVisible().catch(() => false)) {
+    await direct.click()
+    return
+  }
+
+  const mobileTab = page.getByRole('button', { name: '项目', exact: true }).first()
+  if (await mobileTab.isVisible().catch(() => false)) {
+    await mobileTab.click()
+    return
+  }
+
+  await page.getByRole('button', { name: '文件：新建、导入或导出' }).click()
+  await page.getByRole('menuitem', { name: '项目、变量表与实验库' }).click()
+}
+
 /** 打开项目 → 实验库 → 载入指定实验，等工程名落到顶栏。 */
 export async function loadCourseExperiment(page: Page, label: string): Promise<void> {
-  await page.getByRole('button', { name: '打开项目' }).click()
+  await openProjectDialog(page)
   const projectDrawer = page.getByRole('dialog', { name: '项目' })
   await expect(projectDrawer).toBeVisible()
   await projectDrawer.getByRole('button', { name: /实验库/ }).click()

@@ -8,7 +8,8 @@ async function findCanvasBlank(page: Page) {
     const rect = canvas.getBoundingClientRect()
     const blocked = 'button, input, textarea, select, a, summary, [role="button"], '
       + '[role="menu"], [data-node-id], [data-output-id], .ll-slot, .ll-merge-chip, '
-      + '.ll-node-grip, [data-drag-handle], .ll-rung-header'
+      + '.ll-node-grip, [data-drag-handle], .ll-rung-header, '
+      + '[data-inline-operand-editor], .qe-panel'
     for (let y = Math.max(0, rect.top) + 12; y < Math.min(innerHeight, rect.bottom) - 12; y += 10) {
       for (let x = Math.max(0, rect.left) + 12; x < Math.min(innerWidth, rect.right) - 12; x += 10) {
         const hit = document.elementFromPoint(x, y)

@@ -4,6 +4,7 @@ import {
   cancelOpenBranchAt,
   canDeleteTag,
   changeContactKind,
+  changeOutputKind,
   cloneNodesForPaste,
   closeOpenBranchAt,
   collectNodesAtPaths,
@@ -1210,5 +1211,24 @@ describe('programOps 变量地址字段校验', () => {
       error: '%MW10 已被 BOOL 变量“Count”占用。',
     })
     expect(source.tags).toHaveLength(2)
+  })
+
+  it('在线圈、置位、复位之间切换指令类型时保留已填写的输出变量', () => {
+    const start = tag('Start')
+    const coil = tag('Coil')
+    const alarm = tag('Alarm')
+    const source = program(
+      [rung('r1', [contact('c', 'Start')])],
+      [start, coil, alarm],
+    )
+    source.rungs[0].output = { ...source.rungs[0].output, tag: 'Alarm' }
+
+    const set = changeOutputKind(source, 'r1', 'SET')
+    const reset = changeOutputKind(set, 'r1', 'RESET')
+    const backToCoil = changeOutputKind(reset, 'r1', 'COIL')
+
+    expect(rungOf(set, 'r1').output).toMatchObject({ kind: 'SET', tag: 'Alarm' })
+    expect(rungOf(reset, 'r1').output).toMatchObject({ kind: 'RESET', tag: 'Alarm' })
+    expect(rungOf(backToCoil, 'r1').output).toMatchObject({ kind: 'COIL', tag: 'Alarm' })
   })
 })
