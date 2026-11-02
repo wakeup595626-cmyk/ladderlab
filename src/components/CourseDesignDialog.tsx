@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from 'react'
 import { contentRungs } from '../engine/rungInvariant'
-import type { Program } from '../engine/types'
+import type { Program, TagDef } from '../engine/types'
 import { copyText } from '../lib/clipboard'
 import {
   COURSE_DESIGNS,
@@ -23,6 +23,32 @@ interface CourseDesignDialogProps {
 const QUICK_EXAMPLES = ['三层电梯', '四路抢答器', '推土机', '八路流水灯', '电机正反转']
 
 const CATEGORY_ORDER = ['课程实验', '机器课设', '基础示例'] as const
+
+function TagTable({ title, tags }: { title: string; tags: TagDef[] }) {
+  if (tags.length === 0) return null
+  return (
+    <section className="course-design-tag-group">
+      <h4>{title}<span>{tags.length}</span></h4>
+      <div className="course-design-table-wrap">
+        <table className="course-design-table">
+          <thead>
+            <tr><th>地址</th><th>变量</th><th>类型</th><th>说明</th></tr>
+          </thead>
+          <tbody>
+            {tags.map((tag) => (
+              <tr key={tag.id}>
+                <td><code>{tag.address}</code></td>
+                <td>{tag.name}</td>
+                <td>{tag.kind}</td>
+                <td>{tag.comment || '—'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  )
+}
 
 export default function CourseDesignDialog({ open, onClose, onGenerated }: CourseDesignDialogProps) {
   const { present, closing } = usePresence(open, 180)
@@ -75,6 +101,16 @@ function CourseDesignDialogContent({
   }, [template])
   const agentPrompt = useMemo(() => makeAgentPrompt(query), [query])
   const visibleRungs = generated.program ? contentRungs(generated.program) : []
+  const inputTags = generated.program?.tags.filter((tag) => tag.address.startsWith('%I')) ?? []
+  const outputTags = generated.program?.tags.filter((tag) => tag.address.startsWith('%Q')) ?? []
+  const internalTags = generated.program?.tags.filter(
+    (tag) => !tag.address.startsWith('%I') && !tag.address.startsWith('%Q'),
+  ) ?? []
+  const simulationSteps = template?.simulationSteps ?? [
+    '先按 Reset 或停止输入，确认程序回到安全初始状态。',
+    '按题目顺序逐项操作输入，并对照输出和内部变量检查每一步。',
+    '最后执行停止、复位和边界条件，确认不会误动作或卡死。',
+  ]
 
   const updateQuery = (next: string) => {
     setQuery(next)
@@ -219,6 +255,18 @@ function CourseDesignDialogContent({
               <p>{match.message}</p>
             </div>
           )}
+          {match.status === 'incompatible' && (
+            <div className="course-design-unsupported is-incompatible">
+              <strong>题目规格与内置模板不一致</strong>
+              <p>{match.message}</p>
+              <p className="course-design-support-range">
+                相近模板：{match.template.title}
+                {match.template.parameter
+                  ? ` · 支持 ${match.template.parameter.min}～${match.template.parameter.max} ${match.template.parameter.unit}`
+                  : ''}
+              </p>
+            </div>
+          )}
         </div>
 
         {template && (
@@ -227,6 +275,12 @@ function CourseDesignDialogContent({
               <div>
                 <span>{template.category}</span>
                 <h3>{template.title}</h3>
+                {template.parameter && (
+                  <span className="course-design-spec">
+                    当前规格：{template.parameter.value} {template.parameter.unit}
+                    {' · '}可生成 {template.parameter.min}～{template.parameter.max} {template.parameter.unit}
+                  </span>
+                )}
                 <p>{template.description}</p>
               </div>
               <span className="course-design-compiled">
@@ -242,15 +296,29 @@ function CourseDesignDialogContent({
                   <div><dt>变量</dt><dd>{generated.program.tags.length}</dd></div>
                   <div><dt>格式</dt><dd>{generated.program.profile.toUpperCase()}</dd></div>
                 </dl>
-                <div className="course-design-rungs">
-                  <span>程序段预览</span>
-                  <ol>
-                    {visibleRungs.slice(0, 6).map((rung) => <li key={rung.id}>{rung.label}</li>)}
-                    {visibleRungs.length > 6 && <li>另 {visibleRungs.length - 6} 段在载入后查看</li>}
-                  </ol>
+                <div className="course-design-details">
+                  <section className="course-design-rungs">
+                    <h4>完整程序段<span>{visibleRungs.length}</span></h4>
+                    <ol>
+                      {visibleRungs.map((rung) => <li key={rung.id}>{rung.label}</li>)}
+                    </ol>
+                  </section>
+                  <section className="course-design-simulation">
+                    <h4>仿真操作步骤</h4>
+                    <ol>{simulationSteps.map((step) => <li key={step}>{step}</li>)}</ol>
+                  </section>
+                </div>
+                <div className="course-design-io">
+                  <div className="course-design-io-head">
+                    <h4>完整 I/O 与内部变量</h4>
+                    <span>{generated.program.tags.length} 个变量</span>
+                  </div>
+                  <TagTable title="输入" tags={inputTags} />
+                  <TagTable title="输出" tags={outputTags} />
+                  <TagTable title="内部变量" tags={internalTags} />
                 </div>
                 <p className="course-design-export-hint">
-                  载入后可从右上角「导出」保存 PNG / SVG；梯形图仍可继续编辑和仿真。
+                  载入后可从右上角「导出」保存 PNG / SVG / 分页 PDF；梯形图仍可继续编辑和仿真。
                 </p>
               </>
             ) : (
@@ -259,11 +327,16 @@ function CourseDesignDialogContent({
           </div>
         )}
 
-        {(match.status === 'unsupported' || template) && (
-          <details className="course-design-agent" open={match.status === 'unsupported'}>
+        {(match.status === 'unsupported' || match.status === 'incompatible' || template) && (
+          <details
+            className="course-design-agent"
+            open={match.status === 'unsupported' || match.status === 'incompatible'}
+          >
             <summary>
               {match.status === 'unsupported'
                 ? '交给能执行命令的 Agent 定制'
+                : match.status === 'incompatible'
+                  ? '复制任务单，让 Agent 按真实规格定制'
                 : '没有完全符合？复制 Agent 定制任务单'}
             </summary>
             <p>

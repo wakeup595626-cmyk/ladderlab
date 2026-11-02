@@ -31,7 +31,7 @@ test('AI 分享链接可导入样例并导出真实 PNG', async ({ page }) => {
   await expect(page.locator('.status-error')).toHaveCount(0)
 
   const file = await downloadExport(page, '纯梯形图', 'png')
-  expect(file.name).toMatch(/\-纯梯形图-.*\.png$/)
+  expect(file.name).toMatch(/-纯梯形图-.*\.png$/)
   expect(file.bytes.byteLength).toBeGreaterThan(5_000)
   expect(file.bytes.subarray(0, 8).toString('hex')).toBe('89504e470d0a1a0a')
 

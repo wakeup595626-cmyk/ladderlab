@@ -1,7 +1,16 @@
 import { describe, expect, it } from 'vitest'
 import { parseProgramText, serializeProgram } from '../lib/io'
 import { compile } from './compile'
-import { buildCourseLab, COURSE_LABS } from './courseLabs'
+import {
+  buildCourseLab,
+  buildElevatorProgram,
+  buildQuizProgram,
+  COURSE_LABS,
+  ELEVATOR_MAX_FLOORS,
+  ELEVATOR_MIN_FLOORS,
+  QUIZ_MAX,
+  QUIZ_MIN,
+} from './courseLabs'
 import { createRuntime, step, writeRuntimeValue } from './simulate'
 import type { Program, Runtime } from './types'
 
@@ -27,6 +36,26 @@ function scan(program: Program, runtime: Runtime, count = 1, dtMs = 50): Runtime
 function stations(runtime: Runtime): string[] {
   return ['D', 'A', 'E', 'B', 'F', 'C', 'G', 'H'].filter((name) => runtime.bools[`Station${name}`])
 }
+
+/** 三层保留旧版固定布局，轿厢内选记忆沿用 M1/M2/M3。 */
+function cabinTag(floors: number, floor: number): string {
+  return floors === 3 ? `M${floor}` : `Cabin${floor}`
+}
+
+function expectCompilesAndRoundTrips(program: Program) {
+  const result = compile(program)
+  expect(result.errors).toEqual([])
+  expect(result.warnings).toEqual([])
+  expect(parseProgramText(serializeProgram(program))).toEqual(program)
+  expect(new Set(program.tags.map((tag) => tag.name)).size).toBe(program.tags.length)
+  expect(new Set(program.tags.map((tag) => tag.address.toUpperCase())).size).toBe(program.tags.length)
+}
+
+const quizCounts = Array.from({ length: QUIZ_MAX - QUIZ_MIN + 1 }, (_, index) => QUIZ_MIN + index)
+const elevatorFloors = Array.from(
+  { length: ELEVATOR_MAX_FLOORS - ELEVATOR_MIN_FLOORS + 1 },
+  (_, index) => ELEVATOR_MIN_FLOORS + index,
+)
 
 describe('实验指导书六个实验', () => {
   it.each(COURSE_LABS.map((item, index) => ({ ...item, index: index + 1 })))(
@@ -266,5 +295,262 @@ describe('实验指导书六个实验', () => {
     runtime = scan(program, runtime, 1, 20)
     expect(runtime.ints.ShiftByte).toBe(1)
     expect(stations(runtime)).toEqual(['D'])
+  })
+})
+
+describe('课程课设参数化生成', () => {
+  it.each(quizCounts)('%i 路抢答器全范围可编译、往返并保持唯一地址', (count) => {
+    expectCompilesAndRoundTrips(buildQuizProgram(count))
+  })
+
+  it.each(elevatorFloors)('%i 层电梯全范围可编译、往返并保持唯一地址', (floors) => {
+    expectCompilesAndRoundTrips(buildElevatorProgram(floors))
+  })
+
+  it('四层电梯从一层上行到四层并清除轿厢请求', () => {
+    const program = buildElevatorProgram(4)
+    expect(compile(program).errors).toEqual([])
+    expect(compile(program).warnings).toEqual([])
+    let runtime = createRuntime(program)
+    expect(runtime.bools.SQ1).toBe(true)
+
+    runtime = write(program, runtime, { S4: true })
+    runtime = scan(program, runtime)
+    expect(runtime.bools.Cabin4).toBe(true)
+    expect(runtime.bools.Up).toBe(true)
+    expect(runtime.bools.UP).toBe(true)
+
+    runtime = write(program, runtime, { S4: false, SQ1: false, SQ4: true })
+    runtime = scan(program, runtime)
+    expect(runtime.bools.Cabin4).toBe(false)
+    expect(runtime.bools.L4).toBe(true)
+    expect(runtime.bools.Up).toBe(false)
+    expect(runtime.bools.UP).toBe(false)
+  })
+
+  it('两层电梯能连续完成上行和下行方向选择', () => {
+    const program = buildElevatorProgram(2)
+    let runtime = createRuntime(program)
+    runtime = write(program, runtime, { S2: true })
+    runtime = scan(program, runtime)
+    expect(runtime.bools.Up).toBe(true)
+
+    runtime = write(program, runtime, { S2: false, SQ1: false, SQ2: true })
+    runtime = scan(program, runtime)
+    expect(runtime.bools.L2).toBe(true)
+    expect(runtime.bools.Up).toBe(false)
+
+    runtime = write(program, runtime, { S1: true })
+    runtime = scan(program, runtime)
+    expect(runtime.bools.Down).toBe(true)
+    expect(runtime.bools.Cabin1).toBe(true)
+
+    runtime = write(program, runtime, { S1: false, SQ2: false, SQ1: true })
+    runtime = scan(program, runtime)
+    expect(runtime.bools.L1).toBe(true)
+    expect(runtime.bools.Cabin1).toBe(false)
+    expect(runtime.bools.Down).toBe(false)
+  })
+
+  it('三人抢答器阻止抢跑、锁存首位并支持复位', () => {
+    const program = buildQuizProgram(3)
+    let runtime = createRuntime(program)
+    runtime = write(program, runtime, { P2: true })
+    runtime = scan(program, runtime)
+    expect(runtime.bools.L2).toBe(false)
+
+    runtime = write(program, runtime, { Start: true })
+    runtime = scan(program, runtime)
+    expect(runtime.bools.Allow).toBe(true)
+    runtime = write(program, runtime, { P2: false })
+    runtime = scan(program, runtime)
+    runtime = write(program, runtime, { P2: true })
+    runtime = scan(program, runtime)
+    expect(runtime.bools.L2).toBe(true)
+
+    runtime = write(program, runtime, { P1: true, P3: true })
+    runtime = scan(program, runtime)
+    expect([1, 2, 3].filter((index) => runtime.bools[`L${index}`])).toEqual([2])
+    expect({
+      A: runtime.bools.SegA,
+      B: runtime.bools.SegB,
+      C: runtime.bools.SegC,
+      D: runtime.bools.SegD,
+      E: runtime.bools.SegE,
+      F: runtime.bools.SegF,
+      G: runtime.bools.SegG,
+    }).toEqual({ A: true, B: true, C: false, D: true, E: true, F: false, G: true })
+
+    runtime = write(program, runtime, { Reset: true })
+    runtime = scan(program, runtime)
+    expect([1, 2, 3].some((index) => runtime.bools[`L${index}`])).toBe(false)
+    expect(runtime.bools.Allow).toBe(true)
+  })
+
+  it.each(quizCounts)('%i 路抢答器的最后一路可获胜，互锁和复位保持有效', (count) => {
+    const program = buildQuizProgram(count)
+    let runtime = createRuntime(program)
+
+    runtime = write(program, runtime, { P1: true })
+    runtime = scan(program, runtime)
+    expect(runtime.bools.L1).toBe(false)
+
+    runtime = write(program, runtime, { Start: true })
+    runtime = scan(program, runtime)
+    expect(runtime.bools.Allow).toBe(true)
+    expect(runtime.bools.L1).toBe(false)
+
+    runtime = write(program, runtime, { P1: false })
+    runtime = scan(program, runtime)
+    runtime = write(program, runtime, { P1: true })
+    runtime = scan(program, runtime)
+    expect(runtime.bools.L1).toBe(true)
+
+    runtime = write(program, runtime, { P1: false, Reset: true })
+    runtime = scan(program, runtime)
+    expect(Array.from({ length: count }, (_, index) => runtime.bools[`L${index + 1}`]))
+      .toEqual(Array(count).fill(false))
+    expect(runtime.bools.Allow).toBe(true)
+
+    runtime = write(program, runtime, { Reset: false })
+    runtime = scan(program, runtime)
+    runtime = write(program, runtime, { [`P${count}`]: true })
+    runtime = scan(program, runtime)
+    expect(Array.from({ length: count }, (_, index) => runtime.bools[`L${index + 1}`]))
+      .toEqual(Array.from({ length: count }, (_, index) => index + 1 === count))
+
+    runtime = write(program, runtime, { P1: true })
+    runtime = scan(program, runtime)
+    expect(runtime.bools[`L${count}`]).toBe(true)
+    expect(runtime.bools.L1).toBe(false)
+  })
+
+  it.each([
+    [2, { A: true, B: true, C: false, D: true, E: true, F: false, G: true }],
+    [3, { A: true, B: true, C: true, D: true, E: false, F: false, G: true }],
+    [7, { A: true, B: true, C: true, D: false, E: false, F: false, G: false }],
+    [8, { A: true, B: true, C: true, D: true, E: true, F: true, G: true }],
+  ] as const)('%i 路抢答器的数码管只点亮正确答案需要的段', (count, expected) => {
+    const program = buildQuizProgram(count)
+    let runtime = createRuntime(program)
+    runtime = write(program, runtime, { Start: true, [`P${count}`]: true })
+    runtime = scan(program, runtime)
+    expect({
+      A: runtime.bools.SegA,
+      B: runtime.bools.SegB,
+      C: runtime.bools.SegC,
+      D: runtime.bools.SegD,
+      E: runtime.bools.SegE,
+      F: runtime.bools.SegF,
+      G: runtime.bools.SegG,
+    }).toEqual(expected)
+  })
+
+  it.each([1, 9, 2.5])('%s 路是非法抢答规格', (count) => {
+    expect(() => buildQuizProgram(count)).toThrow('2～8')
+  })
+
+  it.each([1, 11, 2.5])('%s 层是非法电梯规格', (floors) => {
+    expect(() => buildElevatorProgram(floors)).toThrow('2～10')
+  })
+
+  it.each(elevatorFloors)('%i 层电梯能上到顶层、再下到底层并清除边界方向', (floors) => {
+    const program = buildElevatorProgram(floors)
+    let runtime = createRuntime(program)
+    const top = floors
+    // 三层沿用实验指导书版本：先算方向、后清需求，到层后方向要多一拍才熄灭。
+    const arrive = (state: Runtime) => (floors === 3 ? scan(program, state, 2) : scan(program, state))
+
+    runtime = write(program, runtime, { [`S${top}`]: true })
+    runtime = scan(program, runtime)
+    expect(runtime.bools[cabinTag(floors, top)]).toBe(true)
+    expect(runtime.bools.Up).toBe(true)
+    expect(runtime.bools.Down).toBe(false)
+
+    runtime = write(program, runtime, { [`S${top}`]: false, SQ1: false, [`SQ${top}`]: true })
+    runtime = arrive(runtime)
+    expect(runtime.bools[cabinTag(floors, top)]).toBe(false)
+    expect(runtime.bools[`L${top}`]).toBe(true)
+    expect(runtime.bools.Up).toBe(false)
+    expect(runtime.bools.UP).toBe(false)
+
+    runtime = write(program, runtime, { S1: true })
+    runtime = scan(program, runtime)
+    expect(runtime.bools[cabinTag(floors, 1)]).toBe(true)
+    expect(runtime.bools.Down).toBe(true)
+    expect(runtime.bools.Up).toBe(false)
+    expect(runtime.bools.DOWN).toBe(true)
+
+    runtime = write(program, runtime, { S1: false, [`SQ${top}`]: false, SQ1: true })
+    runtime = arrive(runtime)
+    expect(runtime.bools[cabinTag(floors, 1)]).toBe(false)
+    expect(runtime.bools.L1).toBe(true)
+    expect(runtime.bools.Down).toBe(false)
+    expect(runtime.bools.DOWN).toBe(false)
+  })
+
+  it('电梯在楼层之间保持已选方向，并继续服务上方请求', () => {
+    const program = buildElevatorProgram(5)
+    let runtime = createRuntime(program)
+    runtime = write(program, runtime, { S5: true })
+    runtime = scan(program, runtime)
+    expect(runtime.bools.Up).toBe(true)
+
+    runtime = write(program, runtime, { S5: false, SQ1: false })
+    runtime = scan(program, runtime)
+    runtime = scan(program, runtime)
+    expect(runtime.bools.UpNeed).toBe(true)
+    expect(runtime.bools.Up).toBe(true)
+    expect(runtime.bools.Down).toBe(false)
+  })
+
+  it('上行途中同向呼叫到层即清除，反向呼叫保留到换向后服务', () => {
+    const program = buildElevatorProgram(5)
+    let runtime = createRuntime(program)
+    runtime = write(program, runtime, { U2: true, S5: true })
+    runtime = scan(program, runtime)
+    runtime = write(program, runtime, { U2: false, S5: false, SQ1: false, SQ2: true })
+    runtime = scan(program, runtime)
+    expect(runtime.bools.UpCall2).toBe(false)
+    expect(runtime.bools.Cabin5).toBe(true)
+    expect(runtime.bools.Up).toBe(true)
+
+    runtime = write(program, runtime, { SQ2: false, SQ4: true, D4: true })
+    runtime = scan(program, runtime)
+    runtime = write(program, runtime, { D4: false })
+    runtime = scan(program, runtime)
+    expect(runtime.bools.DownCall4).toBe(true)
+    expect(runtime.bools.Up).toBe(true)
+
+    runtime = write(program, runtime, { SQ4: false, SQ5: true })
+    runtime = scan(program, runtime)
+    runtime = scan(program, runtime)
+    expect(runtime.bools.Cabin5).toBe(false)
+    expect(runtime.bools.Down).toBe(true)
+    expect(runtime.bools.Up).toBe(false)
+
+    runtime = write(program, runtime, { SQ5: false, SQ4: true })
+    runtime = scan(program, runtime)
+    expect(runtime.bools.DownCall4).toBe(false)
+    expect(runtime.bools.Down).toBe(false)
+  })
+
+  it('复位清除全部轿厢、外呼和方向记忆', () => {
+    const program = buildElevatorProgram(6)
+    let runtime = createRuntime(program)
+    runtime = write(program, runtime, { S6: true, D3: true })
+    runtime = scan(program, runtime)
+    expect(runtime.bools.Up).toBe(true)
+
+    runtime = write(program, runtime, { S6: false, D3: false, Reset: true })
+    runtime = scan(program, runtime)
+    const memories = program.tags
+      .map((tag) => tag.name)
+      .filter((name) => /^(Cabin|UpCall|DownCall)\d+$/.test(name))
+    expect(memories.length).toBeGreaterThan(0)
+    for (const name of memories) expect(runtime.bools[name]).toBe(false)
+    for (const name of ['Up', 'Down', 'UpNeed', 'DownNeed', 'UP', 'DOWN']) {
+      expect(runtime.bools[name]).toBe(false)
+    }
   })
 })

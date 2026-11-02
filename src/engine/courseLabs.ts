@@ -30,7 +30,10 @@ const cloneNode = (node: LadderNode): LadderNode => node.type === 'contact'
 const resetAll = (condition: LadderNode[], label: string, names: string[]) => names.map((name) =>
   r(`${label} · ${name}`, condition.map(cloneNode), o('RESET', name)))
 
-function quiz(): Program {
+export const QUIZ_MIN = 2
+export const QUIZ_MAX = 8
+
+function quizFour(): Program {
   const rungs: Program['rungs'] = [
     r('启动允许抢答', [no('Start')], o('SET', 'Allow')),
     r('停止许可 · 未启动时不能抢答', [nc('Start'), no('Reset')], o('RESET', 'Allow')),
@@ -49,6 +52,85 @@ function quiz(): Program {
     ...[1, 2, 3, 4].map((i) => t(`L${i}`, `%Q0.${i - 1}`, `${i} 号抢答灯`)),
     ...['A', 'B', 'C', 'D'].map((x, i) => t(`Seg${x}`, `%Q1.${i}`, `数码管段 ${x}`)),
   ], rungs)
+}
+
+/**
+ * 通用抢答器：2～8 路都能生成，仍使用“允许抢答 + 上升沿 + 其他回路互锁”的
+ * 同一套行为。四路保留原数码段布局，避免既有课设工程无谓变脸。
+ */
+export function buildQuizProgram(count: number): Program {
+  if (!Number.isInteger(count) || count < QUIZ_MIN || count > QUIZ_MAX) {
+    throw new Error(`抢答路数必须在 ${QUIZ_MIN}～${QUIZ_MAX} 之间`)
+  }
+  if (count === 4) return ensureTrailingBlankRung(quizFour())
+
+  const players = Array.from({ length: count }, (_, index) => index + 1)
+  const lamps = players.map((player) => `L${player}`)
+  const inputAddress = (offset: number) => `%I${Math.floor(offset / 8)}.${offset % 8}`
+  const outputAddress = (offset: number) => `%Q${Math.floor(offset / 8)}.${offset % 8}`
+  const segmentNames = ['SegA', 'SegB', 'SegC', 'SegD', 'SegE', 'SegF', 'SegG'] as const
+  const segmentDigits: Record<number, readonly string[]> = {
+    1: ['SegB', 'SegC'],
+    2: ['SegA', 'SegB', 'SegD', 'SegE', 'SegG'],
+    3: ['SegA', 'SegB', 'SegC', 'SegD', 'SegG'],
+    4: ['SegB', 'SegC', 'SegF', 'SegG'],
+    5: ['SegA', 'SegC', 'SegD', 'SegF', 'SegG'],
+    6: ['SegA', 'SegC', 'SegD', 'SegE', 'SegF', 'SegG'],
+    7: ['SegA', 'SegB', 'SegC'],
+    8: ['SegA', 'SegB', 'SegC', 'SegD', 'SegE', 'SegF', 'SegG'],
+  }
+  const rungs: Program['rungs'] = [
+    r('启动允许抢答', [no('Start')], o('SET', 'Allow')),
+    r('停止许可 · 未启动时不能抢答', [nc('Start'), no('Reset')], o('RESET', 'Allow')),
+    ...players.map((player) => r(
+      `抢答按钮 ${player} · 上升沿互锁`,
+      [
+        no('Allow'),
+        no(`P${player}`),
+        edge(`P${player}`),
+        ...players.filter((other) => other !== player).map((other) => nc(`L${other}`)),
+      ],
+      o('SET', `L${player}`),
+    )),
+    ...resetAll([no('Reset')], '复位并重新允许', lamps),
+    r('复位后开放新一轮抢答', [no('Reset')], o('SET', 'Allow')),
+    ...segmentNames.map((segment) => {
+      const digits = players.filter((player) => segmentDigits[player]?.includes(segment))
+      const condition = digits.length > 1
+        ? [or(...digits.map((digit) => [no(`L${digit}`)]))]
+        : digits.length === 1
+          ? [no(`L${digits[0]}`)]
+          // 空条件在梯形图里是“常通”，会让本不该亮的数码段一直点亮。
+          // 用 Start 的常开与常闭串联构成恒假条件，保持线圈存在且始终熄灭。
+          : [nc('Start'), no('Start')]
+      return r(
+        `数码段 ${segment.slice(-1)} · ${digits.join(' / ') || '恒灭'}`,
+        condition,
+        o('COIL', segment),
+      )
+    }),
+  ]
+  const tags: TagDef[] = [
+    t('Start', '%I0.0', '启动按钮'),
+    t('Reset', '%I0.1', '复位按钮'),
+    ...players.map((player) => t(
+      `P${player}`,
+      inputAddress(player + 1),
+      `${player} 号抢答按钮`,
+    )),
+    t('Allow', '%M0.0', '允许抢答'),
+    ...players.map((player) => t(`L${player}`, outputAddress(player - 1), `${player} 号抢答灯`)),
+    ...segmentNames.map((segment, index) => t(
+      segment,
+      outputAddress(count + index),
+      `数码管段 ${segment.slice(-1)}`,
+    )),
+  ]
+  return ensureTrailingBlankRung(p(`${count} 路抢答器`, tags, rungs))
+}
+
+function quiz(): Program {
+  return buildQuizProgram(4)
 }
 
 function timerCounter(): Program {
@@ -96,7 +178,7 @@ function traffic(): Program {
   ], rungs)
 }
 
-function elevator(): Program {
+function elevatorThree(): Program {
   const rungs: Program['rungs'] = []
   const requests = [['S1', 'M1'], ['S2', 'M2'], ['S3', 'M3'], ['U1', 'HU1'], ['U2', 'HU2'], ['D2', 'HD2'], ['D3', 'HD3']]
   requests.forEach(([button, memory]) => rungs.push(r(`${button} · 请求上升沿记忆`, [no(button), edge(button)], o('SET', memory))))
@@ -119,6 +201,159 @@ function elevator(): Program {
     ...requests.map(([, x], i) => t(x, `%M0.${i}`, '请求记忆')), t('Up', '%M1.0', '上行方向'), t('Down', '%M1.1', '下行方向'), t('UpNeed', '%M1.2', '上行需求'), t('DownNeed', '%M1.3', '下行需求'),
     ...['L1', 'L2', 'L3', 'UP', 'DOWN', 'SL1', 'SL2', 'SL3'].map((x, i) => t(x, `%Q0.${i}`, '楼层 / 方向 / 选择指示')),
   ], rungs)
+}
+
+export const ELEVATOR_MIN_FLOORS = 2
+export const ELEVATOR_MAX_FLOORS = 10
+
+/**
+ * 2～10 层通用呼叫控制。每次扫描根据当前楼层传感器重新汇总上行 / 下行需求，
+ * 保留同向服务、到层清除对应请求，并在最顶层 / 最底层自动取消越界方向。
+ * 三层仍使用已由实验指导书验证过的固定版本，确保既有课设行为不变。
+ */
+export function buildElevatorProgram(floors: number): Program {
+  if (!Number.isInteger(floors) || floors < ELEVATOR_MIN_FLOORS || floors > ELEVATOR_MAX_FLOORS) {
+    throw new Error(`电梯层数必须在 ${ELEVATOR_MIN_FLOORS}～${ELEVATOR_MAX_FLOORS} 之间`)
+  }
+  if (floors === 3) return ensureTrailingBlankRung(elevatorThree())
+
+  const bitAddress = (area: 'I' | 'M' | 'Q', offset: number) =>
+    `%${area}${Math.floor(offset / 8)}.${offset % 8}`
+  const floorsList = Array.from({ length: floors }, (_, index) => index + 1)
+  const requests: Array<{
+    button: string
+    memory: string
+    floor: number
+    kind: 'cabin' | 'up' | 'down'
+  }> = []
+  for (const floor of floorsList) {
+    requests.push({ button: `S${floor}`, memory: `Cabin${floor}`, floor, kind: 'cabin' })
+  }
+  for (const floor of floorsList.slice(0, -1)) {
+    requests.push({ button: `U${floor}`, memory: `UpCall${floor}`, floor, kind: 'up' })
+  }
+  for (const floor of floorsList.slice(1)) {
+    requests.push({ button: `D${floor}`, memory: `DownCall${floor}`, floor, kind: 'down' })
+  }
+  const sensor = (floor: number) => `SQ${floor}`
+  const anyRequest = or(...requests.map((request) => [no(request.memory)]))
+  const noCabinAtFloor = floorsList.map((floor) => nc(sensor(floor)))
+  const rungs: Program['rungs'] = []
+
+  requests.forEach((request) => rungs.push(r(
+    `${request.button} · 请求上升沿记忆`,
+    [no(request.button), edge(request.button)],
+    o('SET', request.memory),
+  )))
+  rungs.push(...resetAll(
+    [no('Reset')],
+    '复位请求与方向',
+    [...requests.map((request) => request.memory), 'Up', 'Down'],
+  ))
+
+  floorsList.forEach((floor) => {
+    rungs.push(r(`到 ${floor} 层清轿厢请求`, [no(sensor(floor))], o('RESET', `Cabin${floor}`)))
+    if (floor < floors) {
+      rungs.push(r(
+        `到 ${floor} 层清上行外呼 · 保留下行服务`,
+        [no(sensor(floor)), nc('Down')],
+        o('RESET', `UpCall${floor}`),
+      ))
+    }
+    if (floor > 1) {
+      rungs.push(r(
+        `到 ${floor} 层清下行外呼 · 保留上行服务`,
+        [no(sensor(floor)), nc('Up')],
+        o('RESET', `DownCall${floor}`),
+      ))
+    }
+  })
+
+  const upBranches: LadderNode[][] = []
+  const downBranches: LadderNode[][] = []
+  floorsList.forEach((floor) => {
+    requests
+      .filter((request) => request.floor > floor || (request.kind === 'up' && request.floor === floor))
+      .forEach((request) => upBranches.push([no(sensor(floor)), no(request.memory)]))
+    requests
+      .filter((request) => request.floor < floor || (request.kind === 'down' && request.floor === floor))
+      .forEach((request) => downBranches.push([no(sensor(floor)), no(request.memory)]))
+  })
+  // 运行在两楼层之间时没有传感器有效，按已选方向继续服务剩余请求。
+  upBranches.push([...noCabinAtFloor.map(cloneNode), no('Up'), cloneNode(anyRequest)])
+  downBranches.push([...noCabinAtFloor.map(cloneNode), no('Down'), cloneNode(anyRequest)])
+  rungs.push(
+    r('汇总所有上方 / 同层上行请求', [or(...upBranches)], o('COIL', 'UpNeed')),
+    r('汇总所有下方 / 同层下行请求', [or(...downBranches)], o('COIL', 'DownNeed')),
+    r('无上行需求清上行方向', [nc('UpNeed')], o('RESET', 'Up')),
+    r('无下行需求清下行方向', [nc('DownNeed')], o('RESET', 'Down')),
+    r('选择上行方向', [no('UpNeed'), nc('Down')], o('SET', 'Up')),
+    r('选择下行方向', [no('DownNeed'), nc('Up')], o('SET', 'Down')),
+  )
+
+  floorsList.forEach((floor) => {
+    rungs.push(r(`显示 ${floor} 层位置`, [no(sensor(floor))], o('COIL', `L${floor}`)))
+    rungs.push(r(`显示 ${floor} 层轿厢选择`, [no(`Cabin${floor}`)], o('COIL', `SL${floor}`)))
+  })
+  rungs.push(
+    r('上行方向指示', [no('Up')], o('COIL', 'UP')),
+    r('下行方向指示', [no('Down')], o('COIL', 'DOWN')),
+  )
+
+  const inputTags: TagDef[] = []
+  requests.forEach((request, index) => inputTags.push(t(
+    request.button,
+    bitAddress('I', index),
+    request.kind === 'cabin'
+      ? `${request.floor} 层轿厢内选`
+      : request.kind === 'up'
+        ? `${request.floor} 层上行外呼`
+        : `${request.floor} 层下行外呼`,
+  )))
+  floorsList.forEach((floor, index) => inputTags.push(t(
+    sensor(floor),
+    bitAddress('I', requests.length + index),
+    `${floor} 层行程开关`,
+    floor === 1,
+  )))
+  inputTags.push(t('Reset', bitAddress('I', requests.length + floors), '复位键'))
+
+  const memoryTags: TagDef[] = requests.map((request, index) => t(
+    request.memory,
+    bitAddress('M', index),
+    `${request.floor} 层请求记忆`,
+  ))
+  memoryTags.push(
+    t('Up', bitAddress('M', requests.length), '上行方向'),
+    t('Down', bitAddress('M', requests.length + 1), '下行方向'),
+    t('UpNeed', bitAddress('M', requests.length + 2), '上行需求'),
+    t('DownNeed', bitAddress('M', requests.length + 3), '下行需求'),
+  )
+
+  const outputTags: TagDef[] = floorsList.map((floor) => t(
+    `L${floor}`,
+    bitAddress('Q', floor - 1),
+    `${floor} 层位置指示`,
+  ))
+  outputTags.push(
+    t('UP', bitAddress('Q', floors), '上行方向指示'),
+    t('DOWN', bitAddress('Q', floors + 1), '下行方向指示'),
+    ...floorsList.map((floor) => t(
+      `SL${floor}`,
+      bitAddress('Q', floors + 1 + floor),
+      `${floor} 层轿厢选择指示`,
+    )),
+  )
+
+  return ensureTrailingBlankRung(p(
+    `实验四 · ${floors} 层电梯呼叫与方向`,
+    [...inputTags, ...memoryTags, ...outputTags],
+    rungs,
+  ))
+}
+
+function elevator(): Program {
+  return buildElevatorProgram(3)
 }
 
 function fountain(): Program {

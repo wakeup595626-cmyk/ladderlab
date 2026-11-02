@@ -3565,7 +3565,7 @@ export default function App() {
     setMobilePanel('none')
     notify(
       `已生成「${template.title}」：${contentRungs(committed).length} 段、`
-      + `${committed.tags.length} 个变量，编译通过；可从右上角“导出”保存 PNG / SVG`,
+      + `${committed.tags.length} 个变量，编译通过；可从右上角“导出”保存 PNG / SVG / 分页 PDF`,
     )
   }
 
@@ -3687,7 +3687,7 @@ export default function App() {
     return () => window.removeEventListener('hashchange', onHashChange)
   }, [consumeShareHash])
   // 顺序功能图由步骤位、步进网络和线圈条件现场归纳，不写入工程文件。
-  const startSfcExport = async (format: ProgramImageFormat) => {
+  const startSfcExport = async (format: 'svg' | 'png') => {
     if (sfcExportBusyRef.current) return
     if (imageExportRequest || imageExportBusyRef.current || sfcExporting) {
       if (imageExportRequest || imageExportBusyRef.current) {
@@ -4117,6 +4117,7 @@ export default function App() {
         onImportProject={() => setImportOpen(true)}
         onExportProject={exportProject}
         onExportImage={startImageExport}
+        onExportPdf={() => startImageExport('complete', 'pdf')}
         onExportSfc={(format) => void startSfcExport(format)}
         exporting={imageExportRequest !== null || sfcExporting}
         onCopyShareLink={() => void copyShareLink()}
@@ -4828,17 +4829,23 @@ export default function App() {
             mode={imageExportRequest.mode}
             format={imageExportRequest.format}
             onComplete={(result) => {
-              const suffix = imageExportRequest.mode === 'complete' ? '完整程序' : '纯梯形图'
+              const suffix = imageExportRequest.mode === 'complete'
+                ? (result.format === 'pdf' ? '完整程序-分页' : '完整程序')
+                : '纯梯形图'
               const base = safeFileName(imageExportRequest.program.name)
                 + '-' + suffix + '-' + downloadTimestamp()
               if (result.format === 'svg') {
                 downloadText(base + '.svg', result.data, 'image/svg+xml;charset=utf-8')
-              } else {
+              } else if (result.format === 'png') {
                 downloadBlob(base + '.png', result.data)
+              } else {
+                downloadBlob(base + '.pdf', result.data)
               }
               imageExportBusyRef.current = false
               setImageExportRequest(null)
-              notify('已导出' + suffix + ' ' + result.format.toUpperCase())
+              notify(result.format === 'pdf'
+                ? `已导出分页 PDF，共 ${result.pageCount} 页`
+                : '已导出' + suffix + ' ' + result.format.toUpperCase())
             }}
             onError={(message) => {
               imageExportBusyRef.current = false

@@ -54,6 +54,7 @@ export interface WorkspaceTopBarProps {
   onImportProject: () => void
   onExportProject: () => void
   onExportImage: (mode: 'complete' | 'plain', format: 'svg' | 'png') => void
+  onExportPdf: () => void
   onExportSfc: (format: 'svg' | 'png') => void
   /** 图片/顺序功能图正在生成：导出入口置灰，避免重复排队占满主线程。 */
   exporting?: boolean
@@ -95,6 +96,7 @@ export default function WorkspaceTopBar({
   onImportProject,
   onExportProject,
   onExportImage,
+  onExportPdf,
   onExportSfc,
   exporting = false,
   onCopyShareLink,
@@ -435,6 +437,10 @@ export default function WorkspaceTopBar({
       <button type="button" role="menuitem" {...exportGuard} onClick={() => chooseFileMenuAction(() => onExportImage('plain', exportFormat))}>
         <ImageIcon size={16} />
         <span>纯梯形图</span>
+      </button>
+      <button type="button" role="menuitem" {...exportGuard} onClick={() => chooseFileMenuAction(onExportPdf)}>
+        <ExportIcon size={16} />
+        <span>完整程序（分页 PDF）</span>
       </button>
       <button type="button" role="menuitem" {...exportGuard} onClick={() => chooseFileMenuAction(() => onExportSfc(exportFormat))}>
         <StepIcon size={16} />

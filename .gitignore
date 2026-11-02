@@ -45,3 +45,12 @@ docs/guide-mobile.png
 docs/screenshot-1366.png
 docs/screenshot-mobile.png
 docs/screenshot-mobile-full.png
+
+# 本地审计、探针与截图产物（不参与发布）
+_audit_*/
+_audit_*.png
+_e2e_out_*/
+_live_probe/
+_probe_*.png
+ladderlab/
+screens/

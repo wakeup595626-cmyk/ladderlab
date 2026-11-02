@@ -79,27 +79,38 @@ function forwardReverse(): Program {
  * 八路流水灯：500ms 通用序列盒依次写 1/2/4/…/128。
  * 停止时写 0 让八灯全灭，但 PATTERN 自己的步号保留，重新启动从下一拍继续。
  */
-function runningLight(): Program {
+export const RUNNING_LIGHT_MIN = 2
+export const RUNNING_LIGHT_MAX = 8
+
+/** 参数化流水灯生成器；每一位使用独立的 BOOL 位别名，2～8 路都可编译。 */
+export function buildRunningLightProgram(count: number): Program {
+  if (!Number.isInteger(count) || count < RUNNING_LIGHT_MIN || count > RUNNING_LIGHT_MAX) {
+    throw new Error(`流水灯路数必须在 ${RUNNING_LIGHT_MIN}～${RUNNING_LIGHT_MAX} 之间`)
+  }
   const tags: TagDef[] = [
     t('Start', '%I0.0', '启动开关（保持型）'),
-    n('LampByte', '%MB10', '八路灯位组成的字节', 0),
+    n('LampByte', '%MB10', `${count} 路灯位组成的字节`, 0),
   ]
-  for (let i = 0; i < 8; i += 1) {
+  for (let i = 0; i < count; i += 1) {
     tags.push({ ...t(`Lamp${i + 1}`, `%M10.${i}`, `灯位 ${i + 1} 状态`), bitOf: 'LampByte' })
   }
-  for (let i = 0; i < 8; i += 1) tags.push(t(`RunningLight${i + 1}`, `%Q0.${i}`, `第 ${i + 1} 只流水灯`))
-  return p('机器课设 · 八路流水灯', tags, [
+  for (let i = 0; i < count; i += 1) tags.push(t(`RunningLight${i + 1}`, `%Q0.${i}`, `第 ${i + 1} 只流水灯`))
+  return ensureTrailingBlankRung(p(`机器课设 · ${count} 路流水灯`, tags, [
     r('500ms 自复位节拍', [no('Start'), nc('T1.Q')], o('TON', 'T1', { pt: 500 })),
     r('每个节拍点亮下一路 · 停止全灭并保留步序', [no('Start')], o('PATTERN', 'LampByte', {
       pulseTag: 'T1.Q',
-      pattern: [1, 2, 4, 8, 16, 32, 64, 128],
+      pattern: Array.from({ length: count }, (_, index) => 2 ** index),
     })),
-    ...Array.from({ length: 8 }, (_, i) => r(
+    ...Array.from({ length: count }, (_, i) => r(
       `灯位 ${i + 1} → 第 ${i + 1} 只灯`,
       [no(`Lamp${i + 1}`)],
       o('COIL', `RunningLight${i + 1}`),
     )),
-  ])
+  ]))
+}
+
+function runningLight(): Program {
+  return buildRunningLightProgram(RUNNING_LIGHT_MAX)
 }
 
 const BUILDERS = [bulldozer, forwardReverse, runningLight]

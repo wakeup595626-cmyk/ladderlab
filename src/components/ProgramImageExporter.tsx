@@ -11,6 +11,7 @@ import {
   type PlainLayout,
   type RungExtent,
 } from '../lib/programImageLayout'
+import { planProgramImagePages } from '../lib/programImagePaging'
 import {
   assertSvgDocument,
   declareSvgDocument,
@@ -27,8 +28,8 @@ import './ProgramImageExporter.css'
 
 export type ProgramImageMode = 'complete' | 'plain'
 
-/** png 用于微信、Word 这类只认位图的场合；svg 是矢量原稿，任意缩放都不糊。 */
-export type ProgramImageFormat = 'png' | 'svg'
+/** PNG 便于分享，SVG 保留矢量原稿，分页 PDF 适合直接提交课设报告。 */
+export type ProgramImageFormat = 'png' | 'svg' | 'pdf'
 
 /**
  * SVG 交付字符串，PNG 交付 Blob：
@@ -38,6 +39,7 @@ export type ProgramImageFormat = 'png' | 'svg'
 export type ProgramImageResult =
   | { format: 'svg'; data: string }
   | { format: 'png'; data: Blob }
+  | { format: 'pdf'; data: Blob; pageCount: number }
 
 interface ProgramImageExporterProps {
   program: Program
@@ -63,6 +65,15 @@ interface VectorRung {
   height: number
   label: string
   title: string
+}
+
+interface CompletePageContext {
+  /** 从 1 开始的全文件页码。 */
+  pageNumber: number
+  pageCount: number
+  /** 当前页第一段在全程序中的零基下标。 */
+  rungOffset: number
+  totalRungs: number
 }
 
 const INITIAL_STAGE_WIDTH = 1240
@@ -634,7 +645,12 @@ function completeHeadingLimit(
   return Math.max(120, cardWidth - Math.max(mainLabelWidth, profileLabelWidth) - 56)
 }
 
-function buildCompleteImage(program: Program, rungs: PreparedRung[], layout: CompleteLayout) {
+function buildCompleteImage(
+  program: Program,
+  rungs: PreparedRung[],
+  layout: CompleteLayout,
+  page?: CompletePageContext,
+) {
   const {
     pagePad,
     cardPad,
@@ -664,7 +680,12 @@ function buildCompleteImage(program: Program, rungs: PreparedRung[], layout: Com
   context.fillStyle = MUTED
   setFont(context, 500, 11)
   context.fillText(
-    `${program.profile.toUpperCase()} 指令档案`,
+    fitText(
+      context,
+      `${program.profile.toUpperCase()} 指令档案`
+        + (page ? ` · 第 ${page.pageNumber} / ${page.pageCount} 页` : ''),
+      Math.max(160, cardWidth * 0.48),
+    ),
     width - pagePad,
     pagePad + rightNoteBaseline,
   )
@@ -684,7 +705,9 @@ function buildCompleteImage(program: Program, rungs: PreparedRung[], layout: Com
 
     // 标题、副标题、页码共用一条基线：先把页码宽度量出来，标题再用剩下的
     // 宽度截断，PNG 与 SVG 才会画出同一个结果，长程序段名也压不到页码。
-    const counter = `${String(index + 1).padStart(2, '0')} / ${String(rungs.length).padStart(2, '0')}`
+    const rungNumber = (page?.rungOffset ?? 0) + index + 1
+    const totalRungs = page?.totalRungs ?? rungs.length
+    const counter = `${String(rungNumber).padStart(2, '0')} / ${String(totalRungs).padStart(2, '0')}`
     context.fillStyle = MUTED
     setFont(context, 500, 10)
     const counterWidth = context.measureText(counter).width
@@ -717,6 +740,75 @@ function buildCompleteImage(program: Program, rungs: PreparedRung[], layout: Com
   })
 
   return canvas
+}
+
+/**
+ * 长程序按完整卡片分页，再把每页画到一张 A4 横向 PDF 上。
+ * 分页只发生在程序段之间，单段本身始终完整保留；页面与程序段编号
+ * 都使用整份程序的连续编号，打印后不会出现每页从 1 开始的歧义。
+ */
+async function buildCompletePdf(
+  program: Program,
+  rungs: PreparedRung[],
+  isCancelled: () => boolean,
+): Promise<{ data: Blob; pageCount: number } | null> {
+  const pages = planProgramImagePages(rungs)
+  if (pages.length === 0) throw new Error('当前工程没有可导出的程序段')
+  const { jsPDF } = await import('jspdf')
+  if (isCancelled()) return null
+
+  const pdf = new jsPDF({
+    orientation: 'landscape',
+    unit: 'mm',
+    format: 'a4',
+    compress: true,
+  })
+  pdf.setProperties({
+    title: program.name,
+    subject: 'LadderLab complete ladder program',
+    creator: 'LadderLab',
+  })
+
+  const pageWidth = pdf.internal.pageSize.getWidth()
+  const pageHeight = pdf.internal.pageSize.getHeight()
+  const margin = 8
+  const availableWidth = pageWidth - margin * 2
+  const availableHeight = pageHeight - margin * 2
+
+  for (let pageIndex = 0; pageIndex < pages.length; pageIndex += 1) {
+    if (isCancelled()) return null
+    const page = pages[pageIndex]
+    const pageRungs = rungs.slice(page.start, page.end)
+    assertProgramImageFits('complete', pageRungs)
+    const layout = planCompleteLayout(pageRungs)
+    const canvas = buildCompleteImage(program, pageRungs, layout, {
+      pageNumber: pageIndex + 1,
+      pageCount: pages.length,
+      rungOffset: page.start,
+      totalRungs: rungs.length,
+    })
+
+    try {
+      const scale = Math.min(
+        availableWidth / layout.width,
+        availableHeight / layout.height,
+      )
+      const drawWidth = layout.width * scale
+      const drawHeight = layout.height * scale
+      const x = margin + (availableWidth - drawWidth) / 2
+      const y = margin + (availableHeight - drawHeight) / 2
+      if (pageIndex > 0) pdf.addPage('a4', 'landscape')
+      pdf.addImage(canvas, 'PNG', x, y, drawWidth, drawHeight, undefined, 'FAST')
+    } finally {
+      // jsPDF 写入图片数据后即可释放页面画布，避免长程序同时保留几十张大图。
+      releaseCanvas(canvas)
+    }
+
+    await yieldToMain()
+  }
+
+  if (isCancelled()) return null
+  return { data: pdf.output('blob'), pageCount: pages.length }
 }
 
 function round2(value: number) {
@@ -1013,6 +1105,16 @@ export default function ProgramImageExporter({
     const firstPassUsable = Math.max(widest, INITIAL_STAGE_WIDTH - DOCUMENT_PADDING_X)
     return Math.max(INITIAL_STAGE_WIDTH, Math.ceil(firstPassUsable + STAGE_BLEED))
   }, [exportProgram])
+  // 每段按自己的自然宽度绘制。若共用整份工程的最宽舞台，窄程序段也会把
+  // 电源轨拉满 A4，分页 PDF 再按整页缩放时文字会小到无法阅读。
+  const exportRungs = useMemo(
+    () => exportProgram.rungs.map((rung) => ({
+      rung,
+      program: { ...exportProgram, rungs: [rung] },
+      availableWidth: Math.max(320, Math.ceil(naturalRungWidth(rung))),
+    })),
+    [exportProgram],
+  )
   const selection: Selection | null = null
 
   useEffect(() => {
@@ -1023,6 +1125,9 @@ export default function ProgramImageExporter({
       // 光栅化出来的每段小图都要在导出结束（含失败、取消）后统一释放。
       const prepared: PreparedRung[] = []
       try {
+        if (format === 'pdf' && mode !== 'complete') {
+          throw new Error('分页 PDF 只支持完整程序导出')
+        }
         await waitForFonts()
         if (cancelled) return
         await nextFrame()
@@ -1090,11 +1195,28 @@ export default function ProgramImageExporter({
             prepared.push(result)
             // 每准备完一段，就按最终版面预算检查一次：一旦确定超限立即停手，
             // 不把剩下几十段也光栅化一遍，更不会等到最后才让整个画布失败。
-            assertProgramImageFits(mode, prepared)
+            // PDF 会按程序段分页，因此不能拿整份程序去套单张画布上限。
+            if (format !== 'pdf') assertProgramImageFits(mode, prepared)
           }
         }
         if (prepared.length !== exportProgram.rungs.length) {
-          throw new Error('有程序段没有绘制内容，无法生成 PNG')
+          throw new Error(
+            format === 'pdf'
+              ? '有程序段没有绘制内容，无法生成 PDF'
+              : '有程序段没有绘制内容，无法生成 PNG',
+          )
+        }
+
+        if (format === 'pdf') {
+          const result = await buildCompletePdf(
+            program,
+            prepared,
+            () => cancelled || controller.signal.aborted,
+          )
+          if (result && !cancelled) {
+            onComplete({ format: 'pdf', data: result.data, pageCount: result.pageCount })
+          }
+          return
         }
 
         const canvas = mode === 'plain'
@@ -1110,7 +1232,11 @@ export default function ProgramImageExporter({
         if (!cancelled) onComplete({ format: 'png', data: blob })
       } catch (reason) {
         if (!cancelled) {
-          const fallback = format === 'svg' ? 'SVG 生成失败' : 'PNG 生成失败'
+          const fallback = format === 'svg'
+            ? 'SVG 生成失败'
+            : format === 'pdf'
+            ? 'PDF 生成失败'
+            : 'PNG 生成失败'
           onError(reason instanceof Error ? reason.message : fallback)
         }
       } finally {
@@ -1134,19 +1260,22 @@ export default function ProgramImageExporter({
         className="program-export-document"
         style={{ width: `${stageWidth}px` }}
       >
-        <LadderCanvas
-          program={exportProgram}
-          runtime={runtime}
-          availableWidth={stageWidth - DOCUMENT_PADDING_X}
-          selection={selection}
-          onSelect={noop}
-          onDuplicateRung={noop}
-          onCopyRung={noop}
-          onCutRung={noop}
-          onPasteRung={noop}
-          onDeleteRung={noop}
-          onMoveRung={noop}
-        />
+        {exportRungs.map(({ rung, program, availableWidth }) => (
+          <LadderCanvas
+            key={rung.id}
+            program={program}
+            runtime={runtime}
+            availableWidth={availableWidth}
+            selection={selection}
+            onSelect={noop}
+            onDuplicateRung={noop}
+            onCopyRung={noop}
+            onCutRung={noop}
+            onPasteRung={noop}
+            onDeleteRung={noop}
+            onMoveRung={noop}
+          />
+        ))}
       </div>
     </div>
   )
