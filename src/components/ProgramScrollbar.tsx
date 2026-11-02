@@ -22,10 +22,16 @@ interface ScrollbarMetrics {
   maxScroll: number
 }
 
-const MIN_THUMB_HEIGHT = 44
+const MIN_THUMB_HEIGHT = 56
 const TRACK_INSET = 14
-const THUMB_HIT_SLOP = 6
-const TRACK_PAGE_RATIO = 0.8
+// The thumb sits outside the paper edge. On narrow desktop windows there is
+// only the pane's 24px gutter to live in, so the gap shrinks before it clips.
+const SCROLLBAR_WIDTH = 20
+const OUTSIDE_GAP = 24
+// A proportional thumb moves ~10px of document per pointer pixel on a long
+// program. Students read that as a jump, so drag travel is geared down while
+// the thumb itself still reports the real scroll position.
+const DRAG_GAIN = 0.45
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value))
@@ -40,7 +46,11 @@ export default function ProgramScrollbar({ paneRef, frameRef }: ProgramScrollbar
   const rootRef = useRef<HTMLDivElement>(null)
   const thumbRef = useRef<HTMLSpanElement>(null)
   const metricsRef = useRef<ScrollbarMetrics | null>(null)
-  const pointerRef = useRef<{ pointerId: number; grabOffset: number } | null>(null)
+  const pointerRef = useRef<{
+    pointerId: number
+    startY: number
+    startScroll: number
+  } | null>(null)
   const [shown, setShown] = useState(false)
   const [dragging, setDragging] = useState(false)
 
@@ -87,9 +97,11 @@ export default function ProgramScrollbar({ paneRef, frameRef }: ProgramScrollbar
     }
 
     const top = Math.round(paneRect.top - containerRect.top + TRACK_INSET)
-    // Sit just inside the sheet edge so the vertical thumb reads as part of the
-    // paper, and stays clear of the horizontal width handle outside the frame.
-    const left = Math.round(frameRect.right - containerRect.left - 26)
+    // Keep the rail in the pink gutter outside the paper. The width handle
+    // stays on the border itself, so the two controls no longer share a strip.
+    const outsideRoom = Math.max(0, containerRect.right - frameRect.right)
+    const gap = clamp(Math.round(outsideRoom - SCROLLBAR_WIDTH), 4, OUTSIDE_GAP)
+    const left = Math.round(frameRect.right - containerRect.left + gap)
     const thumbHeight = Math.min(
       height,
       Math.max(
@@ -145,60 +157,52 @@ export default function ProgramScrollbar({ paneRef, frameRef }: ProgramScrollbar
     return () => container.removeAttribute('data-program-scrollbar')
   }, [shown])
 
-  const scrollToPointer = (clientY: number, grabOffset: number) => {
-    const pane = paneRef.current
-    const metrics = metricsRef.current
-    if (!pane || !metrics || metrics.maxScroll <= 0) return
-    const maxThumbTop = Math.max(0, metrics.height - metrics.thumbHeight)
-    const thumbTop = clamp(clientY - metrics.top - grabOffset, 0, maxThumbTop)
-    pane.scrollTop = maxThumbTop > 0
-      ? (thumbTop / maxThumbTop) * metrics.maxScroll
-      : 0
-    paintThumb()
-  }
-
   const handlePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (event.button !== 0 || !shown) return
     const thumb = thumbRef.current
     const pane = paneRef.current
     const metrics = metricsRef.current
     if (!thumb || !pane || !metrics) return
-    event.currentTarget.focus({ preventScroll: true })
     const thumbRect = thumb.getBoundingClientRect()
-    const onThumb = event.clientY >= thumbRect.top - THUMB_HIT_SLOP
-      && event.clientY <= thumbRect.bottom + THUMB_HIT_SLOP
-    if (!onThumb) {
-      // Moving the pointer onto a long, mostly invisible rail used to throw the
-      // document to the pointer position. Treat the empty rail like a native
-      // scrollbar track: one page toward the click, never a surprise jump.
-      const direction = event.clientY < thumbRect.top ? -1 : 1
-      const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
-      pane.scrollBy({
-        top: direction * pane.clientHeight * TRACK_PAGE_RATIO,
-        behavior: reduceMotion ? 'auto' : 'smooth',
-      })
-      return
-    }
+    // The rail is deliberately inert. Only the visible pill starts a drag, so
+    // a stray click can never page the document or select another rung.
+    if (event.clientY < thumbRect.top || event.clientY > thumbRect.bottom) return
     event.preventDefault()
-    const grabOffset = clamp(event.clientY - thumbRect.top, 0, thumbRect.height)
-    pointerRef.current = { pointerId: event.pointerId, grabOffset }
-    event.currentTarget.setPointerCapture(event.pointerId)
+    event.stopPropagation()
+    pointerRef.current = {
+      pointerId: event.pointerId,
+      startY: event.clientY,
+      startScroll: pane.scrollTop,
+    }
+    thumb.setPointerCapture(event.pointerId)
     setDragging(true)
-    scrollToPointer(event.clientY, grabOffset)
   }
 
   const handlePointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
     const pointer = pointerRef.current
     if (!pointer || pointer.pointerId !== event.pointerId) return
+    const pane = paneRef.current
+    const metrics = metricsRef.current
+    if (!pane || !metrics) return
     event.preventDefault()
-    scrollToPointer(event.clientY, pointer.grabOffset)
+    const delta = event.clientY - pointer.startY
+    if (Math.abs(delta) < 2) return
+    const maxThumbTop = Math.max(0, metrics.height - metrics.thumbHeight)
+    const scrollPerPixel = maxThumbTop > 0 ? metrics.maxScroll / maxThumbTop : 0
+    pane.scrollTop = clamp(
+      pointer.startScroll + delta * scrollPerPixel * DRAG_GAIN,
+      0,
+      metrics.maxScroll,
+    )
+    paintThumb()
   }
 
   const endPointerDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
     const pointer = pointerRef.current
     if (!pointer || pointer.pointerId !== event.pointerId) return
-    if (event.currentTarget.hasPointerCapture(pointer.pointerId)) {
-      event.currentTarget.releasePointerCapture(pointer.pointerId)
+    const thumb = thumbRef.current
+    if (thumb?.hasPointerCapture(pointer.pointerId)) {
+      thumb.releasePointerCapture(pointer.pointerId)
     }
     pointerRef.current = null
     setDragging(false)

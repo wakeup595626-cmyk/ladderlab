@@ -4526,18 +4526,15 @@ body[data-drag-kind] {
     height: 0;
   }
 
-  /* Reserve the right-hand edge while the draggable thumb is visible, so its
-     20px hit rail never sits on top of a rung's menu button. */
-  .wb-workbench[data-program-scrollbar='true'] .ll-rung-header {
-    padding-right: 36px;
-  }
-
   .wb-program-resizer {
     position: absolute;
     inset-block: 0;
     z-index: 4;
     display: block;
-    width: 16px;
+    /* Keep most of the hit area on the paper edge. The program scrollbar now
+       occupies the gutter outside it, so a full-width outside handle would
+       steal the scrollbar's grab zone in narrow desktop windows. */
+    width: 14px;
     padding: 0;
     border: 0;
     background: transparent;
@@ -4547,11 +4544,11 @@ body[data-drag-kind] {
   }
 
   .wb-program-resizer.is-left {
-    left: -16px;
+    left: -7px;
   }
 
   .wb-program-resizer.is-right {
-    right: -16px;
+    right: -7px;
   }
 
   /* 热区完全透明，只有指针靠近纸面边缘时才会露出一条贴边细线。 */
@@ -4572,12 +4569,12 @@ body[data-drag-kind] {
   }
 
   .wb-program-resizer.is-left .wb-program-resizer-grip {
-    right: 0;
-    transform: translateX(50%);
+    left: 50%;
+    transform: translateX(-50%);
   }
 
   .wb-program-resizer.is-right .wb-program-resizer-grip {
-    left: 0;
+    left: 50%;
     transform: translateX(-50%);
   }
 

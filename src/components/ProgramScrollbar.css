@@ -9,26 +9,32 @@
   touch-action: none;
   user-select: none;
   outline: none;
+  /* Only the pill starts a drag. The empty rail lets clicks through to the
+     paper edge instead of swallowing the width handle underneath it. */
+  pointer-events: none;
 }
 
 .program-scrollbar-thumb {
   position: absolute;
   top: 0;
-  right: 4px;
-  width: 4px;
-  min-height: 44px;
+  left: 4px;
+  width: 12px;
+  min-height: 56px;
   border-radius: 999px;
-  background: color-mix(in srgb, var(--muted) 58%, transparent);
+  background: color-mix(in srgb, var(--accent) 58%, var(--border));
   cursor: grab;
   pointer-events: auto;
   will-change: transform;
-  transition: width 120ms ease, background-color 120ms ease;
+  transition:
+    left 140ms ease,
+    width 140ms ease,
+    background-color 140ms ease;
 }
 
 .program-scrollbar:hover .program-scrollbar-thumb,
-.program-scrollbar:focus-visible .program-scrollbar-thumb,
 .program-scrollbar[data-dragging='true'] .program-scrollbar-thumb {
-  width: 7px;
+  left: 3px;
+  width: 14px;
   background: var(--accent);
 }
 
@@ -36,9 +42,10 @@
   cursor: grabbing;
 }
 
+/* Keyboard users still get a focus ring; pointer drags never focus the rail,
+   so the old outlined box no longer appears after a normal click. */
 .program-scrollbar:focus-visible .program-scrollbar-thumb {
-  outline: 2px solid var(--accent-ink);
-  outline-offset: 2px;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 34%, transparent);
 }
 
 @media (max-width: 1024px) {

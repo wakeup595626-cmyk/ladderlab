@@ -87,7 +87,17 @@ test('两侧调宽把手跟随程序段，且拖动与指针一一对应', async
   if (!beforeDrag || !handleBox) return
 
   const startX = handleBox.x + handleBox.width / 2
-  const startY = handleBox.y + handleBox.height / 2
+  // The width handle spans the whole sheet, and the preceding rung clicks may
+  // have scrolled the pane. Grab the midpoint of its visible segment.
+  const viewportHeight = page.viewportSize()?.height ?? 720
+  const visibleTop = Math.max(handleBox.y, 0)
+  const visibleBottom = Math.min(handleBox.y + handleBox.height, viewportHeight)
+  const startY = Math.round((visibleTop + visibleBottom) / 2)
+  const hitTarget = await page.evaluate(
+    ({ x, y }) => document.elementFromPoint(x, y)?.closest('.wb-program-resizer')?.className ?? '',
+    { x: startX, y: startY },
+  )
+  expect(hitTarget).toContain('is-right')
   await page.mouse.move(startX, startY)
   await page.mouse.down()
   await page.mouse.move(startX - 120, startY, { steps: 12 })

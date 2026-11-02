@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test'
 import { loadCourseExperiment, trackPageErrors } from './support'
 
-test('纸面右缘滑块可直接拖动滚动程序块', async ({ page }) => {
+test('纸面外侧滑块可直接拖动滚动程序块', async ({ page }) => {
   const errors = trackPageErrors(page)
 
   await page.goto('/')
@@ -19,7 +19,28 @@ test('纸面右缘滑块可直接拖动滚动程序块', async ({ page }) => {
   await expect(scrollbar).toBeVisible()
   await expect(thumb).toBeVisible()
   await expect(scrollbar).not.toHaveAttribute('title')
-  expect((await thumb.boundingBox())!.width).toBeLessThanOrEqual(4.5)
+  const frameBox = await page.locator('.wb-program-frame').boundingBox()
+  const scrollbarBox = await scrollbar.boundingBox()
+  expect(frameBox).not.toBeNull()
+  expect(scrollbarBox).not.toBeNull()
+  // The rail lives in the pink gutter, not on top of the paper edge.
+  expect(scrollbarBox!.x).toBeGreaterThanOrEqual(frameBox!.x + frameBox!.width)
+
+  const initialThumbBox = await thumb.boundingBox()
+  expect(initialThumbBox).not.toBeNull()
+  // A real grab target, not a 4px hairline.
+  expect(initialThumbBox!.width).toBeGreaterThanOrEqual(10)
+  const chrome = await thumb.evaluate((element) => {
+    const style = getComputedStyle(element)
+    return {
+      border: style.borderTopWidth,
+      outline: style.outlineStyle,
+      shadow: style.boxShadow,
+    }
+  })
+  expect(chrome.border).toBe('0px')
+  expect(chrome.outline).toBe('none')
+  expect(chrome.shadow).toBe('none')
   expect(await scrollbar.evaluate((element) => (
     getComputedStyle(element, '::before').content
   ))).toBe('none')
@@ -47,10 +68,43 @@ test('纸面右缘滑块可直接拖动滚动程序块', async ({ page }) => {
     settledPaneBox!.y + settledPaneBox!.height - 13,
   )
 
+  // The coach strip moved the whole workbench upward. Never drag with the
+  // pre-dismissal coordinates, or the pointer lands on the old rail position.
   const thumbBox = await thumb.boundingBox()
   expect(thumbBox).not.toBeNull()
   const startX = thumbBox!.x + thumbBox!.width / 2
   const startY = thumbBox!.y + thumbBox!.height / 2
+
+  // A plain click on the pill must not move the document at all.
+  await page.mouse.move(startX, startY)
+  await page.mouse.down()
+  await page.mouse.up()
+  await expect.poll(async () => (
+    await pane.evaluate((element) => element.scrollTop)
+  )).toBe(0)
+  // A pointer click must not focus the rail: the old focus outline was the
+  // box students saw around the thumb after selecting a rung.
+  expect(await scrollbar.evaluate((element) => document.activeElement === element)).toBe(false)
+  const clickedChrome = await thumb.evaluate((element) => {
+    const style = getComputedStyle(element)
+    return { outline: style.outlineStyle, shadow: style.boxShadow }
+  })
+  expect(clickedChrome.outline).toBe('none')
+  expect(clickedChrome.shadow).toBe('none')
+
+  // Clicking the empty rail is inert too; it used to page the whole document.
+  const trackBox = await scrollbar.boundingBox()
+  expect(trackBox).not.toBeNull()
+  await page.mouse.click(
+    trackBox!.x + trackBox!.width / 2,
+    Math.min(trackBox!.y + trackBox!.height - 2, thumbBox!.y + thumbBox!.height + 40),
+  )
+  await expect.poll(async () => (
+    await pane.evaluate((element) => element.scrollTop)
+  )).toBe(0)
+
+  // Dragging is geared down: 150px of pointer travel should scroll a few
+  // hundred pixels, not fling the reader through the whole program.
   await page.mouse.move(startX, startY)
   await page.mouse.down()
   await page.mouse.move(startX, startY + 150, { steps: 8 })
@@ -58,30 +112,8 @@ test('纸面右缘滑块可直接拖动滚动程序块', async ({ page }) => {
 
   await expect.poll(async () => (
     await pane.evaluate((element) => element.scrollTop)
-  )).toBeGreaterThan(100)
-
-  // Clicking the empty rail pages once instead of teleporting the thumb to the
-  // pointer. This is the part that previously felt far too sensitive.
-  await pane.evaluate((element) => { element.scrollTop = 0 })
-  const refreshedThumbBox = await thumb.boundingBox()
-  const trackBox = await scrollbar.boundingBox()
-  expect(refreshedThumbBox).not.toBeNull()
-  expect(trackBox).not.toBeNull()
-  const pageTopBefore = await pane.evaluate((element) => element.scrollTop)
-  const viewportHeight = await pane.evaluate((element) => element.clientHeight)
-  await page.mouse.click(
-    trackBox!.x + trackBox!.width / 2,
-    Math.min(
-      trackBox!.y + trackBox!.height - 2,
-      refreshedThumbBox!.y + refreshedThumbBox!.height + 20,
-    ),
-  )
-  await expect.poll(async () => (
-    await pane.evaluate((element) => element.scrollTop)
-  )).toBeGreaterThan(pageTopBefore + viewportHeight * 0.5)
-  expect(await pane.evaluate((element) => element.scrollTop)).toBeLessThan(
-    viewportHeight * 0.95,
-  )
+  )).toBeGreaterThan(250)
+  expect(await pane.evaluate((element) => element.scrollTop)).toBeLessThan(1200)
 
   await scrollbar.focus()
   await page.keyboard.press('End')
