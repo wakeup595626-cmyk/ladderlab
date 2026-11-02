@@ -36,6 +36,11 @@ jobs:
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
         run: npm run check
 
+      # examples/ 是 AI 生成工程的验收靶子：这里用和网页导入完全相同的源码
+      # 跑一遍「导入 → 编译 → 导出 → 分享链接」，任何一个样例坏掉都会拦住上线。
+      - name: Verify example projects end to end
+        run: node scripts/check-project.mjs
+
       - name: Upload verified production build
         uses: actions/upload-artifact@v7
         with:

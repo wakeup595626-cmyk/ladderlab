@@ -1,0 +1,89 @@
+{
+  "schema": 1,
+  "name": "流水线计数分拣",
+  "profile": "v21",
+  "tags": [
+    { "id": "t-start", "name": "Start", "address": "%I0.0", "kind": "BOOL", "initial": false, "comment": "启动按钮" },
+    { "id": "t-stop", "name": "Stop", "address": "%I0.1", "kind": "BOOL", "initial": false, "comment": "停止按钮" },
+    { "id": "t-sensor", "name": "PartSensor", "address": "%I0.2", "kind": "BOOL", "initial": false, "comment": "来料光电传感器，每件一个脉冲" },
+    { "id": "t-reset-bin", "name": "ResetBin", "address": "%I0.3", "kind": "BOOL", "initial": false, "comment": "换箱复位按钮，清零本箱计数" },
+    { "id": "t-run", "name": "Run", "address": "%M0.0", "kind": "BOOL", "initial": false, "comment": "运行标志" },
+    { "id": "t-full", "name": "BinFull", "address": "%M0.1", "kind": "BOOL", "initial": false, "comment": "满箱标志，由计数器 C1 的 Q 输出" },
+    { "id": "t-count", "name": "Count", "address": "%MW10", "kind": "INT", "initial": 0, "comment": "本箱件数，计数器当前值" },
+    { "id": "t-total", "name": "Total", "address": "%MW12", "kind": "INT", "initial": 0, "comment": "累计产量" },
+    { "id": "t-last", "name": "LastBatch", "address": "%MW14", "kind": "INT", "initial": 0, "comment": "上一箱件数，满箱瞬间快照" },
+    { "id": "t-conveyor", "name": "Conveyor", "address": "%Q0.0", "kind": "BOOL", "initial": false, "comment": "传送带电机" },
+    { "id": "t-diverter", "name": "Diverter", "address": "%Q0.1", "kind": "BOOL", "initial": false, "comment": "分流挡板，本箱第 3 件起动作" },
+    { "id": "t-alarm", "name": "Alarm", "address": "%Q0.2", "kind": "BOOL", "initial": false, "comment": "满箱报警灯" }
+  ],
+  "rungs": [
+    {
+      "id": "r1",
+      "label": "启停自锁：启动按钮与自锁并联，停止按钮串联",
+      "nodes": [
+        {
+          "type": "parallel",
+          "id": "p1",
+          "branches": [
+            [ { "type": "contact", "id": "c1", "kind": "NO", "tag": "Start" } ],
+            [ { "type": "contact", "id": "c2", "kind": "NO", "tag": "Run" } ]
+          ]
+        },
+        { "type": "contact", "id": "c3", "kind": "NC", "tag": "Stop" }
+      ],
+      "output": { "id": "o1", "kind": "COIL", "tag": "Run" }
+    },
+    {
+      "id": "r2",
+      "label": "运行时驱动传送带",
+      "nodes": [ { "type": "contact", "id": "c4", "kind": "NO", "tag": "Run" } ],
+      "output": { "id": "o2", "kind": "COIL", "tag": "Conveyor" }
+    },
+    {
+      "id": "r3",
+      "label": "来料上升沿计数，本箱满 5 件置满箱标志",
+      "nodes": [
+        { "type": "contact", "id": "c5", "kind": "P", "tag": "PartSensor" },
+        { "type": "contact", "id": "c6", "kind": "NO", "tag": "Run" }
+      ],
+      "output": {
+        "id": "o3",
+        "kind": "CTU",
+        "tag": "C1",
+        "pv": 5,
+        "resetTag": "ResetBin",
+        "qTag": "BinFull",
+        "valueTag": "Count"
+      }
+    },
+    {
+      "id": "r4",
+      "label": "来料上升沿累计总产量",
+      "nodes": [
+        { "type": "contact", "id": "c7", "kind": "P", "tag": "PartSensor" },
+        { "type": "contact", "id": "c8", "kind": "NO", "tag": "Run" }
+      ],
+      "output": { "id": "o4", "kind": "ADD", "tag": "Total", "value": 1 }
+    },
+    {
+      "id": "r5",
+      "label": "满箱瞬间把本箱件数快照到 LastBatch",
+      "nodes": [ { "type": "contact", "id": "c9", "kind": "P", "tag": "BinFull" } ],
+      "output": { "id": "o5", "kind": "MOVE", "tag": "LastBatch", "sourceTag": "Count" }
+    },
+    {
+      "id": "r6",
+      "label": "本箱满 3 件起打开分流挡板，后段料进 B 箱",
+      "nodes": [
+        { "type": "contact", "id": "c10", "kind": "CMP", "tag": "Count", "compare": { "op": ">=", "value": 3 } }
+      ],
+      "output": { "id": "o6", "kind": "COIL", "tag": "Diverter" }
+    },
+    {
+      "id": "r7",
+      "label": "满箱点亮报警灯，提示换箱并复位",
+      "nodes": [ { "type": "contact", "id": "c11", "kind": "NO", "tag": "BinFull" } ],
+      "output": { "id": "o7", "kind": "COIL", "tag": "Alarm" }
+    }
+  ]
+}
