@@ -4526,6 +4526,12 @@ body[data-drag-kind] {
     height: 0;
   }
 
+  /* Reserve the right-hand edge while the draggable scroll thumb is visible,
+     so the 24px track never sits on top of a rung's menu button. */
+  .wb-workbench[data-program-scrollbar='true'] .ll-rung-header {
+    padding-right: 36px;
+  }
+
   .wb-program-resizer {
     --program-resizer-rail: color-mix(in srgb, var(--accent) 34%, var(--control));
     --program-resizer-chip: var(--accent);

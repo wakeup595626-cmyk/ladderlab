@@ -135,6 +135,14 @@ export default function ProgramScrollbar({ paneRef, frameRef }: ProgramScrollbar
     if (shown) paintThumb()
   }, [paintThumb, shown])
 
+  useEffect(() => {
+    const container = rootRef.current?.parentElement
+    if (!container) return
+    if (shown) container.setAttribute('data-program-scrollbar', 'true')
+    else container.removeAttribute('data-program-scrollbar')
+    return () => container.removeAttribute('data-program-scrollbar')
+  }, [shown])
+
   const scrollToPointer = (clientY: number, grabOffset: number) => {
     const pane = paneRef.current
     const metrics = metricsRef.current
