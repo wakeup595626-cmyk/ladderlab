@@ -29,6 +29,24 @@
 完整操作说明、快捷键、项目保存、离线安装、仿真语义和浏览器验收步骤见
 [docs/GUIDE.md](docs/GUIDE.md)。
 
+## 把课设题目交给 AI
+
+这个仓库自带给 AI 助手看的说明书：[AGENTS.md](AGENTS.md) 说明工作流程，
+[docs/AI_GUIDE.md](docs/AI_GUIDE.md) 写清了工程文件格式、指令语义和编译器的硬性
+限制。把仓库地址连同题目一起发给 Codex、Claude、Cursor 这类能读写文件的助手，
+它会先生成 I/O 表，再按格式写出 `.ladderlab.json`，跑通样例校验后给你一条可以直接
+打开成品的分享链接。
+
+可以直接复制这段话：
+
+> 请阅读 https://github.com/wakeup595626-cmyk/ladderlab 的 AGENTS.md 和
+> docs/AI_GUIDE.md，按里面的格式为「<题目>」生成 .ladderlab.json。先给我 I/O 表，
+> 确认后写出完整工程，自测导入与编译，最后用 scripts/share-link.mjs 给我一条
+> 能直接打开成品的分享链接。
+
+跑不了 node 的助手也能用：让它把完整 JSON 贴进对话，你在网页「导入 → 没有文件？
+直接粘贴工程 JSON」里粘贴即可。导入后可以继续改图，并从「导出」保存 PNG / SVG。
+
 ## 顺序功能图是怎么来的
 
 顺序功能图不是固定模板，也不是把梯形图逐段翻译成 SFC。导出时，LadderLab 先扫描当前
