@@ -1,0 +1,81 @@
+.program-scrollbar {
+  position: absolute;
+  z-index: 8;
+  width: 24px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  outline: none;
+}
+
+.program-scrollbar::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 3px;
+  bottom: 0;
+  width: 2px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 24%, transparent);
+  opacity: 0.42;
+  transition: width 120ms ease, opacity 120ms ease, background-color 120ms ease;
+}
+
+.program-scrollbar-thumb {
+  position: absolute;
+  top: 0;
+  right: 2px;
+  width: 8px;
+  min-height: 44px;
+  border-radius: 999px;
+  background: var(--accent);
+  box-shadow:
+    0 1px 3px color-mix(in srgb, var(--accent-ink) 30%, transparent),
+    inset 1px 0 0 color-mix(in srgb, var(--surface) 38%, transparent);
+  pointer-events: none;
+  will-change: transform;
+  transition: width 120ms ease, background-color 120ms ease, box-shadow 120ms ease;
+}
+
+.program-scrollbar:hover::before,
+.program-scrollbar:focus-visible::before,
+.program-scrollbar[data-dragging='true']::before {
+  width: 3px;
+  background: var(--accent);
+  opacity: 0.68;
+}
+
+.program-scrollbar:hover .program-scrollbar-thumb,
+.program-scrollbar:focus-visible .program-scrollbar-thumb,
+.program-scrollbar[data-dragging='true'] .program-scrollbar-thumb {
+  width: 11px;
+  background: var(--accent-ink);
+  box-shadow:
+    0 2px 7px color-mix(in srgb, var(--accent-ink) 38%, transparent),
+    inset 1px 0 0 color-mix(in srgb, var(--surface) 48%, transparent);
+}
+
+.program-scrollbar[data-dragging='true'] {
+  cursor: grabbing;
+}
+
+.program-scrollbar:focus-visible .program-scrollbar-thumb {
+  outline: 2px solid var(--accent-ink);
+  outline-offset: 2px;
+}
+
+@media (max-width: 1024px) {
+  .program-scrollbar {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .program-scrollbar::before,
+  .program-scrollbar-thumb {
+    transition: none;
+  }
+}

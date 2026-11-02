@@ -20,11 +20,10 @@ test('AI 课设只生成提示词，并能复制完整需求交给本机 Agent',
 
   const dialog = page.getByRole('dialog', { name: '让 AI 做课设' })
   await expect(dialog).toBeVisible()
-  await expect(dialog.getByRole('list', { name: '三步完成课设' })).toBeVisible()
-  await expect(dialog.getByText('写清要求，复制提示词，交给电脑上的 AI。')).toBeVisible()
+  await expect(dialog.getByText('填好要求，复制提示词，粘贴给电脑上的 Agent。')).toBeVisible()
 
   const requirement = dialog.getByRole('textbox', {
-    name: '你的课设要求',
+    name: '课设要求',
     exact: true,
   })
   await expect(requirement).toBeFocused()
@@ -53,7 +52,7 @@ test('AI 课设只生成提示词，并能复制完整需求交给本机 Agent',
   expect(copied).toContain('node scripts/check-project.mjs')
   expect(copied).toContain('node scripts/share-link.mjs')
   await expect(dialog.getByRole('button', { name: '已复制', exact: true })).toBeVisible()
-  await expect(dialog.getByText('已复制，粘贴给 AI 即可。')).toBeVisible()
+  await expect(dialog.getByText('已复制，去 Agent 里粘贴即可。')).toBeVisible()
 })
 
 test('实验库中的三层电梯仍可导出真实梯形图 PNG', async ({ page }) => {

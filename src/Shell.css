@@ -2714,7 +2714,7 @@ body[data-drag-kind] {
   border-right: 1px solid var(--border);
   border-radius: 0;
   background: var(--accent-wash);
-  color: var(--accent);
+  color: var(--accent-ink);
   font-size: 12.5px;
   font-weight: 650;
   white-space: nowrap;
@@ -4516,6 +4516,16 @@ body[data-drag-kind] {
 }
 
 @media (min-width: 1025px) {
+  /* 纸面右缘的自定义滑块承担可见滚动反馈，避免和原生滚动条形成双轨。 */
+  .wb-program-pane {
+    scrollbar-width: none;
+  }
+
+  .wb-program-pane::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+  }
+
   .wb-program-resizer {
     --program-resizer-rail: color-mix(in srgb, var(--accent) 34%, var(--control));
     --program-resizer-chip: var(--accent);
@@ -4586,8 +4596,24 @@ body[data-drag-kind] {
   }
 
   .wb-program-resizer.is-right .wb-program-resizer-grip {
+    top: 18px;
     left: 0;
+    display: flex;
+    width: 24px;
+    height: 18px;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid color-mix(in srgb, var(--accent) 42%, var(--border));
     border-radius: 0 4px 4px 0;
+    background: color-mix(in srgb, var(--surface) 88%, var(--accent) 12%);
+    box-shadow: 0 1px 2px color-mix(in srgb, var(--frame-ink) 10%, transparent);
+    color: var(--accent-ink);
+    transition:
+      width 140ms ease,
+      border-color 140ms ease,
+      background-color 140ms ease,
+      color 140ms ease,
+      box-shadow 140ms ease;
   }
 
   .wb-program-resizer-tip {
@@ -4616,7 +4642,8 @@ body[data-drag-kind] {
   }
 
   .wb-program-resizer.is-right .wb-program-resizer-tip {
-    right: 18px;
+    top: 28px;
+    right: 28px;
   }
 
   .wb-program-resizer:hover::before,
@@ -4635,6 +4662,18 @@ body[data-drag-kind] {
     box-shadow:
       0 2px 6px color-mix(in srgb, var(--accent-ink) 34%, transparent),
       inset var(--program-resizer-highlight-x) 0 0 color-mix(in srgb, var(--surface) 55%, transparent);
+  }
+
+  .wb-program-resizer.is-right:hover .wb-program-resizer-grip,
+  .wb-program-resizer.is-right:focus-visible .wb-program-resizer-grip,
+  .wb-program-resizer.is-right[data-resizing='true'] .wb-program-resizer-grip {
+    width: 24px;
+    border-color: var(--accent-ink);
+    background: var(--accent);
+    box-shadow:
+      0 2px 6px color-mix(in srgb, var(--accent-ink) 34%, transparent),
+      inset -1px 0 0 color-mix(in srgb, var(--surface) 55%, transparent);
+    color: var(--surface);
   }
 
   .wb-program-resizer:hover .wb-program-resizer-tip,

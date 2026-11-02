@@ -75,13 +75,10 @@ for (const viewport of VIEWPORTS) {
       const opener = await openCourseDesign(page, viewport.width)
       const dialog = page.getByRole('dialog', { name: '让 AI 做课设' })
       await expectInsideViewport(dialog, viewport)
-      await expect(dialog.getByRole('list', { name: '三步完成课设' })).toBeVisible()
-      await expect(dialog.getByText('写要求')).toBeVisible()
-      await expect(dialog.getByText('复制给 AI')).toBeVisible()
-      await expect(dialog.getByText('导入导出')).toBeVisible()
+      await expect(dialog.getByText('填好要求，复制提示词，粘贴给电脑上的 Agent。')).toBeVisible()
 
       const requirement = dialog.getByRole('textbox', {
-        name: '你的课设要求',
+        name: '课设要求',
         exact: true,
       })
       await expect(requirement).toBeVisible()
@@ -110,7 +107,6 @@ for (const viewport of VIEWPORTS) {
       await expectInsideViewport(close, viewport)
       const closeHeight = await expectTouchTarget(close)
       const copyHeight = await expectTouchTarget(copy)
-      await expectInsideViewport(dialog.getByRole('button', { name: '关闭', exact: true }), viewport)
       console.log(
         `--- ${viewport.name} ${viewport.width}×${viewport.height}: `
         + `关闭 ${closeHeight.toFixed(1)}px / 复制 ${copyHeight.toFixed(1)}px`,

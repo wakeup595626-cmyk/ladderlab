@@ -26,7 +26,13 @@ import {
 } from './lib/storageQuota'
 import { useConfirmDialog } from './lib/useConfirmDialog'
 import Guide from './components/Guide'
-import { FolderIcon, GripIcon, LadderIcon, TagIcon } from './components/Icons'
+import {
+  FolderIcon,
+  GripIcon,
+  LadderIcon,
+  ResizeHorizontalIcon,
+  TagIcon,
+} from './components/Icons'
 import Inspector, { type InspectorTab } from './components/Inspector'
 import InstructionBar from './components/InstructionBar'
 import InstructionDrawer from './components/InstructionDrawer'
@@ -51,6 +57,7 @@ import SaveProjectDialog from './components/SaveProjectDialog'
 import ProjectBackupDialog from './components/ProjectBackupDialog'
 import RecoveryBackupsDialog from './components/RecoveryBackupsDialog'
 import ProgramIssuesDialog from './components/ProgramIssuesDialog'
+import ProgramScrollbar from './components/ProgramScrollbar'
 import type {
   ProgramImageFormat,
   ProgramImageMode,
@@ -4004,7 +4011,7 @@ export default function App() {
       + 'button, input, textarea, select, label, a, summary, '
       + '[contenteditable="true"], [role="button"], [role="menu"], '
       + '[role="menuitem"], [role="dialog"], [role="alertdialog"], '
-      + '[role="listbox"], [role="complementary"], [role="separator"], '
+      + '[role="listbox"], [role="complementary"], [role="separator"], [role="scrollbar"], '
       + '.wb-context-resizer, .wb-program-resizer',
     )) return
     const active = document.activeElement
@@ -4387,7 +4394,7 @@ export default function App() {
               className="wb-program-resizer is-right"
               role="separator"
               aria-orientation="vertical"
-              aria-label="调整程序区宽度"
+              aria-label="左右拖动调整程序区宽度"
               aria-controls="wb-program-sheet"
               aria-valuemin={programSheetAriaMin}
               aria-valuemax={programSheetAriaMax}
@@ -4395,7 +4402,7 @@ export default function App() {
               aria-valuetext={`${programSheetEffectiveWidth} 像素`}
               data-resizing={resizingProgramSheetSide === 'right' ? 'true' : undefined}
               tabIndex={0}
-              title="拖动调整程序区宽度；双击恢复默认；方向键微调"
+              title="左右拖动调整程序区宽度；双击恢复默认；方向键微调"
               onPointerDown={(event) => startProgramSheetResize('right', event)}
               onPointerMove={moveProgramSheetResize}
               onPointerUp={endProgramSheetResize}
@@ -4404,15 +4411,19 @@ export default function App() {
               onDoubleClick={resetProgramSheetWidth}
               onKeyDown={resizeProgramSheetWithKeyboard}
             >
-              <span className="wb-program-resizer-grip" aria-hidden="true" />
+              <span className="wb-program-resizer-grip" aria-hidden="true">
+                <ResizeHorizontalIcon size={12} />
+              </span>
               <span className="wb-program-resizer-tip" aria-hidden="true">
                 {resizingProgramSheetSide === 'right'
                   ? `${programSheetEffectiveWidth} px · 双击复位`
-                  : '拖动调宽 · 双击复位'}
+                  : '左右拖动调宽 · 双击复位'}
               </span>
             </div>
           </div>
         </main>
+
+        <ProgramScrollbar paneRef={editorRef} frameRef={programFrameRef} />
 
         {quickEdit && quickEditValid && (
           <InlineOperandEditor

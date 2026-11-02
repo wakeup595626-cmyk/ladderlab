@@ -1,22 +1,21 @@
 import { expect, test, type Page } from '@playwright/test'
 import { loadCourseExperiment, openHome, trackPageErrors } from './support'
 
-async function expectGripsToFollowRung(page: Page, index: number): Promise<void> {
+async function expectLeftGripToFollowRung(page: Page, index: number): Promise<void> {
   const rung = page.locator('.ll-rung').nth(index)
   await page.locator('.ll-rung-drag').nth(index).click()
   await expect(rung).toHaveClass(/is-whole-selected/)
 
-  const grips = page.locator('.wb-program-resizer-grip')
-  await expect(grips).toHaveCount(2)
-  await expect(grips.first().locator('svg')).toHaveCount(0)
+  const grip = page.locator('.wb-program-resizer.is-left .wb-program-resizer-grip')
+  await expect(grip.locator('svg')).toHaveCount(0)
   await expect.poll(async () => (
-    await grips.first().evaluate((element) => {
+    await grip.evaluate((element) => {
       const style = getComputedStyle(element)
       return `${style.backgroundImage}|${style.width}`
     })
   )).toBe('none|8px')
   await expect.poll(async () => (
-    await grips.first().evaluate((element) => {
+    await grip.evaluate((element) => {
       const style = getComputedStyle(element)
       const property = style.transitionProperty.split(',')[0].trim()
       const duration = style.transitionDuration.split(',')[0].trim()
@@ -25,16 +24,36 @@ async function expectGripsToFollowRung(page: Page, index: number): Promise<void>
   )).toContain('top|0.32s')
 
   await expect.poll(async () => {
-    const [rungBox, leftBox, rightBox] = await Promise.all([
+    const [rungBox, leftBox] = await Promise.all([
       rung.boundingBox(),
-      grips.nth(0).boundingBox(),
-      grips.nth(1).boundingBox(),
+      grip.boundingBox(),
     ])
-    if (!rungBox || !leftBox || !rightBox) return Number.POSITIVE_INFINITY
+    if (!rungBox || !leftBox) return Number.POSITIVE_INFINITY
     const rungCenter = rungBox.y + rungBox.height / 2
     const leftCenter = leftBox.y + leftBox.height / 2
-    const rightCenter = rightBox.y + rightBox.height / 2
-    return Math.max(Math.abs(leftCenter - rungCenter), Math.abs(rightCenter - rungCenter))
+    return Math.abs(leftCenter - rungCenter)
+  }).toBeLessThanOrEqual(1)
+}
+
+async function expectRightWidthHandleAtPaperTop(page: Page): Promise<void> {
+  const handle = page.locator('.wb-program-resizer.is-right .wb-program-resizer-grip')
+  const frame = page.locator('.wb-program-frame')
+  await expect(handle.locator('svg')).toHaveCount(1)
+  await expect(handle).toHaveText('')
+  await expect.poll(async () => (
+    await handle.evaluate((element) => {
+      const style = getComputedStyle(element)
+      return `${style.width}|${style.height}`
+    })
+  )).toBe('24px|18px')
+
+  await expect.poll(async () => {
+    const [frameBox, handleBox] = await Promise.all([
+      frame.boundingBox(),
+      handle.boundingBox(),
+    ])
+    if (!frameBox || !handleBox) return Number.POSITIVE_INFINITY
+    return Math.abs(handleBox.y - (frameBox.y + 18))
   }).toBeLessThanOrEqual(1)
 }
 
@@ -53,15 +72,16 @@ async function expectCanvasCentered(page: Page): Promise<void> {
   }).toBeLessThanOrEqual(1)
 }
 
-test('图纸两侧的调宽把手跟随当前编辑程序段', async ({ page }) => {
+test('左侧调宽把手跟随程序段，右侧横向把手固定在纸面顶部', async ({ page }) => {
   const errors = trackPageErrors(page)
 
   await openHome(page)
   await loadCourseExperiment(page, '02 定时器与计数器')
 
   await expectCanvasCentered(page)
-  await expectGripsToFollowRung(page, 1)
-  await expectGripsToFollowRung(page, 2)
+  await expectRightWidthHandleAtPaperTop(page)
+  await expectLeftGripToFollowRung(page, 1)
+  await expectLeftGripToFollowRung(page, 2)
 
   // 单击元件后只出现绝对定位的就地气泡，不能把图纸往一侧挤偏。
   await page.locator('.ll-node[data-node-id]').first().click()

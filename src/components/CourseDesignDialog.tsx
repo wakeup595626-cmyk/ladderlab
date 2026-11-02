@@ -3,7 +3,7 @@ import { copyText } from '../lib/clipboard'
 import { makeAgentPrompt } from '../lib/courseDesign'
 import { useModalFocus } from '../lib/useModalFocus'
 import { usePresence } from '../lib/usePresence'
-import { BoltIcon, CloseIcon, CopyIcon } from './Icons'
+import { CloseIcon, CopyIcon } from './Icons'
 import './CourseDesignDialog.css'
 
 interface CourseDesignDialogProps {
@@ -11,7 +11,7 @@ interface CourseDesignDialogProps {
   onClose: () => void
 }
 
-const QUICK_EXAMPLES = ['三层电梯', '四路抢答器', '推土机', '八路流水灯', '十字路口交通灯']
+const QUICK_EXAMPLES = ['三层电梯', '四路抢答器', '推土机']
 
 export default function CourseDesignDialog({ open, onClose }: CourseDesignDialogProps) {
   const { present, closing } = usePresence(open, 180)
@@ -64,13 +64,8 @@ function CourseDesignDialogContent({ open, closing, onClose }: CourseDesignDialo
       >
         <header className="course-design-head">
           <div className="course-design-title-wrap">
-            <span className="course-design-mark" aria-hidden="true"><BoltIcon size={19} /></span>
-            <div>
-              <h2 id="course-design-title">让 AI 做课设</h2>
-              <p id="course-design-description">
-                写清要求，复制提示词，交给电脑上的 AI。
-              </p>
-            </div>
+            <h2 id="course-design-title">让 AI 做课设</h2>
+            <p id="course-design-description">填好要求，复制提示词，粘贴给电脑上的 Agent。</p>
           </div>
           <button
             type="button"
@@ -83,32 +78,8 @@ function CourseDesignDialogContent({ open, closing, onClose }: CourseDesignDialo
         </header>
 
         <div className="course-design-body">
-          <ol className="course-design-steps" aria-label="三步完成课设">
-            <li>
-              <span className="course-design-step-index" aria-hidden="true">1</span>
-              <div>
-                <strong>写要求</strong>
-                <span>写清题目、动作和停止条件。</span>
-              </div>
-            </li>
-            <li>
-              <span className="course-design-step-index" aria-hidden="true">2</span>
-              <div>
-                <strong>复制给 AI</strong>
-                <span>复制后粘贴给电脑上的 AI。</span>
-              </div>
-            </li>
-            <li>
-              <span className="course-design-step-index" aria-hidden="true">3</span>
-              <div>
-                <strong>导入导出</strong>
-                <span>打开链接，导入后导出图片或 PDF。</span>
-              </div>
-            </li>
-          </ol>
-
           <label className="course-design-field">
-            <span>你的课设要求</span>
+            <span>课设要求</span>
             <textarea
               ref={queryRef}
               value={query}
@@ -121,15 +92,21 @@ function CourseDesignDialogContent({ open, closing, onClose }: CourseDesignDialo
                 }
               }}
               placeholder="例如：三层电梯，每层有外呼、选层、开关门和急停。"
-              rows={4}
+              rows={6}
               spellCheck={false}
             />
           </label>
 
           <div className="course-design-examples" aria-label="快捷填写课设要求">
-            <span>快速示例</span>
             {QUICK_EXAMPLES.map((example) => (
-              <button type="button" key={example} onClick={() => updateQuery(example)}>
+              <button
+                type="button"
+                key={example}
+                onClick={() => {
+                  updateQuery(example)
+                  queryRef.current?.focus()
+                }}
+              >
                 {example}
               </button>
             ))}
@@ -147,44 +124,32 @@ function CourseDesignDialogContent({ open, closing, onClose }: CourseDesignDialo
             />
           </details>
 
-          <aside className="course-design-boundary">
-            <strong>小提示</strong>
-            <p>
-              AI 不能运行命令时，可能只会给你工程文件。
-            </p>
-          </aside>
-
-          <p className="course-design-library-note">
-            现成梯形图在「项目 → 实验库」。
-          </p>
         </div>
 
         <footer className="course-design-actions">
           <p className="course-design-feedback" role="status" aria-live="polite">
             {copyState === 'done'
-              ? '已复制，粘贴给 AI 即可。'
+              ? '已复制，去 Agent 里粘贴即可。'
               : copyState === 'failed'
                 ? '复制失败，请展开提示词后手动复制。'
-                : '复制后粘贴给电脑上的 AI。'}
+                : ''}
           </p>
-          <div className="course-design-action-buttons">
-            <button type="button" className="course-design-cancel" onClick={onClose}>关闭</button>
-            <button
-              type="button"
-              className="course-design-copy"
-              disabled={!canCopy}
-              onClick={() => void copyPrompt()}
-            >
-              <CopyIcon size={16} />
-              <span>
-                {copyState === 'done'
-                  ? '已复制'
-                  : copyState === 'failed'
-                    ? '重新复制'
-                    : '复制提示词'}
-              </span>
-            </button>
-          </div>
+          <button
+            type="button"
+            className="course-design-copy"
+            disabled={!canCopy}
+            onClick={() => void copyPrompt()}
+            aria-keyshortcuts="Control+Enter Meta+Enter"
+          >
+            <CopyIcon size={16} />
+            <span>
+              {copyState === 'done'
+                ? '已复制'
+                : copyState === 'failed'
+                  ? '重新复制'
+                  : '复制提示词'}
+            </span>
+          </button>
         </footer>
       </section>
     </div>
