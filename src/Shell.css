@@ -2704,6 +2704,32 @@ body[data-drag-kind] {
   background: var(--surface);
 }
 
+.wb-course-button {
+  display: inline-flex;
+  height: 100%;
+  align-items: center;
+  gap: 6px;
+  padding-inline: 10px;
+  border: 0;
+  border-right: 1px solid var(--border);
+  border-radius: 0;
+  background: var(--accent-wash);
+  color: var(--accent);
+  font-size: 12.5px;
+  font-weight: 650;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.wb-course-button svg {
+  flex: none;
+}
+
+.wb-course-button:hover {
+  background: var(--active);
+  color: var(--text);
+}
+
 .wb-project-button {
   height: 100%;
   padding-inline: 10px;
@@ -4893,6 +4919,7 @@ body[data-drag-kind] {
 }
 
 @media (max-width: 860px) {
+  .wb-course-button,
   .wb-project-button,
   .wb-file-actions-desktop {
     display: none;

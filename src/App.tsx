@@ -45,6 +45,7 @@ import {
 import ProjectDrawer from './components/ProjectDrawer'
 import RungNavigator from './components/RungNavigator'
 import ProjectImportDialog from './components/ProjectImportDialog'
+import CourseDesignDialog from './components/CourseDesignDialog'
 import NewProjectDialog from './components/NewProjectDialog'
 import SaveProjectDialog from './components/SaveProjectDialog'
 import ProjectBackupDialog from './components/ProjectBackupDialog'
@@ -63,6 +64,7 @@ import { instructionLabel, type InstructionFamily } from './components/instructi
 /* 导出器只在真正导出时才需要，按需加载可以让首屏少解析一块渲染逻辑。 */
 const ProgramImageExporter = lazy(() => import('./components/ProgramImageExporter'))
 import { compile } from './engine/compile'
+import type { CourseDesignTemplate } from './lib/courseDesign'
 import { normalizeReference } from './engine/references'
 import type { RungLayoutSnapshot } from './lib/virtualRungLayout'
 import { blankProgram, buildSample } from './engine/samples'
@@ -771,6 +773,7 @@ export default function App() {
   const [libraryOpen, setLibraryOpen] = useState(false)
   const [guideOpen, setGuideOpen] = useState(false)
   const [aboutOpen, setAboutOpen] = useState(false)
+  const [courseDesignOpen, setCourseDesignOpen] = useState(false)
   const [importOpen, setImportOpen] = useState(false)
   const [backupOpen, setBackupOpen] = useState(false)
   const [imageExportRequest, setImageExportRequest] = useState<{
@@ -3543,6 +3546,29 @@ export default function App() {
       })
   }
 
+  const handleCourseDesignGenerated = async (
+    nextProgram: Program,
+    template: CourseDesignTemplate,
+  ) => {
+    const accepted = await confirm({
+      title: '载入这个课设？',
+      description: '当前工程会被替换，载入后可以用撤销恢复。',
+      confirmLabel: '载入',
+    })
+    if (!accepted) return
+    const next = ensureTrailingBlankRung(nextProgram)
+    const committed = commit(next)
+    const first = preferredRung(committed)
+    setSelection(first ? { rungId: first.id, path: null } : null)
+    setActiveProject(null)
+    setCourseDesignOpen(false)
+    setMobilePanel('none')
+    notify(
+      `已生成「${template.title}」：${contentRungs(committed).length} 段、`
+      + `${committed.tags.length} 个变量，编译通过；可从右上角“导出”保存 PNG / SVG`,
+    )
+  }
+
   const startImageExport = (mode: ProgramImageMode, format: ProgramImageFormat) => {
     if (imageExportRequest || imageExportBusyRef.current || sfcExportBusyRef.current || sfcExporting) {
       if (imageExportRequest || imageExportBusyRef.current) {
@@ -4019,7 +4045,7 @@ export default function App() {
   // 并把焦点交还给打开它的按钮。手机端的变量面板是对话框，由它自己处理 Esc。
   useEffect(() => {
     if (!inspectorDocked || !inspectorOpen) return
-    if (quickEdit || libraryOpen || guideOpen || aboutOpen) return
+    if (quickEdit || libraryOpen || guideOpen || aboutOpen || courseDesignOpen) return
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape' || event.defaultPrevented) return
       event.preventDefault()
@@ -4028,7 +4054,7 @@ export default function App() {
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [inspectorDocked, inspectorOpen, quickEdit, libraryOpen, guideOpen, aboutOpen])
+  }, [inspectorDocked, inspectorOpen, quickEdit, libraryOpen, guideOpen, aboutOpen, courseDesignOpen])
 
   // 手机端面板从底部升起，会盖住画布下半屏。打开时把选中的元件滚到
   // 面板上方，调参数时仍能看见它在梯形图里的位置。
@@ -4083,6 +4109,7 @@ export default function App() {
         onUndo={undo}
         onRedo={redo}
         onOpenProject={() => setMobilePanel('project')}
+        onCourseDesign={() => setCourseDesignOpen(true)}
         onSaveProject={requestSaveProject}
         saveBlocked={Boolean(projectLibraryError)}
         saveStatus={manualSaveStatus}
@@ -4703,6 +4730,12 @@ export default function App() {
         open={importOpen}
         onClose={() => setImportOpen(false)}
         onImport={applyImportedProject}
+      />
+
+      <CourseDesignDialog
+        open={courseDesignOpen}
+        onClose={() => setCourseDesignOpen(false)}
+        onGenerated={handleCourseDesignGenerated}
       />
 
       <NewProjectDialog

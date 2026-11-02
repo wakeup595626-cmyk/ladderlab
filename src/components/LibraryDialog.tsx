@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react'
 import { COURSE_LABS } from '../engine/courseLabs'
+import { MACHINE_LABS } from '../engine/machineLabs'
 import { SAMPLES } from '../engine/samples'
 import { useModalFocus } from '../lib/useModalFocus'
 import { usePresence } from '../lib/usePresence'
@@ -41,6 +42,7 @@ function LibraryDialogContent({
     || name.toLocaleLowerCase().includes(normalizedQuery)
     || description.toLocaleLowerCase().includes(normalizedQuery)
   const courseLabs = COURSE_LABS.filter((item) => matches(item.name, item.description))
+  const machineLabs = MACHINE_LABS.filter((item) => matches(item.name, item.description))
   const samples = SAMPLES.filter((item) => matches(item.name, item.description))
 
   return (
@@ -66,7 +68,10 @@ function LibraryDialogContent({
       <header className="library-head" role="none">
           <div>
             <h2 id="library-title">实验与示例</h2>
-            <p>{COURSE_LABS.length} 个课程实验与 {SAMPLES.length} 个基础示例，载入后都可直接编辑、仿真。</p>
+            <p>
+              {COURSE_LABS.length} 个课程实验、{MACHINE_LABS.length} 个机器课设与
+              {' '}{SAMPLES.length} 个基础示例，载入后都可直接编辑、仿真。
+            </p>
           </div>
           <button type="button" className="icon-button library-close" onClick={onClose} aria-label="关闭实验与示例" title="关闭实验与示例">
             <CloseIcon size={18} />
@@ -80,8 +85,8 @@ function LibraryDialogContent({
             type="search"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="搜索实验或示例"
-            aria-label="搜索实验或示例"
+            placeholder="搜索实验、课设或示例"
+            aria-label="搜索实验、课设或示例"
           />
         </label>
 
@@ -90,6 +95,34 @@ function LibraryDialogContent({
             <h3 id="library-course-title">课程实验</h3>
             <div className="library-list">
               {courseLabs.map((item) => (
+                <button
+                  type="button"
+                  className="library-item"
+                  key={item.id}
+                  onClick={() => {
+                    void Promise.resolve(onLoadSample(item.id)).then((loaded) => {
+                      if (loaded) onClose()
+                    })
+                  }}
+                  aria-label={`载入${item.name}`}
+                  title={`载入${item.name}：${item.description}`}
+                >
+                  <span className="library-item-head">
+                    <strong>{item.name}</strong>
+                    <span className="library-badge">{item.badge}</span>
+                  </span>
+                  <span className="library-description">{item.description}</span>
+                </button>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {machineLabs.length > 0 && (
+          <section className="library-group" aria-labelledby="library-machine-title">
+            <h3 id="library-machine-title">机器课设</h3>
+            <div className="library-list">
+              {machineLabs.map((item) => (
                 <button
                   type="button"
                   className="library-item"
@@ -141,8 +174,8 @@ function LibraryDialogContent({
           </section>
         )}
 
-        {courseLabs.length === 0 && samples.length === 0 && (
-          <p className="library-empty">没有找到匹配的实验或示例</p>
+        {courseLabs.length === 0 && machineLabs.length === 0 && samples.length === 0 && (
+          <p className="library-empty">没有找到匹配的实验、课设或示例</p>
         )}
       </section>
     </div>

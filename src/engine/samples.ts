@@ -1,5 +1,6 @@
 import { uid } from '../lib/uid'
 import { buildCourseLab } from './courseLabs'
+import { buildMachineLab } from './machineLabs'
 import { ensureTrailingBlankRung } from './rungInvariant'
 import type {
   ContactKind,
@@ -209,6 +210,8 @@ export const SAMPLES: Sample[] = [
 export function buildSample(id: string): Program | null {
   const courseLab = buildCourseLab(id)
   if (courseLab) return ensureTrailingBlankRung(courseLab)
+  const machineLab = buildMachineLab(id)
+  if (machineLab) return ensureTrailingBlankRung(machineLab)
   const sample = SAMPLES.find((item) => item.id === id)
   return sample ? ensureTrailingBlankRung(sample.build()) : null
 }

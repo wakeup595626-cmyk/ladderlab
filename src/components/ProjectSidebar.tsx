@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { COURSE_LABS } from '../engine/courseLabs'
+import { MACHINE_LABS } from '../engine/machineLabs'
 import { getProfile } from '../engine/profiles'
 import type { ContactKind, OutputKind, ProfileId, Program } from '../engine/types'
 import type { DragPayload } from '../lib/dragTypes'
@@ -150,12 +151,14 @@ export default function ProjectSidebar({
           type="button"
           className="tree-row tree-action"
           onClick={onOpenLibrary}
-          aria-label={`打开实验库，共 ${COURSE_LABS.length} 个课程实验`}
+          aria-label={`打开实验库，共 ${COURSE_LABS.length + MACHINE_LABS.length} 个课程实验与机器课设`}
           title="打开实验与示例库"
         >
           <BookIcon size={16} />
           <span>实验库</span>
-          <span className="tree-count" aria-hidden="true">{COURSE_LABS.length}</span>
+          <span className="tree-count" aria-hidden="true">
+            {COURSE_LABS.length + MACHINE_LABS.length}
+          </span>
         </button>
       </nav>}
 

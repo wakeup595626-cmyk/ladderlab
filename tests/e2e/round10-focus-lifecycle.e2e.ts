@@ -283,7 +283,7 @@ test('实验库载入确认只让顶层弹层可交互', async ({ page }) => {
   await drawer.getByRole('button', { name: /实验库/ }).click()
 
   const library = page.getByRole('dialog', { name: '实验与示例' })
-  const search = library.getByRole('searchbox', { name: '搜索实验或示例' })
+  const search = library.getByRole('searchbox', { name: '搜索实验、课设或示例' })
   await expect(library).toBeVisible()
   await expect(search).toBeFocused()
 

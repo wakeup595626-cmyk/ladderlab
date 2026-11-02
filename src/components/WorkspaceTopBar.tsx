@@ -5,6 +5,7 @@ import type { ProfileId } from '../engine/types'
 import { FIELD_LIMITS } from '../lib/limits'
 import { THEME_PRESETS, type ThemePreference } from '../lib/theme'
 import {
+  BoltIcon,
   CheckCircleIcon,
   ChevronDownIcon,
   FolderIcon,
@@ -46,6 +47,7 @@ export interface WorkspaceTopBarProps {
   onUndo: () => void
   onRedo: () => void
   onOpenProject: () => void
+  onCourseDesign: () => void
   onSaveProject: () => void
   saveBlocked?: boolean
   saveStatus?: 'idle' | 'saving' | 'saved' | 'error'
@@ -86,6 +88,7 @@ export default function WorkspaceTopBar({
   onUndo,
   onRedo,
   onOpenProject,
+  onCourseDesign,
   onSaveProject,
   saveBlocked = false,
   saveStatus = 'idle',
@@ -509,6 +512,17 @@ export default function WorkspaceTopBar({
       <div className="wb-topbar-actions">
         <button
           type="button"
+          className="wb-course-button"
+          onClick={onCourseDesign}
+          aria-label="一键课设：输入题目生成梯形图"
+          title="输入课设题目，从内置模板生成可编译的梯形图"
+        >
+          <BoltIcon size={16} />
+          <span>一键课设</span>
+        </button>
+
+        <button
+          type="button"
           className="wb-project-button"
           onClick={onOpenProject}
           aria-label="打开项目"
@@ -622,6 +636,10 @@ export default function WorkspaceTopBar({
             >
               <div className="wb-menu-group" role="group" aria-label="工程">
                 <span className="wb-menu-label">工程</span>
+                <button type="button" role="menuitem" onClick={() => chooseFileMenuAction(onCourseDesign)}>
+                  <BoltIcon size={16} />
+                  <span>一键课设 / 输入题目生成梯形图</span>
+                </button>
                 <button type="button" role="menuitem" onClick={() => chooseFileMenuAction(onOpenProject)}>
                   <FolderIcon size={16} />
                   <span>项目、变量表与实验库</span>

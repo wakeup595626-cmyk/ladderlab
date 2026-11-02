@@ -1,5 +1,6 @@
 import { useRef } from 'react'
 import { COURSE_LABS } from '../engine/courseLabs'
+import { MACHINE_LABS } from '../engine/machineLabs'
 import { getProfile } from '../engine/profiles'
 import { contentRungs } from '../engine/rungInvariant'
 import type { Program } from '../engine/types'
@@ -133,7 +134,9 @@ export default function ProjectDrawer({
             <button type="button" className="wb-tree-item" onClick={onOpenLibrary}>
               <BookIcon size={18} />
               <span className="wb-tree-label">实验库</span>
-              <span className="wb-tree-count" aria-hidden="true">{COURSE_LABS.length}</span>
+              <span className="wb-tree-count" aria-hidden="true">
+                {COURSE_LABS.length + MACHINE_LABS.length}
+              </span>
             </button>
             {onOpenBackup && (
               <button type="button" className="wb-tree-item" onClick={onOpenBackup}>
