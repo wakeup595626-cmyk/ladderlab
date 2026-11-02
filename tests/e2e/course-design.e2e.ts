@@ -4,8 +4,10 @@ import {
   loadCourseExperiment,
   openExportMenu,
   openHome,
+  selectExportContent,
   selectExportFormat,
   trackPageErrors,
+  type ExportContent,
 } from './support'
 
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
@@ -13,12 +15,13 @@ const PDF_SIGNATURE = Buffer.from('%PDF-')
 
 async function downloadPagedPdf(
   page: import('@playwright/test').Page,
-  itemName: '完整程序（分页 PDF）' | '纯梯形图（分页 PDF）',
+  content: ExportContent,
   filename: RegExp,
 ) {
   const menu = await openExportMenu(page)
+  await selectExportContent(menu, content)
   const downloadPromise = page.waitForEvent('download', { timeout: 60_000 })
-  await menu.getByRole('menuitem', { name: itemName, exact: true }).click()
+  await menu.getByRole('menuitem', { name: '分页 PDF', exact: true }).click()
   const download = await downloadPromise
   expect(await download.failure()).toBeNull()
   expect(download.suggestedFilename()).toMatch(filename)
@@ -35,14 +38,15 @@ async function downloadPagedPdf(
 
 async function downloadSegmentArchive(
   page: import('@playwright/test').Page,
-  itemName: '完整程序（分段图片）' | '纯梯形图（分段图片）',
+  content: ExportContent,
   format: 'png' | 'svg',
   filename: RegExp,
 ) {
   const menu = await openExportMenu(page)
+  await selectExportContent(menu, content)
   await selectExportFormat(menu, format)
   const downloadPromise = page.waitForEvent('download', { timeout: 90_000 })
-  await menu.getByRole('menuitem', { name: itemName, exact: true }).click()
+  await menu.getByRole('menuitem', { name: /^分段图片/ }).click()
   const download = await downloadPromise
   expect(await download.failure()).toBeNull()
   expect(download.suggestedFilename()).toMatch(filename)
@@ -151,7 +155,7 @@ test('实验库中的装配流水线可分页导出真实 PDF', async ({ page })
 
   const { bytes, pageCount } = await downloadPagedPdf(
     page,
-    '完整程序（分页 PDF）',
+    '完整程序',
     /-完整程序-分页-.*\.pdf$/,
   )
   expect(bytes.byteLength).toBeGreaterThan(20_000)
@@ -167,7 +171,7 @@ test('实验库中的装配流水线可分页导出纯梯形图 PDF', async ({ p
 
   const { bytes, pageCount } = await downloadPagedPdf(
     page,
-    '纯梯形图（分页 PDF）',
+    '纯梯形图',
     /-纯梯形图-分页-.*\.pdf$/,
   )
   expect(bytes.byteLength).toBeGreaterThan(10_000)
@@ -186,7 +190,7 @@ test('装配流水线可把完整程序与纯梯形图分别导出成分段图�
 
   const completeSvg = await downloadSegmentArchive(
     page,
-    '完整程序（分段图片）',
+    '完整程序',
     'svg',
     /-完整程序-分段图片-.*\.zip$/,
   )
@@ -195,7 +199,7 @@ test('装配流水线可把完整程序与纯梯形图分别导出成分段图�
 
   const plainSvg = await downloadSegmentArchive(
     page,
-    '纯梯形图（分段图片）',
+    '纯梯形图',
     'svg',
     /-纯梯形图-分段图片-.*\.zip$/,
   )
@@ -203,7 +207,7 @@ test('装配流水线可把完整程序与纯梯形图分别导出成分段图�
 
   const completePng = await downloadSegmentArchive(
     page,
-    '完整程序（分段图片）',
+    '完整程序',
     'png',
     /-完整程序-分段图片-.*\.zip$/,
   )
@@ -211,7 +215,7 @@ test('装配流水线可把完整程序与纯梯形图分别导出成分段图�
 
   const plainPng = await downloadSegmentArchive(
     page,
-    '纯梯形图（分段图片）',
+    '纯梯形图',
     'png',
     /-纯梯形图-分段图片-.*\.zip$/,
   )

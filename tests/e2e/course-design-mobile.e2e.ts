@@ -1,6 +1,11 @@
 import { readFile } from 'node:fs/promises'
 import { expect, test, type Locator, type Page } from '@playwright/test'
-import { loadCourseExperiment, openHome, trackPageErrors } from './support'
+import {
+  loadCourseExperiment,
+  openHome,
+  selectExportContent,
+  trackPageErrors,
+} from './support'
 
 const PDF_SIGNATURE = Buffer.from('%PDF-')
 const BASE_URL = `http://127.0.0.1:${process.env.E2E_PORT ?? 4319}`
@@ -147,8 +152,9 @@ test('短屏触屏可从实验库导出真实分页 PDF', async ({ browser }) =>
     await fileMenuButton.click()
     const menu = page.getByRole('menu', { name: '文件操作' })
     await expect(menu).toBeVisible()
+    await selectExportContent(menu, '完整程序')
     const pdfItem = menu.getByRole('menuitem', {
-      name: '完整程序（分页 PDF）',
+      name: '分页 PDF',
       exact: true,
     })
     await pdfItem.scrollIntoViewIfNeeded()

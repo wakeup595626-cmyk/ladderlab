@@ -4766,8 +4766,8 @@ body[data-drag-kind] {
   z-index: 90;
   /* 宽度跟着最长的菜单项走，短标签不会把浮层撑成一大片。 */
   width: max-content;
-  min-width: 188px;
-  max-width: min(272px, calc(100vw - 24px));
+  min-width: 208px;
+  max-width: min(300px, calc(100vw - 24px));
   max-height: calc(100dvh - 72px);
   overflow-y: auto;
   overscroll-behavior: contain;
@@ -4777,6 +4777,12 @@ body[data-drag-kind] {
   border-radius: var(--radius-card);
   background: var(--surface);
   box-shadow: var(--shadow-overlay);
+}
+
+.wb-export-menu.topbar-menu {
+  width: 286px;
+  min-width: 0;
+  max-width: min(286px, calc(100vw - 24px));
 }
 
 /* 每项一行：图标 + 标签，行高与顶栏其它下拉菜单一致。 */
@@ -4792,60 +4798,164 @@ body[data-drag-kind] {
   color: var(--accent);
 }
 
-/* 导出格式只选一次；内容动作保持独立，避免格式与内容组成重复菜单。 */
-.wb-file-menu .wb-export-format {
+.wb-export-panel {
+  display: grid;
   gap: 3px;
-  padding-block: 5px 7px;
+  padding: 4px 6px 7px;
 }
 
-.wb-file-menu .wb-export-format > .wb-menu-label {
-  padding: 2px 6px 1px;
+.wb-export-choice {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
 }
 
-.wb-export-format-switch {
+.wb-export-choice-label {
+  padding-left: 2px;
+  color: var(--faint);
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.03em;
+}
+
+.wb-export-switch {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 2px;
-  margin-inline: 4px;
   padding: 2px;
   border: 1px solid var(--rule);
   border-radius: var(--radius-control);
   background: var(--raised);
 }
 
-.wb-export-format-switch button {
+.wb-export-switch button {
   min-height: 30px;
-  padding: 0 12px;
   border: 0;
   border-radius: calc(var(--radius-control) - 1px);
+  padding: 0 12px;
   background: transparent;
   color: var(--muted);
   font-size: 12px;
   font-weight: 650;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.02em;
   cursor: pointer;
 }
 
-.wb-export-format-switch button:hover {
+.wb-export-switch button:hover {
   background: var(--active);
   color: var(--text);
 }
 
-.wb-export-format-switch button.is-active {
+.wb-export-switch button.is-active {
   background: var(--surface);
   color: var(--accent-ink);
   box-shadow: inset 0 0 0 1px var(--control);
 }
 
-.wb-export-format-switch button:focus-visible {
+.wb-export-switch button:focus-visible,
+.wb-export-action:focus-visible,
+.wb-export-footer button:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
+}
+
+.wb-export-actions {
+  display: grid;
+  gap: 1px;
+  padding: 5px 4px 4px;
+  border-top: 1px solid var(--rule);
+}
+
+.wb-file-menu .wb-export-action {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  min-height: 37px;
+  align-items: center;
+  gap: 9px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.wb-file-menu .wb-export-action:hover:not(:disabled) {
+  background: var(--active);
+}
+
+.wb-file-menu .wb-export-action:disabled {
+  color: var(--faint);
+  cursor: wait;
+}
+
+.wb-file-menu .wb-export-action > svg {
+  color: var(--accent);
+}
+
+.wb-export-badge {
+  min-width: 32px;
+  padding: 2px 5px;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  color: var(--muted);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  line-height: 1.2;
+  text-align: center;
+}
+
+.wb-export-footer {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1px;
+  padding: 4px 4px 2px;
+  border-top: 1px solid var(--rule);
+}
+
+.wb-export-footer button {
+  display: inline-flex;
+  min-height: 35px;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 5px;
+  padding: 0 7px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--muted);
+  font-size: 11.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.wb-export-footer button:hover:not(:disabled) {
+  background: var(--active);
+  color: var(--text);
+}
+
+.wb-export-footer button:disabled {
+  color: var(--faint);
+  cursor: wait;
+}
+
+.wb-export-footer button > svg {
+  flex: 0 0 auto;
+  color: var(--accent);
 }
 
 /* 手指操作的屏幕、以及窄到只剩触屏形态的窗口，都保留 44px 点击高度。 */
 @media (pointer: coarse), (max-width: 720px) {
   .wb-file-menu .wb-menu-group > button,
-  .wb-export-format-switch button {
+  .wb-export-switch button,
+  .wb-file-menu .wb-export-action,
+  .wb-export-footer button {
     min-height: 44px;
   }
 }

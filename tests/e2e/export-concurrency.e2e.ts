@@ -6,14 +6,11 @@ import {
 } from './support'
 
 const EXPORT_ITEMS = [
-  '完整程序',
-  '纯梯形图',
-  '完整程序（分段图片）',
-  '纯梯形图（分段图片）',
-  '完整程序（分页 PDF）',
-  '纯梯形图（分页 PDF）',
+  /^整张图片/,
+  /^分段图片/,
+  '分页 PDF',
   '顺序功能图',
-]
+] as const
 
 /** 卡住 SFC PNG 的图片解码，直到测试确认导出中的菜单状态后再放行。 */
 async function gateImageDecode(page: Page): Promise<void> {
@@ -39,16 +36,18 @@ async function releaseImageDecode(page: Page): Promise<void> {
 
 async function expectExportItemsDisabled(menu: Locator): Promise<void> {
   for (const item of EXPORT_ITEMS) {
-    await expect(menu.getByRole('menuitem', { name: item, exact: true })).toBeDisabled()
+    await expect(menu.getByRole('menuitem', { name: item })).toBeDisabled()
   }
-  // 格式只是导出目标，不触发主线程任务；导出期间仍可切换，下一张图按新格式生成。
+  // 范围与格式只是导出目标，不触发主线程任务；下一张图按新选择生成。
+  await expect(menu.getByRole('menuitemradio', { name: '完整程序', exact: true })).toBeEnabled()
+  await expect(menu.getByRole('menuitemradio', { name: '纯梯形图', exact: true })).toBeEnabled()
   await expect(menu.getByRole('menuitemradio', { name: 'PNG', exact: true })).toBeEnabled()
   await expect(menu.getByRole('menuitemradio', { name: 'SVG', exact: true })).toBeEnabled()
 }
 
 async function expectExportItemsEnabled(menu: Locator): Promise<void> {
   for (const item of EXPORT_ITEMS) {
-    await expect(menu.getByRole('menuitem', { name: item, exact: true })).toBeEnabled()
+    await expect(menu.getByRole('menuitem', { name: item })).toBeEnabled()
   }
 }
 

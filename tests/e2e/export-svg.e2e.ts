@@ -1,5 +1,11 @@
 import { expect, test, type Page } from '@playwright/test'
-import { downloadExport, loadCourseExperiment, openExportMenu, openHome } from './support'
+import {
+  downloadExport,
+  loadCourseExperiment,
+  openExportMenu,
+  openHome,
+  selectExportContent,
+} from './support'
 
 /** PNG 超限时应用给出的提示，必须指路到不受画布限制的 SVG。 */
 const PNG_TOO_LARGE_MESSAGE = '工程过长，单张 PNG 超过浏览器画布上限；'
@@ -174,7 +180,8 @@ test('超长工程导出 PNG 时提前拦下，并指路到不受画布限制的
 
   const menu = await openExportMenu(page)
   await menu.getByRole('menuitemradio', { name: 'PNG', exact: true }).click()
-  await menu.getByRole('menuitem', { name: '完整程序', exact: true }).click()
+  await selectExportContent(menu, '完整程序')
+  await menu.getByRole('menuitem', { name: /^整张图片/ }).click()
   await expect(page.getByText(PNG_TOO_LARGE_MESSAGE, { exact: true })).toBeVisible({ timeout: 60_000 })
 
   // 同一个工程改走 SVG 仍然出得来，提示里的替代方案不是空话。

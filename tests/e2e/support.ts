@@ -2,7 +2,8 @@ import { readFile } from 'node:fs/promises'
 import { expect, type Locator, type Page } from '@playwright/test'
 
 export type ExportFormat = 'png' | 'svg'
-export type ExportContentName = '完整程序' | '纯梯形图' | '顺序功能图'
+export type ExportContent = '完整程序' | '纯梯形图'
+export type ExportContentName = ExportContent | '顺序功能图'
 
 /** 忽略浏览器扩展自己注入到页面里的报错，只收应用自身的错误。 */
 export function trackPageErrors(page: Page): string[] {
@@ -100,16 +101,26 @@ export async function selectExportFormat(menu: Locator, format: ExportFormat) {
   await expect(menu).toBeVisible()
 }
 
-/** 先选图片格式，再点导出内容，返回下载文件读出的原始字节。 */
+/** 选择导出范围；切换内容只更新菜单，不会提前触发下载。 */
+export async function selectExportContent(menu: Locator, content: ExportContent) {
+  const radio = menu.getByRole('menuitemradio', { name: content, exact: true })
+  await radio.click()
+  await expect(radio).toHaveAttribute('aria-checked', 'true')
+  await expect(menu).toBeVisible()
+}
+
+/** 先选导出范围与图片格式，再点「整张图片」，返回下载文件读出的原始字节。 */
 export async function downloadExport(
   page: Page,
   itemName: ExportContentName,
   format: ExportFormat = 'png',
 ) {
   const menu = await openExportMenu(page)
+  if (itemName !== '顺序功能图') await selectExportContent(menu, itemName)
   await selectExportFormat(menu, format)
   const downloadPromise = page.waitForEvent('download', { timeout: 30_000 })
-  await menu.getByRole('menuitem', { name: itemName, exact: true }).click()
+  const action = itemName === '顺序功能图' ? /^顺序功能图$/ : /^整张图片/
+  await menu.getByRole('menuitem', { name: action }).click()
   const download = await downloadPromise
   expect(await download.failure()).toBeNull()
   const path = await download.path()

@@ -121,6 +121,7 @@ export default function WorkspaceTopBar({
   const [fileMenuKind, setFileMenuKind] = useState<'export' | 'file'>('export')
   // 图片格式是导出菜单的一次性选择，不是内容类型。默认 PNG 让偶尔导图的
   // 用户直接完成操作，需要无损缩放时再切到 SVG。
+  const [exportContent, setExportContent] = useState<'complete' | 'plain'>('complete')
   const [exportFormat, setExportFormat] = useState<'png' | 'svg'>('png')
   const [themeMenuOpen, setThemeMenuOpen] = useState(false)
   const [themeMenuStyle, setThemeMenuStyle] = useState<CSSProperties | null>(null)
@@ -157,8 +158,10 @@ export default function WorkspaceTopBar({
   const fileMenuItems = () => Array.from(
     fileMenuRef.current?.querySelectorAll<HTMLButtonElement>('[role^="menuitem"]:not([disabled])') ?? [],
   )
-  const exportFormatRadios = () => Array.from(
-    fileMenuRef.current?.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]') ?? [],
+  const exportRadios = (group: 'content' | 'format') => Array.from(
+    fileMenuRef.current?.querySelectorAll<HTMLButtonElement>(
+      `[data-export-radio-group="${group}"] [role="menuitemradio"]`,
+    ) ?? [],
   )
   const themeRadios = () => Array.from(
     themeMenuRef.current?.querySelectorAll<HTMLButtonElement>('[role="radio"]') ?? [],
@@ -335,14 +338,20 @@ export default function WorkspaceTopBar({
   }
 
   const handleFileMenuKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
-    // 格式是一组二选一选项：左右键只在这一组里换值，不关闭菜单。
+    // 内容和格式各是一组二选一选项：左右键只改当前组，不关闭菜单。
     const active = document.activeElement
-    const radios = exportFormatRadios()
+    const radioGroup = active instanceof HTMLElement
+      ? active.closest<HTMLElement>('[data-export-radio-group]')
+      : null
+    const group = radioGroup?.dataset.exportRadioGroup
     if (
       active instanceof HTMLButtonElement
-      && radios.includes(active)
+      && active.getAttribute('role') === 'menuitemradio'
+      && (group === 'content' || group === 'format')
       && ['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)
     ) {
+      const radios = exportRadios(group)
+      if (radios.length === 0) return
       event.preventDefault()
       const index = radios.indexOf(active)
       const next = event.key === 'Home'
@@ -410,59 +419,107 @@ export default function WorkspaceTopBar({
     ? { disabled: true, title: '正在导出，请稍候…' }
     : {}
 
-  const exportFormatPicker = (
-    <div className="wb-menu-group wb-export-format" role="group" aria-label="图片格式">
-      <span className="wb-menu-label">图片格式</span>
-      <div className="wb-export-format-switch">
-        {(['png', 'svg'] as const).map((format) => (
-          <button
-            type="button"
-            role="menuitemradio"
-            aria-checked={exportFormat === format}
-            className={exportFormat === format ? 'is-active' : ''}
-            key={format}
-            onClick={() => setExportFormat(format)}
-            title={format === 'png' ? 'PNG 位图，适合分享和插入文档' : 'SVG 矢量图，放大不模糊'}
-          >
-            <span>{format.toUpperCase()}</span>
-          </button>
-        ))}
-      </div>
-    </div>
-  )
+  const exportPanel = (
+    <>
+      <div className="wb-export-panel">
+        <div className="wb-export-choice" role="group" aria-labelledby="wb-export-content-label">
+          <span className="wb-export-choice-label" id="wb-export-content-label">内容</span>
+          <div className="wb-export-switch" data-export-radio-group="content">
+            <button
+              type="button"
+              role="menuitemradio"
+              aria-checked={exportContent === 'complete'}
+              className={exportContent === 'complete' ? 'is-active' : ''}
+              onClick={() => setExportContent('complete')}
+            >
+              完整程序
+            </button>
+            <button
+              type="button"
+              role="menuitemradio"
+              aria-checked={exportContent === 'plain'}
+              className={exportContent === 'plain' ? 'is-active' : ''}
+              onClick={() => setExportContent('plain')}
+            >
+              纯梯形图
+            </button>
+          </div>
+        </div>
 
-  const exportActions = (
-    <div className="wb-menu-group wb-export-actions" role="group" aria-label="导出内容">
-      <span className="wb-menu-label">导出内容</span>
-      <button type="button" role="menuitem" {...exportGuard} onClick={() => chooseFileMenuAction(() => onExportImage('complete', exportFormat))}>
-        <ImageIcon size={16} />
-        <span>完整程序</span>
-      </button>
-      <button type="button" role="menuitem" {...exportGuard} onClick={() => chooseFileMenuAction(() => onExportImage('plain', exportFormat))}>
-        <ImageIcon size={16} />
-        <span>纯梯形图</span>
-      </button>
-      <button type="button" role="menuitem" {...exportGuard} onClick={() => chooseFileMenuAction(() => onExportImage('complete', exportFormat, true))}>
-        <ImageIcon size={16} />
-        <span>完整程序（分段图片）</span>
-      </button>
-      <button type="button" role="menuitem" {...exportGuard} onClick={() => chooseFileMenuAction(() => onExportImage('plain', exportFormat, true))}>
-        <ImageIcon size={16} />
-        <span>纯梯形图（分段图片）</span>
-      </button>
-      <button type="button" role="menuitem" {...exportGuard} onClick={() => chooseFileMenuAction(() => onExportPdf('complete'))}>
-        <ExportIcon size={16} />
-        <span>完整程序（分页 PDF）</span>
-      </button>
-      <button type="button" role="menuitem" {...exportGuard} onClick={() => chooseFileMenuAction(() => onExportPdf('plain'))}>
-        <ExportIcon size={16} />
-        <span>纯梯形图（分页 PDF）</span>
-      </button>
-      <button type="button" role="menuitem" {...exportGuard} onClick={() => chooseFileMenuAction(() => onExportSfc(exportFormat))}>
-        <StepIcon size={16} />
-        <span>顺序功能图</span>
-      </button>
-    </div>
+        <div className="wb-export-choice" role="group" aria-labelledby="wb-export-format-label">
+          <span className="wb-export-choice-label" id="wb-export-format-label">格式</span>
+          <div className="wb-export-switch" data-export-radio-group="format">
+            {(['png', 'svg'] as const).map((format) => (
+              <button
+                type="button"
+                role="menuitemradio"
+                aria-checked={exportFormat === format}
+                className={exportFormat === format ? 'is-active' : ''}
+                key={format}
+                onClick={() => setExportFormat(format)}
+                title={format === 'png' ? 'PNG 位图，适合分享和插入文档' : 'SVG 矢量图，放大不模糊'}
+              >
+                {format.toUpperCase()}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div className="wb-export-actions" role="group" aria-label="图片与 PDF">
+        <button
+          type="button"
+          role="menuitem"
+          className="wb-export-action"
+          aria-label={`整张图片，${exportFormat.toUpperCase()}`}
+          {...exportGuard}
+          onClick={() => chooseFileMenuAction(() => onExportImage(exportContent, exportFormat))}
+        >
+          <ImageIcon size={16} />
+          <span>整张图片</span>
+          <span className="wb-export-badge" aria-hidden="true">{exportFormat.toUpperCase()}</span>
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          className="wb-export-action"
+          aria-label={`分段图片，${exportFormat.toUpperCase()} ZIP`}
+          {...exportGuard}
+          onClick={() => chooseFileMenuAction(() => onExportImage(exportContent, exportFormat, true))}
+        >
+          <LayersIcon size={16} />
+          <span>分段图片</span>
+          <span className="wb-export-badge" aria-hidden="true">ZIP</span>
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          className="wb-export-action"
+          aria-label="分页 PDF"
+          {...exportGuard}
+          onClick={() => chooseFileMenuAction(() => onExportPdf(exportContent))}
+        >
+          <ExportIcon size={16} />
+          <span>分页 PDF</span>
+          <span className="wb-export-badge" aria-hidden="true">PDF</span>
+        </button>
+      </div>
+
+      <div className="wb-export-footer" role="group" aria-label="工程与更多导出">
+        <button type="button" role="menuitem" onClick={() => chooseFileMenuAction(onExportProject)} title="导出工程 JSON">
+          <SaveIcon size={15} />
+          <span>工程 JSON</span>
+        </button>
+        <button type="button" role="menuitem" onClick={() => chooseFileMenuAction(onCopyShareLink)} title="复制分享链接">
+          <LinkIcon size={15} />
+          <span>分享</span>
+        </button>
+        <button type="button" role="menuitem" {...exportGuard} onClick={() => chooseFileMenuAction(() => onExportSfc(exportFormat))} title="导出顺序功能图">
+          <StepIcon size={15} />
+          <span>顺序功能图</span>
+        </button>
+      </div>
+    </>
   )
 
 
@@ -632,18 +689,7 @@ export default function WorkspaceTopBar({
               onKeyDown={handleFileMenuKeyDown}
               style={fileMenuStyle ?? undefined}
             >
-              <div className="wb-menu-group" role="group" aria-label="工程文件与分享">
-                <button type="button" role="menuitem" onClick={() => chooseFileMenuAction(onExportProject)}>
-                  <ExportIcon size={16} />
-                  <span>工程文件（.json）</span>
-                </button>
-                <button type="button" role="menuitem" onClick={() => chooseFileMenuAction(onCopyShareLink)}>
-                  <LinkIcon size={16} />
-                  <span>复制分享链接</span>
-                </button>
-              </div>
-              {exportFormatPicker}
-              {exportActions}
+              {exportPanel}
             </div>
           )}
 
@@ -674,20 +720,8 @@ export default function WorkspaceTopBar({
                   <ImportIcon size={16} />
                   <span>导入工程文件</span>
                 </button>
-                <button type="button" role="menuitem" onClick={() => chooseFileMenuAction(onExportProject)}>
-                  <ExportIcon size={16} />
-                  <span>导出工程文件（.json）</span>
-                </button>
               </div>
-              <div className="wb-menu-group" role="group" aria-label="分享">
-                <span className="wb-menu-label">分享</span>
-                <button type="button" role="menuitem" onClick={() => chooseFileMenuAction(onCopyShareLink)}>
-                  <LinkIcon size={16} />
-                  <span>复制分享链接</span>
-                </button>
-              </div>
-              {exportFormatPicker}
-              {exportActions}
+              {exportPanel}
             </div>
           )}
         </div>

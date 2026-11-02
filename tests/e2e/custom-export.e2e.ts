@@ -9,24 +9,6 @@ import {
   missingTexts,
 } from './custom-export.spec'
 
-const EXPORT_FILE_ITEMS = [
-  '工程文件（.json）',
-  '复制分享链接',
-]
-
-/** SVG / PNG 在菜单顶部选一次，不再复制整套动作；PDF 是独立的分页交付格式。 */
-const EXPORT_CONTENT_ITEMS = [
-  '完整程序',
-  '纯梯形图',
-  '完整程序（分段图片）',
-  '纯梯形图（分段图片）',
-  '完整程序（分页 PDF）',
-  '纯梯形图（分页 PDF）',
-  '顺序功能图',
-]
-const EXPORT_MENU_ITEMS = [...EXPORT_FILE_ITEMS, ...EXPORT_CONTENT_ITEMS]
-const EXPORT_INTERACTIVE_ITEMS = [...EXPORT_FILE_ITEMS, 'PNG', 'SVG', ...EXPORT_CONTENT_ITEMS]
-
 type ExportKind = 'complete' | 'plain' | 'sfc'
 
 interface ExportCase {
@@ -140,7 +122,7 @@ test.describe('自定义工程导出验收', () => {
     console.log('--- 导出证据 ---\n' + evidence.join('\n'))
   })
 
-  test('导出菜单：格式二选一、内容七项、键盘可开关、触屏每项不低于 44px', async ({ page, browser }) => {
+  test('导出菜单：内容与格式二选一、六个动作、键盘可开关、触屏每项不低于 44px', async ({ page, browser }) => {
     test.setTimeout(120_000)
     page.setDefaultTimeout(10_000)
     await openHome(page)
@@ -153,14 +135,38 @@ test.describe('自定义工程导出验收', () => {
     const menu = page.getByRole('menu', { name: '导出' })
     await expect(menu).toBeVisible()
     const items = menu.getByRole('menuitem')
-    await expect(items).toHaveCount(EXPORT_MENU_ITEMS.length)
-    expect(await items.allInnerTexts()).toEqual(EXPORT_MENU_ITEMS)
-    await expect(items.first()).toBeFocused()
+    await expect(items).toHaveCount(6)
+    await expect(menu.getByRole('menuitemradio')).toHaveCount(4)
+    await expect(menu.getByRole('menuitem', { name: /^整张图片/ })).toBeVisible()
+    await expect(menu.getByRole('menuitem', { name: /^分段图片/ })).toBeVisible()
+    await expect(menu.getByRole('menuitem', { name: '分页 PDF', exact: true })).toBeVisible()
+    await expect(menu.getByRole('menuitem', { name: '工程 JSON', exact: true })).toBeVisible()
+    await expect(menu.getByRole('menuitem', { name: '分享', exact: true })).toBeVisible()
+    await expect(menu.getByRole('menuitem', { name: '顺序功能图', exact: true })).toBeVisible()
+    await expect(menu.getByRole('menuitemradio', { name: '完整程序', exact: true })).toBeFocused()
 
+    // 七个旧入口合并成两个选择组和三个主操作，桌面菜单应明显变短。
+    await expect
+      .poll(async () => (await menu.boundingBox())?.height ?? Number.POSITIVE_INFINITY)
+      .toBeLessThan(330)
+
+    const completeContent = menu.getByRole('menuitemradio', { name: '完整程序', exact: true })
+    const plainContent = menu.getByRole('menuitemradio', { name: '纯梯形图', exact: true })
     const pngFormat = menu.getByRole('menuitemradio', { name: 'PNG', exact: true })
     const svgFormat = menu.getByRole('menuitemradio', { name: 'SVG', exact: true })
+    await expect(completeContent).toHaveAttribute('aria-checked', 'true')
+    await expect(plainContent).toHaveAttribute('aria-checked', 'false')
     await expect(pngFormat).toHaveAttribute('aria-checked', 'true')
     await expect(svgFormat).toHaveAttribute('aria-checked', 'false')
+
+    // 两组单选都支持左右键切换，且切换只更新菜单，不会提前触发下载。
+    await expect(completeContent).toBeFocused()
+    await page.keyboard.press('ArrowRight')
+    await expect(plainContent).toHaveAttribute('aria-checked', 'true')
+    await expect(menu).toBeVisible()
+    await page.keyboard.press('ArrowLeft')
+    await expect(completeContent).toHaveAttribute('aria-checked', 'true')
+    await expect(menu).toBeVisible()
 
     // 上下键仍按整份菜单移动；进入格式组后，左右键切换但菜单保持打开。
     await page.keyboard.press('ArrowDown')
@@ -213,7 +219,7 @@ test.describe('自定义工程导出验收', () => {
         .toBeGreaterThanOrEqual(44 - 0.5)
 
       const boxes = await measure()
-      expect(boxes.map((box) => box.label)).toEqual(EXPORT_INTERACTIVE_ITEMS)
+      expect(boxes).toHaveLength(10)
       const tooSmall = boxes.filter((box) => box.height < 44 - 0.5)
       expect(tooSmall.map((box) => `${box.label}=${box.height}`).join('、')).toBe('')
       console.log(
