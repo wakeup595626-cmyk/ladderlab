@@ -93,6 +93,10 @@
   scrollbar-color: var(--control) transparent;
 }
 
+.course-design-body > * {
+  flex: 0 0 auto;
+}
+
 .course-design-steps {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -207,12 +211,60 @@
   min-height: 92px;
 }
 
-.course-design-prompt-field textarea {
-  min-height: 216px;
-  max-height: 38vh;
-  resize: vertical;
+.course-design-prompt-preview {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
   background: var(--raised);
+}
+
+.course-design-prompt-preview summary {
+  display: flex;
+  min-height: 42px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 12px;
+  color: var(--text);
+  font-size: 11.5px;
+  font-weight: 650;
+  cursor: pointer;
+  list-style: none;
+}
+
+.course-design-prompt-preview summary::-webkit-details-marker {
+  display: none;
+}
+
+.course-design-prompt-preview summary::after {
+  content: '展开';
+  color: var(--accent-ink);
+  font-size: 10.5px;
+  font-weight: 600;
+}
+
+.course-design-prompt-preview[open] summary::after {
+  content: '收起';
+}
+
+.course-design-prompt-preview textarea {
+  display: block;
+  width: 100%;
+  min-height: 190px;
+  max-height: 34vh;
+  resize: vertical;
+  padding: 10px 12px;
+  border: 0;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
   font: 11.5px/1.58 var(--mono);
+  scrollbar-color: var(--control) transparent;
+}
+
+.course-design-prompt-preview summary:focus-visible {
+  outline: 2px solid var(--accent-ink);
+  outline-offset: -3px;
 }
 
 .course-design-examples {
@@ -376,11 +428,6 @@
   .course-design-steps li + li {
     border-top: 1px solid var(--border);
     border-left: 0;
-  }
-
-  .course-design-prompt-field textarea {
-    min-height: 190px;
-    max-height: 32vh;
   }
 
   .course-design-actions {

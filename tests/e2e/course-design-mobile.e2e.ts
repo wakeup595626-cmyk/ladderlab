@@ -35,7 +35,7 @@ async function openCourseDesign(page: Page, width: number): Promise<Locator> {
       .click()
   }
 
-  await expect(page.getByRole('dialog', { name: '让 Agent 做课设' })).toBeVisible()
+  await expect(page.getByRole('dialog', { name: '让 AI 做课设' })).toBeVisible()
   return entry
 }
 
@@ -73,23 +73,24 @@ for (const viewport of VIEWPORTS) {
       expect(await page.evaluate(() => matchMedia('(pointer: coarse)').matches)).toBe(true)
 
       const opener = await openCourseDesign(page, viewport.width)
-      const dialog = page.getByRole('dialog', { name: '让 Agent 做课设' })
+      const dialog = page.getByRole('dialog', { name: '让 AI 做课设' })
       await expectInsideViewport(dialog, viewport)
       await expect(dialog.getByRole('list', { name: '三步完成课设' })).toBeVisible()
-      await expect(dialog.getByText('打开本地 Agent')).toBeVisible()
-      await expect(dialog.getByText('填写并复制需求')).toBeVisible()
-      await expect(dialog.getByText('打开链接并导出')).toBeVisible()
+      await expect(dialog.getByText('写要求')).toBeVisible()
+      await expect(dialog.getByText('复制给 AI')).toBeVisible()
+      await expect(dialog.getByText('导入导出')).toBeVisible()
 
       const requirement = dialog.getByRole('textbox', {
-        name: '课设要求',
-        exact: true,
-      })
-      const prompt = dialog.getByRole('textbox', {
-        name: 'Agent 提示词',
+        name: '你的课设要求',
         exact: true,
       })
       await expect(requirement).toBeVisible()
       await expectInsideViewport(requirement, viewport)
+      await dialog.locator('summary').click()
+      const prompt = dialog.getByRole('textbox', {
+        name: 'Agent 提示词',
+        exact: true,
+      })
       await prompt.scrollIntoViewIfNeeded()
       await expectInsideViewport(prompt, viewport)
 
@@ -99,13 +100,13 @@ for (const viewport of VIEWPORTS) {
       }))
       expect(overflow.document - overflow.viewport).toBeLessThanOrEqual(1)
 
-      const copy = dialog.getByRole('button', { name: '复制 AI 提示词', exact: true })
+      const copy = dialog.getByRole('button', { name: '复制提示词', exact: true })
       await expect(copy).toBeDisabled()
       await requirement.fill('三层电梯，带楼层外呼、选层、方向显示和开门延时。')
       await expect(copy).toBeEnabled()
       await expect(prompt).toHaveValue(/三层电梯/)
 
-      const close = dialog.getByRole('button', { name: '关闭 Agent 课设', exact: true })
+      const close = dialog.getByRole('button', { name: '关闭 AI 课设', exact: true })
       await expectInsideViewport(close, viewport)
       const closeHeight = await expectTouchTarget(close)
       const copyHeight = await expectTouchTarget(copy)

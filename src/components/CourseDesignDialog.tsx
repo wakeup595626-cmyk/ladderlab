@@ -27,7 +27,6 @@ function CourseDesignDialogContent({ open, closing, onClose }: CourseDesignDialo
   const [query, setQuery] = useState('')
   const [copyState, setCopyState] = useState<'idle' | 'done' | 'failed'>('idle')
   const queryRef = useRef<HTMLTextAreaElement>(null)
-  const promptRef = useRef<HTMLTextAreaElement>(null)
   const dialogRef = useModalFocus<HTMLElement>(open, onClose, queryRef)
   const agentPrompt = useMemo(() => makeAgentPrompt(query), [query])
   const canCopy = query.trim().length > 0
@@ -67,9 +66,9 @@ function CourseDesignDialogContent({ open, closing, onClose }: CourseDesignDialo
           <div className="course-design-title-wrap">
             <span className="course-design-mark" aria-hidden="true"><BoltIcon size={19} /></span>
             <div>
-              <h2 id="course-design-title">让 Agent 做课设</h2>
+              <h2 id="course-design-title">让 AI 做课设</h2>
               <p id="course-design-description">
-                网页只生成提示词，不调用 AI，也不上传你的题目。
+                写清要求，复制提示词，交给电脑上的 AI。
               </p>
             </div>
           </div>
@@ -77,7 +76,7 @@ function CourseDesignDialogContent({ open, closing, onClose }: CourseDesignDialo
             type="button"
             className="icon-button course-design-close"
             onClick={onClose}
-            aria-label="关闭 Agent 课设"
+            aria-label="关闭 AI 课设"
           >
             <CloseIcon size={18} />
           </button>
@@ -88,28 +87,28 @@ function CourseDesignDialogContent({ open, closing, onClose }: CourseDesignDialo
             <li>
               <span className="course-design-step-index" aria-hidden="true">1</span>
               <div>
-                <strong>打开本地 Agent</strong>
-                <span>Codex、Claude Code 或 Cursor，确认它能读写仓库并运行 Node。</span>
+                <strong>写要求</strong>
+                <span>写清题目、动作和停止条件。</span>
               </div>
             </li>
             <li>
               <span className="course-design-step-index" aria-hidden="true">2</span>
               <div>
-                <strong>填写并复制需求</strong>
-                <span>下面会实时生成完整提示词，整段发给 Agent，不需要自己改命令。</span>
+                <strong>复制给 AI</strong>
+                <span>复制后粘贴给电脑上的 AI。</span>
               </div>
             </li>
             <li>
               <span className="course-design-step-index" aria-hidden="true">3</span>
               <div>
-                <strong>打开链接并导出</strong>
-                <span>点开 Agent 返回的分享链接，导入后导出 PNG、SVG 或分页 PDF。</span>
+                <strong>导入导出</strong>
+                <span>打开链接，导入后导出图片或 PDF。</span>
               </div>
             </li>
           </ol>
 
           <label className="course-design-field">
-            <span>课设要求</span>
+            <span>你的课设要求</span>
             <textarea
               ref={queryRef}
               value={query}
@@ -121,15 +120,14 @@ function CourseDesignDialogContent({ open, closing, onClose }: CourseDesignDialo
                   void copyPrompt()
                 }
               }}
-              aria-label="课设要求"
-              placeholder="例如：三层电梯，每层有外呼按钮和选层按钮，显示运行方向与当前楼层；到站开门并延时关门，急停复位后回到安全状态。"
+              placeholder="例如：三层电梯，每层有外呼、选层、开关门和急停。"
               rows={4}
               spellCheck={false}
             />
           </label>
 
           <div className="course-design-examples" aria-label="快捷填写课设要求">
-            <span>填入示例</span>
+            <span>快速示例</span>
             {QUICK_EXAMPLES.map((example) => (
               <button type="button" key={example} onClick={() => updateQuery(example)}>
                 {example}
@@ -137,42 +135,37 @@ function CourseDesignDialogContent({ open, closing, onClose }: CourseDesignDialo
             ))}
           </div>
 
-          <label className="course-design-field course-design-prompt-field">
-            <span className="course-design-field-head">
-              <span>完整 Agent 提示词</span>
-              <small>随需求实时更新</small>
-            </span>
+          <details className="course-design-prompt-preview">
+            <summary>查看完整提示词</summary>
             <textarea
-              ref={promptRef}
               value={agentPrompt}
               readOnly
               aria-label="Agent 提示词"
-              rows={12}
+              rows={10}
               spellCheck={false}
               onFocus={(event) => event.currentTarget.select()}
             />
-          </label>
+          </details>
 
           <aside className="course-design-boundary">
-            <strong>能力边界</strong>
+            <strong>小提示</strong>
             <p>
-              能访问仓库并运行 Node 的 Agent，才能完成编译校验和分享链接；
-              纯聊天环境只能交付完整 JSON，并标注“未经仓库校验器验证”。
+              AI 不能运行命令时，可能只会给你工程文件。
             </p>
           </aside>
 
           <p className="course-design-library-note">
-            14 个已验证实验仍保存在「项目 → 实验库」，需要现成梯形图时可以直接载入。
+            现成梯形图在「项目 → 实验库」。
           </p>
         </div>
 
         <footer className="course-design-actions">
           <p className="course-design-feedback" role="status" aria-live="polite">
             {copyState === 'done'
-              ? '提示词已复制，去粘贴给本机 Agent。'
+              ? '已复制，粘贴给 AI 即可。'
               : copyState === 'failed'
-                ? '复制失败，请点提示词框后按 Ctrl+A 全选。'
-                : '复制后直接粘贴给 Agent，让它开始执行。'}
+                ? '复制失败，请展开提示词后手动复制。'
+                : '复制后粘贴给电脑上的 AI。'}
           </p>
           <div className="course-design-action-buttons">
             <button type="button" className="course-design-cancel" onClick={onClose}>关闭</button>
@@ -185,10 +178,10 @@ function CourseDesignDialogContent({ open, closing, onClose }: CourseDesignDialo
               <CopyIcon size={16} />
               <span>
                 {copyState === 'done'
-                  ? '已复制提示词'
+                  ? '已复制'
                   : copyState === 'failed'
-                    ? '重新复制提示词'
-                    : '复制 AI 提示词'}
+                    ? '重新复制'
+                    : '复制提示词'}
               </span>
             </button>
           </div>

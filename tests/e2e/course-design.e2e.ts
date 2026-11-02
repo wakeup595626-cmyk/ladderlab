@@ -18,21 +18,22 @@ test('AI 课设只生成提示词，并能复制完整需求交给本机 Agent',
     exact: true,
   }).click()
 
-  const dialog = page.getByRole('dialog', { name: '让 Agent 做课设' })
+  const dialog = page.getByRole('dialog', { name: '让 AI 做课设' })
   await expect(dialog).toBeVisible()
   await expect(dialog.getByRole('list', { name: '三步完成课设' })).toBeVisible()
-  await expect(dialog.getByText('网页只生成提示词，不调用 AI，也不上传你的题目。')).toBeVisible()
+  await expect(dialog.getByText('写清要求，复制提示词，交给电脑上的 AI。')).toBeVisible()
 
   const requirement = dialog.getByRole('textbox', {
-    name: '课设要求',
+    name: '你的课设要求',
     exact: true,
   })
   await expect(requirement).toBeFocused()
+  await dialog.locator('summary').click()
   const prompt = dialog.getByRole('textbox', {
     name: 'Agent 提示词',
     exact: true,
   })
-  const copy = dialog.getByRole('button', { name: '复制 AI 提示词', exact: true })
+  const copy = dialog.getByRole('button', { name: '复制提示词', exact: true })
   await expect(copy).toBeDisabled()
 
   const request = '三层电梯，每层有外呼按钮和选层按钮；到站开门延时关门，急停后复位。'
@@ -51,8 +52,8 @@ test('AI 课设只生成提示词，并能复制完整需求交给本机 Agent',
   expect(copied).toContain(request)
   expect(copied).toContain('node scripts/check-project.mjs')
   expect(copied).toContain('node scripts/share-link.mjs')
-  await expect(dialog.getByRole('button', { name: '已复制提示词', exact: true })).toBeVisible()
-  await expect(dialog.getByText('提示词已复制，去粘贴给本机 Agent。')).toBeVisible()
+  await expect(dialog.getByRole('button', { name: '已复制', exact: true })).toBeVisible()
+  await expect(dialog.getByText('已复制，粘贴给 AI 即可。')).toBeVisible()
 })
 
 test('实验库中的三层电梯仍可导出真实梯形图 PNG', async ({ page }) => {
