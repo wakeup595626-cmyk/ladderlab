@@ -243,31 +243,45 @@ await send('Input.dispatchMouseEvent', {
   button: 'none',
 })
 await sleep(220)
-const hoverTip = await evaluate(`(() => {
-  const tip = document.querySelector('.wb-program-resizer.is-left .wb-program-resizer-tip')
-  if (!tip) return null
-  const box = tip.getBoundingClientRect()
+const hoverGrip = await evaluate(`(() => {
+  const handle = document.querySelector('.wb-program-resizer.is-left')
+  const grip = handle?.querySelector('.wb-program-resizer-grip')
+  if (!handle || !grip) return null
+  const style = getComputedStyle(grip)
   return {
-    text: tip.textContent.trim(),
-    opacity: getComputedStyle(tip).opacity,
-    left: box.left,
-    right: box.right,
-    inViewport: box.left >= 0 && box.right <= innerWidth,
+    width: style.width,
+    height: style.height,
+    opacity: style.opacity,
+    borderWidth: style.borderTopWidth,
+    backgroundImage: style.backgroundImage,
+    rail: getComputedStyle(handle, '::before').content,
+    tip: document.querySelector('.wb-program-resizer-tip') !== null,
   }
 })()`)
-assert(hoverTip?.text.includes('拖动调宽'), '拖动柄悬停后没有出现操作提示')
-assert(hoverTip.opacity === '1', `拖动柄提示没有显示：${hoverTip.opacity}`)
-assert(hoverTip.inViewport, '拖动柄提示被裁切')
+assert(hoverGrip, '拖动柄或握柄不存在')
+assert(hoverGrip.opacity === '1', `握柄悬停后没有显示：${hoverGrip.opacity}`)
+assert(hoverGrip.width === '4px', `握柄悬停宽度不对：${hoverGrip.width}`)
+assert(hoverGrip.height === '44px', `握柄只是贴边细线，不应变成方框：${hoverGrip.height}`)
+assert(hoverGrip.borderWidth === '0px', `握柄不应带边框：${hoverGrip.borderWidth}`)
+assert(hoverGrip.backgroundImage === 'none', `握柄不应带图标或渐变：${hoverGrip.backgroundImage}`)
+assert(hoverGrip.rail === 'none', '拖动柄仍然画出整条虚拟竖框')
+assert(hoverGrip.tip === false, '拖动柄仍然显示悬浮文字提示')
 await screenshot('docs/qa/desktop-sheet-hover.png')
 
 await dragHandle('right', 90)
 const draggedRight = await sheetMetrics()
-assert(draggedRight.frameWidth > initial.frameWidth + 150, '向右拖动没有放大图纸')
+assert(
+  Math.abs(draggedRight.frameWidth - (initial.frameWidth + 90)) <= 3,
+  `向右拖动 90px 后宽度应同步增加 90px：${initial.frameWidth} → ${draggedRight.frameWidth}`,
+)
 assert(Math.abs(draggedRight.storedWidth - draggedRight.frameWidth) <= 1, '宽度没有写入存储')
 
 await dragHandle('left', -60)
 const draggedLeft = await sheetMetrics()
-assert(draggedLeft.frameWidth > draggedRight.frameWidth + 90, '向左拖动没有继续放大图纸')
+assert(
+  Math.abs(draggedLeft.frameWidth - (draggedRight.frameWidth + 60)) <= 3,
+  `向左拖动 60px 后宽度应同步增加 60px：${draggedRight.frameWidth} → ${draggedLeft.frameWidth}`,
+)
 await screenshot('docs/qa/desktop-sheet-resized.png')
 
 await reload()

@@ -20,18 +20,22 @@ test('AI 课设只生成提示词，并能复制完整需求交给本机 Agent',
 
   const dialog = page.getByRole('dialog', { name: '让 AI 做课设' })
   await expect(dialog).toBeVisible()
-  await expect(dialog.getByText('填好要求，复制提示词，粘贴给电脑上的 Agent。')).toBeVisible()
+  await expect(dialog.getByText('粘贴课设要求，复制完整提示词给电脑上的 Agent。')).toBeVisible()
+  await expect(dialog.locator('.course-design-examples')).toHaveCount(0)
+  await expect(dialog.getByRole('button', { name: '三层电梯', exact: true })).toHaveCount(0)
+  await expect(dialog.getByRole('button', { name: '推土机', exact: true })).toHaveCount(0)
 
   const requirement = dialog.getByRole('textbox', {
     name: '课设要求',
     exact: true,
   })
   await expect(requirement).toBeFocused()
-  await dialog.locator('summary').click()
   const prompt = dialog.getByRole('textbox', {
     name: 'Agent 提示词',
     exact: true,
   })
+  await expect(prompt).toBeVisible()
+  await expect(prompt).toHaveValue(/请直接执行/)
   const copy = dialog.getByRole('button', { name: '复制提示词', exact: true })
   await expect(copy).toBeDisabled()
 

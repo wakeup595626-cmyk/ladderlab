@@ -11,8 +11,6 @@ interface CourseDesignDialogProps {
   onClose: () => void
 }
 
-const QUICK_EXAMPLES = ['三层电梯', '四路抢答器', '推土机']
-
 export default function CourseDesignDialog({ open, onClose }: CourseDesignDialogProps) {
   const { present, closing } = usePresence(open, 180)
   if (!present) return null
@@ -65,7 +63,7 @@ function CourseDesignDialogContent({ open, closing, onClose }: CourseDesignDialo
         <header className="course-design-head">
           <div className="course-design-title-wrap">
             <h2 id="course-design-title">让 AI 做课设</h2>
-            <p id="course-design-description">填好要求，复制提示词，粘贴给电脑上的 Agent。</p>
+            <p id="course-design-description">粘贴课设要求，复制完整提示词给电脑上的 Agent。</p>
           </div>
           <button
             type="button"
@@ -91,39 +89,23 @@ function CourseDesignDialogContent({ open, closing, onClose }: CourseDesignDialo
                   void copyPrompt()
                 }
               }}
-              placeholder="例如：三层电梯，每层有外呼、选层、开关门和急停。"
+              placeholder="把老师或客户给的课设要求直接粘贴到这里。"
               rows={6}
               spellCheck={false}
             />
           </label>
 
-          <div className="course-design-examples" aria-label="快捷填写课设要求">
-            {QUICK_EXAMPLES.map((example) => (
-              <button
-                type="button"
-                key={example}
-                onClick={() => {
-                  updateQuery(example)
-                  queryRef.current?.focus()
-                }}
-              >
-                {example}
-              </button>
-            ))}
-          </div>
-
-          <details className="course-design-prompt-preview">
-            <summary>查看完整提示词</summary>
+          <div className="course-design-prompt">
+            <span>完整提示词</span>
             <textarea
               value={agentPrompt}
               readOnly
               aria-label="Agent 提示词"
-              rows={10}
+              rows={12}
               spellCheck={false}
               onFocus={(event) => event.currentTarget.select()}
             />
-          </details>
-
+          </div>
         </div>
 
         <footer className="course-design-actions">
@@ -131,7 +113,7 @@ function CourseDesignDialogContent({ open, closing, onClose }: CourseDesignDialo
             {copyState === 'done'
               ? '已复制，去 Agent 里粘贴即可。'
               : copyState === 'failed'
-                ? '复制失败，请展开提示词后手动复制。'
+                ? '复制失败，请手动选择上方完整提示词复制。'
                 : ''}
           </p>
           <button

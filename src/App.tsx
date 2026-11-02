@@ -30,7 +30,6 @@ import {
   FolderIcon,
   GripIcon,
   LadderIcon,
-  ResizeHorizontalIcon,
   TagIcon,
 } from './components/Icons'
 import Inspector, { type InspectorTab } from './components/Inspector'
@@ -3959,7 +3958,7 @@ export default function App() {
     event.preventDefault()
     const direction = resize.side === 'right' ? 1 : -1
     const nextWidth = resize.startWidth
-      + (event.clientX - resize.startX) * direction * 2
+      + (event.clientX - resize.startX) * direction
     setProgramSheetWidth(clampProgramSheetWidth(nextWidth, programSheetAvailableWidth))
   }
 
@@ -4181,7 +4180,6 @@ export default function App() {
               aria-valuetext={`${programSheetEffectiveWidth} 像素`}
               data-resizing={resizingProgramSheetSide === 'left' ? 'true' : undefined}
               tabIndex={0}
-              title="拖动调整程序区宽度；双击恢复默认；方向键微调"
               onPointerDown={(event) => startProgramSheetResize('left', event)}
               onPointerMove={moveProgramSheetResize}
               onPointerUp={endProgramSheetResize}
@@ -4191,11 +4189,6 @@ export default function App() {
               onKeyDown={resizeProgramSheetWithKeyboard}
             >
               <span className="wb-program-resizer-grip" aria-hidden="true" />
-              <span className="wb-program-resizer-tip" aria-hidden="true">
-                {resizingProgramSheetSide === 'left'
-                  ? `${programSheetEffectiveWidth} px · 双击复位`
-                  : '拖动调宽 · 双击复位'}
-              </span>
             </div>
             <div className="wb-program-inner">
               <RungNavigator
@@ -4394,7 +4387,7 @@ export default function App() {
               className="wb-program-resizer is-right"
               role="separator"
               aria-orientation="vertical"
-              aria-label="左右拖动调整程序区宽度"
+              aria-label="调整程序区宽度"
               aria-controls="wb-program-sheet"
               aria-valuemin={programSheetAriaMin}
               aria-valuemax={programSheetAriaMax}
@@ -4402,7 +4395,6 @@ export default function App() {
               aria-valuetext={`${programSheetEffectiveWidth} 像素`}
               data-resizing={resizingProgramSheetSide === 'right' ? 'true' : undefined}
               tabIndex={0}
-              title="左右拖动调整程序区宽度；双击恢复默认；方向键微调"
               onPointerDown={(event) => startProgramSheetResize('right', event)}
               onPointerMove={moveProgramSheetResize}
               onPointerUp={endProgramSheetResize}
@@ -4411,14 +4403,7 @@ export default function App() {
               onDoubleClick={resetProgramSheetWidth}
               onKeyDown={resizeProgramSheetWithKeyboard}
             >
-              <span className="wb-program-resizer-grip" aria-hidden="true">
-                <ResizeHorizontalIcon size={12} />
-              </span>
-              <span className="wb-program-resizer-tip" aria-hidden="true">
-                {resizingProgramSheetSide === 'right'
-                  ? `${programSheetEffectiveWidth} px · 双击复位`
-                  : '左右拖动调宽 · 双击复位'}
-              </span>
+              <span className="wb-program-resizer-grip" aria-hidden="true" />
             </div>
           </div>
         </main>

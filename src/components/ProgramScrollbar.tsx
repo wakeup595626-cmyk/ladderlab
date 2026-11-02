@@ -24,6 +24,8 @@ interface ScrollbarMetrics {
 
 const MIN_THUMB_HEIGHT = 44
 const TRACK_INSET = 14
+const THUMB_HIT_SLOP = 6
+const TRACK_PAGE_RATIO = 0.8
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value))
@@ -158,12 +160,27 @@ export default function ProgramScrollbar({ paneRef, frameRef }: ProgramScrollbar
   const handlePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (event.button !== 0 || !shown) return
     const thumb = thumbRef.current
-    if (!thumb) return
-    event.preventDefault()
+    const pane = paneRef.current
+    const metrics = metricsRef.current
+    if (!thumb || !pane || !metrics) return
     event.currentTarget.focus({ preventScroll: true })
     const thumbRect = thumb.getBoundingClientRect()
-    const onThumb = event.clientY >= thumbRect.top && event.clientY <= thumbRect.bottom
-    const grabOffset = onThumb ? event.clientY - thumbRect.top : thumbRect.height / 2
+    const onThumb = event.clientY >= thumbRect.top - THUMB_HIT_SLOP
+      && event.clientY <= thumbRect.bottom + THUMB_HIT_SLOP
+    if (!onThumb) {
+      // Moving the pointer onto a long, mostly invisible rail used to throw the
+      // document to the pointer position. Treat the empty rail like a native
+      // scrollbar track: one page toward the click, never a surprise jump.
+      const direction = event.clientY < thumbRect.top ? -1 : 1
+      const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+      pane.scrollBy({
+        top: direction * pane.clientHeight * TRACK_PAGE_RATIO,
+        behavior: reduceMotion ? 'auto' : 'smooth',
+      })
+      return
+    }
+    event.preventDefault()
+    const grabOffset = clamp(event.clientY - thumbRect.top, 0, thumbRect.height)
     pointerRef.current = { pointerId: event.pointerId, grabOffset }
     event.currentTarget.setPointerCapture(event.pointerId)
     setDragging(true)
@@ -222,7 +239,6 @@ export default function ProgramScrollbar({ paneRef, frameRef }: ProgramScrollbar
       data-dragging={dragging ? 'true' : undefined}
       hidden={!shown}
       tabIndex={0}
-      title="上下拖动滚动程序块；方向键、Page Up / Page Down、Home / End 也可滚动"
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={endPointerDrag}

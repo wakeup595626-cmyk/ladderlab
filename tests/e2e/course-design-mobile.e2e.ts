@@ -75,7 +75,13 @@ for (const viewport of VIEWPORTS) {
       const opener = await openCourseDesign(page, viewport.width)
       const dialog = page.getByRole('dialog', { name: '让 AI 做课设' })
       await expectInsideViewport(dialog, viewport)
-      await expect(dialog.getByText('填好要求，复制提示词，粘贴给电脑上的 Agent。')).toBeVisible()
+      await expect(dialog.getByText('粘贴课设要求，复制完整提示词给电脑上的 Agent。')).toBeVisible()
+      await expect(dialog.locator('.course-design-examples')).toHaveCount(0)
+
+      const dialogBox = await dialog.boundingBox()
+      expect(dialogBox).not.toBeNull()
+      expect(Math.abs(dialogBox!.x + dialogBox!.width / 2 - viewport.width / 2)).toBeLessThanOrEqual(1)
+      expect(Math.abs(dialogBox!.y + dialogBox!.height / 2 - viewport.height / 2)).toBeLessThanOrEqual(1)
 
       const requirement = dialog.getByRole('textbox', {
         name: '课设要求',
@@ -83,11 +89,11 @@ for (const viewport of VIEWPORTS) {
       })
       await expect(requirement).toBeVisible()
       await expectInsideViewport(requirement, viewport)
-      await dialog.locator('summary').click()
       const prompt = dialog.getByRole('textbox', {
         name: 'Agent 提示词',
         exact: true,
       })
+      await expect(prompt).toBeVisible()
       await prompt.scrollIntoViewIfNeeded()
       await expectInsideViewport(prompt, viewport)
 
