@@ -354,19 +354,28 @@ export function generateCourseDesign(templateOrId: string | CourseDesignTemplate
 
 export function makeAgentPrompt(text: string): string {
   const requirement = text.trim() || '（请在这里填写课设题目和动作要求）'
-  return `请把下面这个 PLC 课设做成一份可以直接导入 LadderLab 的梯形图工程。\n\n`
+  return `请直接执行，把下面这个 PLC 课设做成一份可以直接导入 LadderLab 的梯形图工程；不要只给方案或教学步骤。\n\n`
     + `仓库：${COURSE_DESIGN_REPO}\n\n`
     + `原始需求：\n${requirement}\n\n`
-    + '工作要求：\n'
-    + '1. 先完整阅读仓库根目录的 AGENT_START_HERE.md、AGENTS.md 和 docs/AI_GUIDE.md，按里面的工程格式与硬性限制执行。\n'
-    + '2. 先列出完整 I/O 表（输入、输出、内部存储，含地址、变量名、作用），再写状态转换表；不要先写代码后补说明。\n'
-    + '3. 优先复用 src/engine/courseLabs.ts、src/engine/machineLabs.ts 和 examples/ 里已经验证过的结构，能复用就复用，不要重画。\n'
-    + '4. 生成完整的 .ladderlab.json（schema、profile、tags、rungs 齐全），变量名、程序段 ID、元件 ID 全部唯一。\n'
-    + '5. 在仓库根目录自己执行命令，不要让用户手动操作：先 npm install，再运行\n'
-    + '   node scripts/check-project.mjs <你的文件>.ladderlab.json\n'
-    + '   必须看到 ✔ 且退出码为 0。没有通过就按报错逐条修；不要改校验器，也不要删掉用户要求的动作。\n'
-    + '6. 在仿真里推演：初始 → 启动 → 过程 → 到点动作 → 停止 / 复位，确认动作顺序和互锁正确。编译通过不等于逻辑正确。\n'
-    + '7. 通过后执行 node scripts/share-link.mjs <你的文件>.ladderlab.json，把可点开的分享链接、I/O 表、每段程序的作用和仿真步骤一起交付。\n'
-    + '8. 未校验不得声称完成。没跑到校验器的 ✔，不得声称“做好了”或“验证过了”。如果环境不能运行 Node，就直接交付完整 JSON，并明确标注“未经仓库校验器验证”。\n\n'
-    + '交付时请先给结论和分享链接，再给 I/O 表、程序段说明和仿真步骤。'
+    + '开始前：\n'
+    + '- 确认你能访问仓库、写入文件，并运行 package.json 所要求的 Node 版本（^22.12 / ^24 / >=26）。如果仓库尚未下载，先克隆它。\n'
+    + '- 完整阅读 AGENT_START_HERE.md、AGENTS.md 和 docs/AI_GUIDE.md，遵守里面的工程格式、校验要求和能力边界。\n'
+    + '- 只有关键动作、输出互斥关系或安全边界确实不明确时才问最少的问题；信息足够就直接完成。\n\n'
+    + '设计顺序：\n'
+    + '1. 先列出完整 I/O 表（输入、输出、内部存储，含地址、变量名、类型、作用），再写状态转换表或动作顺序。\n'
+    + '2. 优先复用 src/engine/courseLabs.ts、src/engine/machineLabs.ts、src/engine/samples.ts 和 examples/ 中已经验证过的结构；能复用就复用，不要重画。\n'
+    + '3. 生成一个新的完整 .ladderlab.json（schema、profile、tags、rungs 齐全），文件名保持唯一，不修改校验器，也不覆盖已有样例。变量名、程序段 ID、元件 ID 必须全部唯一。\n\n'
+    + '必须自己完成的验证（用户不需要手敲命令）：\n'
+    + '1. 在仓库根目录运行 npm install。\n'
+    + '2. 运行 node scripts/check-project.mjs <你的文件>.ladderlab.json，必须看到 ✔ 且退出码为 0。失败就按报错逐条修，不得改校验器或删掉用户要求的动作。\n'
+    + '3. 在仿真里完整推演：初始 → 启动 → 过程 → 到点动作 → 停止 / 复位，检查动作顺序、互锁、边界条件和重新启动；编译通过不等于逻辑正确。\n'
+    + '4. 验证通过后运行 node scripts/share-link.mjs <你的文件>.ladderlab.json，生成可直接打开的 LadderLab 分享链接。\n\n'
+    + '交付格式：\n'
+    + '- 先给结论和可点开的分享链接。\n'
+    + '- 再给 I/O 表、每段程序的作用、完整仿真步骤，以及实际执行的校验命令和结果。\n'
+    + '- 用户应能直接打开链接、导入工程，并从网站导出 PNG / SVG / 分页 PDF。\n\n'
+    + '硬性边界：\n'
+    + '- 未校验不得声称完成。没有跑到校验器的 ✔，不得说“做好了”“编译通过”或“验证过了”。\n'
+    + '- 如果环境不能访问仓库或运行 Node，就交付完整 JSON，并明确标注“未经仓库校验器验证”，同时说明缺少哪一步。\n'
+    + '- 这是 LadderLab 教学仿真器的梯形图 JSON，不要生成 TIA Portal 工程、SCL、FBD、HMI 或真实 PLC 下载文件，也不要声称它兼容 S7 工程。'
 }

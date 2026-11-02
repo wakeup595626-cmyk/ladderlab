@@ -15,7 +15,7 @@ function matchedId(text: string): string | null {
   return match.status === 'ok' ? match.template.id : null
 }
 
-describe('一键课设题目匹配', () => {
+describe('内置实验题目匹配', () => {
   it('把常见课设题目映射到确定性模板', () => {
     expect(matchedId('三层电梯')).toBe('course-4')
     expect(matchedId('四路抢答器')).toBe('course-1')
@@ -154,10 +154,14 @@ describe('Agent 定制任务单', () => {
     expect(prompt).toContain(COURSE_DESIGN_REPO)
     expect(prompt).toContain('AGENT_START_HERE.md')
     expect(prompt).toContain('做一个带前后限位的推土机')
+    expect(prompt).toContain('请直接执行')
+    expect(prompt).toContain('不要只给方案')
+    expect(prompt).toContain('src/engine/machineLabs.ts')
     expect(prompt).toContain('node scripts/check-project.mjs')
     expect(prompt).toContain('node scripts/share-link.mjs')
     expect(prompt).toContain('未校验不得声称完成')
     expect(prompt).toContain('未经仓库校验器验证')
-    expect(prompt).toContain('不要让用户手动操作')
+    expect(prompt).toContain('用户不需要手敲命令')
+    expect(prompt).toContain('不要生成 TIA Portal')
   })
 })

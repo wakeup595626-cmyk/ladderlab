@@ -520,11 +520,11 @@ export default function WorkspaceTopBar({
           type="button"
           className="wb-course-button"
           onClick={onCourseDesign}
-          aria-label="一键课设：输入题目生成梯形图"
-          title="输入课设题目，从内置模板生成可编译的梯形图"
+          aria-label="AI 课设：复制提示词交给本机 Agent"
+          title="填写课设需求，复制完整提示词交给本机 Agent"
         >
           <BoltIcon size={16} />
-          <span>一键课设</span>
+          <span>AI 课设</span>
         </button>
 
         <button
@@ -644,7 +644,7 @@ export default function WorkspaceTopBar({
                 <span className="wb-menu-label">工程</span>
                 <button type="button" role="menuitem" onClick={() => chooseFileMenuAction(onCourseDesign)}>
                   <BoltIcon size={16} />
-                  <span>一键课设 / 输入题目生成梯形图</span>
+                  <span>AI 课设 / 复制提示词交给本机 Agent</span>
                 </button>
                 <button type="button" role="menuitem" onClick={() => chooseFileMenuAction(onOpenProject)}>
                   <FolderIcon size={16} />

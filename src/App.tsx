@@ -64,7 +64,6 @@ import { instructionLabel, type InstructionFamily } from './components/instructi
 /* 导出器只在真正导出时才需要，按需加载可以让首屏少解析一块渲染逻辑。 */
 const ProgramImageExporter = lazy(() => import('./components/ProgramImageExporter'))
 import { compile } from './engine/compile'
-import type { CourseDesignTemplate } from './lib/courseDesign'
 import { normalizeReference } from './engine/references'
 import type { RungLayoutSnapshot } from './lib/virtualRungLayout'
 import { blankProgram, buildSample } from './engine/samples'
@@ -3546,29 +3545,6 @@ export default function App() {
       })
   }
 
-  const handleCourseDesignGenerated = async (
-    nextProgram: Program,
-    template: CourseDesignTemplate,
-  ) => {
-    const accepted = await confirm({
-      title: '载入这个课设？',
-      description: '当前工程会被替换，载入后可以用撤销恢复。',
-      confirmLabel: '载入',
-    })
-    if (!accepted) return
-    const next = ensureTrailingBlankRung(nextProgram)
-    const committed = commit(next)
-    const first = preferredRung(committed)
-    setSelection(first ? { rungId: first.id, path: null } : null)
-    setActiveProject(null)
-    setCourseDesignOpen(false)
-    setMobilePanel('none')
-    notify(
-      `已生成「${template.title}」：${contentRungs(committed).length} 段、`
-      + `${committed.tags.length} 个变量，编译通过；可从右上角“导出”保存 PNG / SVG / 分页 PDF`,
-    )
-  }
-
   const startImageExport = (mode: ProgramImageMode, format: ProgramImageFormat) => {
     if (imageExportRequest || imageExportBusyRef.current || sfcExportBusyRef.current || sfcExporting) {
       if (imageExportRequest || imageExportBusyRef.current) {
@@ -4736,7 +4712,6 @@ export default function App() {
       <CourseDesignDialog
         open={courseDesignOpen}
         onClose={() => setCourseDesignOpen(false)}
-        onGenerated={handleCourseDesignGenerated}
       />
 
       <NewProjectDialog

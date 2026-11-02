@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises'
 import { expect, test, type Locator, type Page } from '@playwright/test'
-import { openHome, trackPageErrors } from './support'
+import { loadCourseExperiment, openHome, trackPageErrors } from './support'
 
 const PDF_SIGNATURE = Buffer.from('%PDF-')
 const BASE_URL = `http://127.0.0.1:${process.env.E2E_PORT ?? 4319}`
@@ -15,7 +15,7 @@ const VIEWPORTS = [
 async function courseEntry(page: Page, width: number): Promise<Locator> {
   if (width > 860) {
     return page.getByRole('button', {
-      name: '一键课设：输入题目生成梯形图',
+      name: 'AI 课设：复制提示词交给本机 Agent',
       exact: true,
     })
   }
@@ -31,11 +31,11 @@ async function openCourseDesign(page: Page, width: number): Promise<Locator> {
     const fileMenu = page.getByRole('menu', { name: '文件操作' })
     await expect(fileMenu).toBeVisible()
     await fileMenu
-      .getByRole('menuitem', { name: '一键课设 / 输入题目生成梯形图', exact: true })
+      .getByRole('menuitem', { name: 'AI 课设 / 复制提示词交给本机 Agent', exact: true })
       .click()
   }
 
-  await expect(page.getByRole('dialog', { name: '一键课设' })).toBeVisible()
+  await expect(page.getByRole('dialog', { name: '让 Agent 做课设' })).toBeVisible()
   return entry
 }
 
@@ -60,7 +60,7 @@ async function expectTouchTarget(locator: Locator): Promise<number> {
 }
 
 for (const viewport of VIEWPORTS) {
-  test(`一键课设适配${viewport.name} ${viewport.width}×${viewport.height}`, async ({ browser }) => {
+  test(`AI 课设适配${viewport.name} ${viewport.width}×${viewport.height}`, async ({ browser }) => {
     const context = await browser.newContext({
       baseURL: BASE_URL,
       hasTouch: true,
@@ -73,14 +73,25 @@ for (const viewport of VIEWPORTS) {
       expect(await page.evaluate(() => matchMedia('(pointer: coarse)').matches)).toBe(true)
 
       const opener = await openCourseDesign(page, viewport.width)
-      const dialog = page.getByRole('dialog', { name: '一键课设' })
+      const dialog = page.getByRole('dialog', { name: '让 Agent 做课设' })
       await expectInsideViewport(dialog, viewport)
+      await expect(dialog.getByRole('list', { name: '三步完成课设' })).toBeVisible()
+      await expect(dialog.getByText('打开本地 Agent')).toBeVisible()
+      await expect(dialog.getByText('填写并复制需求')).toBeVisible()
+      await expect(dialog.getByText('打开链接并导出')).toBeVisible()
 
-      const input = dialog.getByLabel('课设题目或动作要求')
-      await input.fill('八路流水灯')
-      await expect(dialog.getByRole('heading', { name: '八路流水灯', exact: true })).toBeVisible()
-      await expect(dialog.getByText('编译通过', { exact: true })).toBeVisible()
-      await expectInsideViewport(dialog, viewport)
+      const requirement = dialog.getByRole('textbox', {
+        name: '课设要求',
+        exact: true,
+      })
+      const prompt = dialog.getByRole('textbox', {
+        name: 'Agent 提示词',
+        exact: true,
+      })
+      await expect(requirement).toBeVisible()
+      await expectInsideViewport(requirement, viewport)
+      await prompt.scrollIntoViewIfNeeded()
+      await expectInsideViewport(prompt, viewport)
 
       const overflow = await page.evaluate(() => ({
         viewport: window.innerWidth,
@@ -88,29 +99,20 @@ for (const viewport of VIEWPORTS) {
       }))
       expect(overflow.document - overflow.viewport).toBeLessThanOrEqual(1)
 
-      const tableScrolls = await dialog.locator('.course-design-table-wrap').evaluateAll((elements) =>
-        elements.map((element) => {
-          const style = getComputedStyle(element)
-          return {
-            clientHeight: element.clientHeight,
-            scrollHeight: element.scrollHeight,
-            overflowX: style.overflowX,
-            overflowY: style.overflowY,
-          }
-        }),
-      )
-      expect(tableScrolls.length).toBeGreaterThan(0)
-      expect(tableScrolls.every((table) => /auto|scroll/.test(table.overflowY))).toBe(true)
-      expect(tableScrolls.every((table) => /auto|scroll/.test(table.overflowX))).toBe(true)
-      expect(tableScrolls.some((table) => table.scrollHeight > table.clientHeight)).toBe(true)
+      const copy = dialog.getByRole('button', { name: '复制 AI 提示词', exact: true })
+      await expect(copy).toBeDisabled()
+      await requirement.fill('三层电梯，带楼层外呼、选层、方向显示和开门延时。')
+      await expect(copy).toBeEnabled()
+      await expect(prompt).toHaveValue(/三层电梯/)
 
-      const close = dialog.getByRole('button', { name: '关闭一键课设', exact: true })
-      const generate = dialog.getByRole('button', { name: '生成并载入梯形图', exact: true })
+      const close = dialog.getByRole('button', { name: '关闭 Agent 课设', exact: true })
+      await expectInsideViewport(close, viewport)
       const closeHeight = await expectTouchTarget(close)
-      const generateHeight = await expectTouchTarget(generate)
+      const copyHeight = await expectTouchTarget(copy)
+      await expectInsideViewport(dialog.getByRole('button', { name: '关闭', exact: true }), viewport)
       console.log(
         `--- ${viewport.name} ${viewport.width}×${viewport.height}: `
-        + `关闭 ${closeHeight.toFixed(1)}px / 生成 ${generateHeight.toFixed(1)}px`,
+        + `关闭 ${closeHeight.toFixed(1)}px / 复制 ${copyHeight.toFixed(1)}px`,
       )
 
       await page.keyboard.press('Escape')
@@ -123,7 +125,7 @@ for (const viewport of VIEWPORTS) {
   })
 }
 
-test('短屏触屏可从文件菜单导出真实分页 PDF', async ({ browser }) => {
+test('短屏触屏可从实验库导出真实分页 PDF', async ({ browser }) => {
   test.setTimeout(120_000)
   const viewport = { width: 844, height: 390 }
   const context = await browser.newContext({
@@ -135,18 +137,7 @@ test('短屏触屏可从文件菜单导出真实分页 PDF', async ({ browser })
     const page = await context.newPage()
     const errors = trackPageErrors(page)
     await openHome(page)
-    await openCourseDesign(page, viewport.width)
-
-    const dialog = page.getByRole('dialog', { name: '一键课设' })
-    await dialog.getByLabel('课设题目或动作要求').fill('八路流水灯')
-    await expect(dialog.getByRole('heading', { name: '八路流水灯', exact: true })).toBeVisible()
-    await expect(dialog.getByText('编译通过', { exact: true })).toBeVisible()
-    await dialog.getByRole('button', { name: '生成并载入梯形图', exact: true }).click()
-
-    const confirm = page.getByRole('dialog', { name: '载入这个课设？' })
-    await expect(confirm).toBeVisible()
-    await confirm.getByRole('button', { name: '载入', exact: true }).click()
-    await expect(dialog).toBeHidden()
+    await loadCourseExperiment(page, '06 装配流水线')
     await expect(page.locator('.ll-rung:not(.is-placeholder)').first()).toBeVisible()
 
     const fileMenuButton = page.getByRole('button', { name: '文件：新建、导入或导出', exact: true })
