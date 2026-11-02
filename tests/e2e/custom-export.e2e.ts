@@ -15,7 +15,15 @@ const EXPORT_FILE_ITEMS = [
 ]
 
 /** SVG / PNG 在菜单顶部选一次，不再复制整套动作；PDF 是独立的分页交付格式。 */
-const EXPORT_CONTENT_ITEMS = ['完整程序', '纯梯形图', '完整程序（分页 PDF）', '顺序功能图']
+const EXPORT_CONTENT_ITEMS = [
+  '完整程序',
+  '纯梯形图',
+  '完整程序（分段图片）',
+  '纯梯形图（分段图片）',
+  '完整程序（分页 PDF）',
+  '纯梯形图（分页 PDF）',
+  '顺序功能图',
+]
 const EXPORT_MENU_ITEMS = [...EXPORT_FILE_ITEMS, ...EXPORT_CONTENT_ITEMS]
 const EXPORT_INTERACTIVE_ITEMS = [...EXPORT_FILE_ITEMS, 'PNG', 'SVG', ...EXPORT_CONTENT_ITEMS]
 
@@ -132,7 +140,7 @@ test.describe('自定义工程导出验收', () => {
     console.log('--- 导出证据 ---\n' + evidence.join('\n'))
   })
 
-  test('导出菜单：格式二选一、内容四项、键盘可开关、触屏每项不低于 44px', async ({ page, browser }) => {
+  test('导出菜单：格式二选一、内容七项、键盘可开关、触屏每项不低于 44px', async ({ page, browser }) => {
     test.setTimeout(120_000)
     page.setDefaultTimeout(10_000)
     await openHome(page)

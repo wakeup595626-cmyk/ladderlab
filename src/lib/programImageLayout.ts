@@ -81,14 +81,21 @@ export function programCardHeight(rungHeight: number): number {
 
 export function planPlainLayout(rungs: readonly RungExtent[]): PlainLayout {
   const { padding, gap } = PLAIN_LAYOUT
+  const contentWidth = widestRung(rungs)
   let y = padding
   const placements = rungs.map((rung) => {
-    const placement = { x: padding, y, width: rung.width, height: rung.height }
+    const placement = {
+      // 分页 PDF 里每一段都单独居中；窄段不会贴着整页左边缘。
+      x: padding + (contentWidth - rung.width) / 2,
+      y,
+      width: rung.width,
+      height: rung.height,
+    }
     y += rung.height + gap
     return placement
   })
   return {
-    width: Math.ceil(widestRung(rungs) + padding * 2),
+    width: Math.ceil(contentWidth + padding * 2),
     height: Math.ceil(
       padding * 2 + totalRungHeight(rungs) + gap * Math.max(0, rungs.length - 1),
     ),
@@ -105,7 +112,8 @@ export function planCompleteLayout(rungs: readonly RungExtent[]): CompleteLayout
     const card = {
       y,
       height,
-      rungX: pagePad + cardPad,
+      // 标题仍在卡片左侧，梯形图本身按卡片可用宽度水平居中。
+      rungX: pagePad + (cardWidth - rung.width) / 2,
       rungY: y + cardHeader + cardLead,
     }
     y += height + gap

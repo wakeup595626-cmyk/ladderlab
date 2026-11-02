@@ -4,11 +4,78 @@ import {
   loadCourseExperiment,
   openExportMenu,
   openHome,
+  selectExportFormat,
   trackPageErrors,
 } from './support'
 
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
 const PDF_SIGNATURE = Buffer.from('%PDF-')
+
+async function downloadPagedPdf(
+  page: import('@playwright/test').Page,
+  itemName: '完整程序（分页 PDF）' | '纯梯形图（分页 PDF）',
+  filename: RegExp,
+) {
+  const menu = await openExportMenu(page)
+  const downloadPromise = page.waitForEvent('download', { timeout: 60_000 })
+  await menu.getByRole('menuitem', { name: itemName, exact: true }).click()
+  const download = await downloadPromise
+  expect(await download.failure()).toBeNull()
+  expect(download.suggestedFilename()).toMatch(filename)
+  const path = await download.path()
+  expect(path).not.toBeNull()
+  const { readFile } = await import('node:fs/promises')
+  const bytes = await readFile(path!)
+  expect(bytes.subarray(0, PDF_SIGNATURE.length)).toEqual(PDF_SIGNATURE)
+  const pageCount = bytes.toString('latin1').match(/\/Type\s*\/Page\b/g)?.length ?? 0
+  expect(pageCount).toBeGreaterThan(1)
+  await expect(page.getByText(/已导出分页 PDF，共 \d+ 页/)).toBeVisible()
+  return { bytes, pageCount }
+}
+
+async function downloadSegmentArchive(
+  page: import('@playwright/test').Page,
+  itemName: '完整程序（分段图片）' | '纯梯形图（分段图片）',
+  format: 'png' | 'svg',
+  filename: RegExp,
+) {
+  const menu = await openExportMenu(page)
+  await selectExportFormat(menu, format)
+  const downloadPromise = page.waitForEvent('download', { timeout: 90_000 })
+  await menu.getByRole('menuitem', { name: itemName, exact: true }).click()
+  const download = await downloadPromise
+  expect(await download.failure()).toBeNull()
+  expect(download.suggestedFilename()).toMatch(filename)
+  const path = await download.path()
+  expect(path).not.toBeNull()
+  const { readFile } = await import('node:fs/promises')
+  const { unzipSync } = await import('fflate')
+  const bytes = await readFile(path!)
+  const entries = unzipSync(new Uint8Array(bytes))
+  return { bytes, entries }
+}
+
+function expectSegmentEntries(
+  entries: Record<string, Uint8Array>,
+  rungCount: number,
+  extension: 'png' | 'svg',
+) {
+  const names = Object.keys(entries).sort()
+  expect(names).toHaveLength(rungCount)
+  names.forEach((name, index) => {
+    expect(name).toMatch(new RegExp('^' + String(index + 1).padStart(3, '0') + '-' + '.*\\.' + extension + '$'))
+  })
+  for (const name of names) {
+    const data = entries[name]
+    if (extension === 'svg') {
+      const source = new TextDecoder().decode(data)
+      expect(source).toContain('<svg')
+      expect(source).toContain('fill="#ffffff"')
+    } else {
+      expect(Buffer.from(data.subarray(0, PNG_SIGNATURE.length))).toEqual(PNG_SIGNATURE)
+    }
+  }
+}
 
 test('AI 课设只生成提示词，并能复制完整需求交给本机 Agent', async ({ page, context }) => {
   await context.grantPermissions(['clipboard-read', 'clipboard-write'])
@@ -82,20 +149,72 @@ test('实验库中的装配流水线可分页导出真实 PDF', async ({ page })
   await loadCourseExperiment(page, '06 装配流水线')
   await expect(page.locator('.ll-rung:not(.is-placeholder)').first()).toBeVisible()
 
-  const menu = await openExportMenu(page)
-  const downloadPromise = page.waitForEvent('download', { timeout: 60_000 })
-  await menu.getByRole('menuitem', { name: '完整程序（分页 PDF）', exact: true }).click()
-  const download = await downloadPromise
-  expect(await download.failure()).toBeNull()
-  expect(download.suggestedFilename()).toMatch(/-完整程序-分页-.*\.pdf$/)
-  const path = await download.path()
-  expect(path).not.toBeNull()
-  const { readFile } = await import('node:fs/promises')
-  const bytes = await readFile(path!)
-  expect(bytes.subarray(0, PDF_SIGNATURE.length)).toEqual(PDF_SIGNATURE)
+  const { bytes, pageCount } = await downloadPagedPdf(
+    page,
+    '完整程序（分页 PDF）',
+    /-完整程序-分页-.*\.pdf$/,
+  )
   expect(bytes.byteLength).toBeGreaterThan(20_000)
-  const source = bytes.toString('latin1')
-  expect(source.match(/\/Type\s*\/Page\b/g)?.length ?? 0).toBeGreaterThan(1)
-  await expect(page.getByText(/已导出分页 PDF，共 \d+ 页/)).toBeVisible()
+  expect(pageCount).toBeGreaterThan(1)
+  expect(errors).toEqual([])
+})
+
+test('实验库中的装配流水线可分页导出纯梯形图 PDF', async ({ page }) => {
+  const errors = trackPageErrors(page)
+  await openHome(page)
+  await loadCourseExperiment(page, '06 装配流水线')
+  await expect(page.locator('.ll-rung:not(.is-placeholder)').first()).toBeVisible()
+
+  const { bytes, pageCount } = await downloadPagedPdf(
+    page,
+    '纯梯形图（分页 PDF）',
+    /-纯梯形图-分页-.*\.pdf$/,
+  )
+  expect(bytes.byteLength).toBeGreaterThan(10_000)
+  expect(pageCount).toBeGreaterThan(1)
+  expect(errors).toEqual([])
+})
+
+test('装配流水线可把完整程序与纯梯形图分别导出成分段图片 ZIP', async ({ page }) => {
+  test.setTimeout(180_000)
+  const errors = trackPageErrors(page)
+  await openHome(page)
+  await loadCourseExperiment(page, '06 装配流水线')
+  await expect(page.locator('.ll-rung:not(.is-placeholder)').first()).toBeVisible()
+  const rungCount = await page.locator('.ll-rung:not(.is-placeholder)').count()
+  expect(rungCount).toBeGreaterThan(1)
+
+  const completeSvg = await downloadSegmentArchive(
+    page,
+    '完整程序（分段图片）',
+    'svg',
+    /-完整程序-分段图片-.*\.zip$/,
+  )
+  expectSegmentEntries(completeSvg.entries, rungCount, 'svg')
+  await expect(page.getByText('已导出完整程序-分段图片，共 ' + rungCount + ' 张')).toBeVisible()
+
+  const plainSvg = await downloadSegmentArchive(
+    page,
+    '纯梯形图（分段图片）',
+    'svg',
+    /-纯梯形图-分段图片-.*\.zip$/,
+  )
+  expectSegmentEntries(plainSvg.entries, rungCount, 'svg')
+
+  const completePng = await downloadSegmentArchive(
+    page,
+    '完整程序（分段图片）',
+    'png',
+    /-完整程序-分段图片-.*\.zip$/,
+  )
+  expectSegmentEntries(completePng.entries, rungCount, 'png')
+
+  const plainPng = await downloadSegmentArchive(
+    page,
+    '纯梯形图（分段图片）',
+    'png',
+    /-纯梯形图-分段图片-.*\.zip$/,
+  )
+  expectSegmentEntries(plainPng.entries, rungCount, 'png')
   expect(errors).toEqual([])
 })

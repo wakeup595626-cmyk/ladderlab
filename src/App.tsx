@@ -786,6 +786,7 @@ export default function App() {
     program: Program
     mode: ProgramImageMode
     format: ProgramImageFormat
+    segmented: boolean
   } | null>(null)
   const [sfcExporting, setSfcExporting] = useState(false)
   const [coachDismissed, setCoachDismissed] = useState(() => {
@@ -3551,7 +3552,11 @@ export default function App() {
       })
   }
 
-  const startImageExport = (mode: ProgramImageMode, format: ProgramImageFormat) => {
+  const startImageExport = (
+    mode: ProgramImageMode,
+    format: ProgramImageFormat,
+    segmented = false,
+  ) => {
     if (imageExportRequest || imageExportBusyRef.current || sfcExportBusyRef.current || sfcExporting) {
       if (imageExportRequest || imageExportBusyRef.current) {
         // 直接替换请求会让上一张图静默消失，学生只会看到界面卡住又弹一条新提示。
@@ -3570,9 +3575,11 @@ export default function App() {
       program,
       mode,
       format,
+      segmented,
     })
     const name = mode === 'complete' ? '完整程序' : '纯梯形图'
-    notify('正在生成' + name + ' ' + format.toUpperCase()
+    const kind = segmented ? '分段图片' : format.toUpperCase()
+    notify('正在生成' + name + ' ' + kind
       + '（' + contentRungs(program).length + ' 段）…', {
       sticky: true,
       action: {
@@ -4099,7 +4106,7 @@ export default function App() {
         onImportProject={() => setImportOpen(true)}
         onExportProject={exportProject}
         onExportImage={startImageExport}
-        onExportPdf={() => startImageExport('complete', 'pdf')}
+        onExportPdf={(mode) => startImageExport(mode, 'pdf')}
         onExportSfc={(format) => void startSfcExport(format)}
         exporting={imageExportRequest !== null || sfcExporting}
         onCopyShareLink={() => void copyShareLink()}
@@ -4799,21 +4806,30 @@ export default function App() {
             program={imageExportRequest.program}
             mode={imageExportRequest.mode}
             format={imageExportRequest.format}
+            segmented={imageExportRequest.segmented}
             onComplete={(result) => {
-              const suffix = imageExportRequest.mode === 'complete'
-                ? (result.format === 'pdf' ? '完整程序-分页' : '完整程序')
-                : '纯梯形图'
+              const suffix = result.format === 'archive'
+                ? (imageExportRequest.mode === 'complete' ? '完整程序-分段图片' : '纯梯形图-分段图片')
+                : result.format === 'pdf'
+                ? (imageExportRequest.mode === 'complete' ? '完整程序-分页' : '纯梯形图-分页')
+                : (imageExportRequest.mode === 'complete' ? '完整程序' : '纯梯形图')
               const base = safeFileName(imageExportRequest.program.name)
                 + '-' + suffix + '-' + downloadTimestamp()
               if (result.format === 'svg') {
                 downloadText(base + '.svg', result.data, 'image/svg+xml;charset=utf-8')
               } else if (result.format === 'png') {
                 downloadBlob(base + '.png', result.data)
+              } else if (result.format === 'archive') {
+                downloadBlob(base + '.zip', result.data)
               } else {
                 downloadBlob(base + '.pdf', result.data)
               }
               imageExportBusyRef.current = false
               setImageExportRequest(null)
+              if (result.format === 'archive') {
+                notify('已导出' + suffix + '，共 ' + result.fileCount + ' 张')
+                return
+              }
               notify(result.format === 'pdf'
                 ? `已导出分页 PDF，共 ${result.pageCount} 页`
                 : '已导出' + suffix + ' ' + result.format.toUpperCase())

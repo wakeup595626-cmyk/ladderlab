@@ -8,6 +8,10 @@ import {
 const EXPORT_ITEMS = [
   '完整程序',
   '纯梯形图',
+  '完整程序（分段图片）',
+  '纯梯形图（分段图片）',
+  '完整程序（分页 PDF）',
+  '纯梯形图（分页 PDF）',
   '顺序功能图',
 ]
 
@@ -48,7 +52,7 @@ async function expectExportItemsEnabled(menu: Locator): Promise<void> {
   }
 }
 
-test('顺序功能图 PNG 生成期间，桌面导出三项内容都不可重复触发', async ({ page }) => {
+test('顺序功能图 PNG 生成期间，桌面导出内容都不可重复触发', async ({ page }) => {
   await gateImageDecode(page)
   await openHome(page)
   await loadCourseExperiment(page, '03 十字路口交通灯')
@@ -72,7 +76,7 @@ test('顺序功能图 PNG 生成期间，桌面导出三项内容都不可重复
   await expectExportItemsEnabled(recoveredMenu)
 })
 
-test('顺序功能图 PNG 生成期间，移动端文件菜单三项内容都不可重复触发', async ({ page }) => {
+test('顺序功能图 PNG 生成期间，移动端文件菜单内容都不可重复触发', async ({ page }) => {
   await gateImageDecode(page)
   await openHome(page)
   await loadCourseExperiment(page, '03 十字路口交通灯')

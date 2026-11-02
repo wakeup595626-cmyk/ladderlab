@@ -11,7 +11,7 @@ import {
   type PlainLayout,
   type RungExtent,
 } from '../lib/programImageLayout'
-import { planProgramImagePages } from '../lib/programImagePaging'
+import { planPlainImagePages, planProgramImagePages } from '../lib/programImagePaging'
 import {
   assertSvgDocument,
   declareSvgDocument,
@@ -40,11 +40,14 @@ export type ProgramImageResult =
   | { format: 'svg'; data: string }
   | { format: 'png'; data: Blob }
   | { format: 'pdf'; data: Blob; pageCount: number }
+  | { format: 'archive'; imageFormat: 'svg' | 'png'; data: Blob; fileCount: number }
 
 interface ProgramImageExporterProps {
   program: Program
   mode: ProgramImageMode
   format?: ProgramImageFormat
+  /** 每段单独成图并打包成 ZIP，不把整份程序压进一张超长画布。 */
+  segmented?: boolean
   onComplete: (result: ProgramImageResult) => void
   onError: (message: string) => void
 }
@@ -715,14 +718,15 @@ function buildCompleteImage(
 
     context.fillStyle = INK
     setFont(context, 650, 13)
-    const label = fitText(context, rung.label, Math.max(60, contentRight - card.rungX))
+    const titleX = pagePad + cardPad
+    const label = fitText(context, rung.label, Math.max(60, contentRight - titleX))
     const labelWidth = context.measureText(label).width
-    context.fillText(label, card.rungX, card.y + cardTitleBaseline)
+    context.fillText(label, titleX, card.y + cardTitleBaseline)
 
     if (rung.title) {
       context.fillStyle = MUTED
       setFont(context, 450, 12)
-      const titleLeft = card.rungX + labelWidth + 14
+      const titleLeft = titleX + labelWidth + 14
       context.fillText(
         fitText(context, rung.title, Math.max(40, contentRight - titleLeft)),
         titleLeft,
@@ -743,16 +747,19 @@ function buildCompleteImage(
 }
 
 /**
- * 长程序按完整卡片分页，再把每页画到一张 A4 横向 PDF 上。
+ * 长程序按模式分页，再把每页画到一张 A4 横向 PDF 上。
  * 分页只发生在程序段之间，单段本身始终完整保留；页面与程序段编号
  * 都使用整份程序的连续编号，打印后不会出现每页从 1 开始的歧义。
  */
-async function buildCompletePdf(
+async function buildProgramPdf(
+  mode: ProgramImageMode,
   program: Program,
   rungs: PreparedRung[],
   isCancelled: () => boolean,
 ): Promise<{ data: Blob; pageCount: number } | null> {
-  const pages = planProgramImagePages(rungs)
+  const pages = mode === 'plain'
+    ? planPlainImagePages(rungs)
+    : planProgramImagePages(rungs)
   if (pages.length === 0) throw new Error('当前工程没有可导出的程序段')
   const { jsPDF } = await import('jspdf')
   if (isCancelled()) return null
@@ -764,8 +771,10 @@ async function buildCompletePdf(
     compress: true,
   })
   pdf.setProperties({
-    title: program.name,
-    subject: 'LadderLab complete ladder program',
+    title: program.name + (mode === 'plain' ? ' - 纯梯形图' : ' - 完整程序'),
+    subject: mode === 'plain'
+      ? 'LadderLab plain ladder diagram'
+      : 'LadderLab complete ladder program',
     creator: 'LadderLab',
   })
 
@@ -779,25 +788,41 @@ async function buildCompletePdf(
     if (isCancelled()) return null
     const page = pages[pageIndex]
     const pageRungs = rungs.slice(page.start, page.end)
-    assertProgramImageFits('complete', pageRungs)
-    const layout = planCompleteLayout(pageRungs)
-    const canvas = buildCompleteImage(program, pageRungs, layout, {
-      pageNumber: pageIndex + 1,
-      pageCount: pages.length,
-      rungOffset: page.start,
-      totalRungs: rungs.length,
-    })
+    assertProgramImageFits(mode, pageRungs)
+    let canvas: HTMLCanvasElement
+    let imageWidth: number
+    let imageHeight: number
+
+    if (mode === 'plain') {
+      const layout = planPlainLayout(pageRungs)
+      imageWidth = layout.width
+      imageHeight = layout.height
+      canvas = buildPlainImage(pageRungs, layout)
+    } else {
+      const layout = planCompleteLayout(pageRungs)
+      imageWidth = layout.width
+      imageHeight = layout.height
+      canvas = buildCompleteImage(program, pageRungs, layout, {
+        pageNumber: pageIndex + 1,
+        pageCount: pages.length,
+        rungOffset: page.start,
+        totalRungs: rungs.length,
+      })
+    }
 
     try {
       const scale = Math.min(
-        availableWidth / layout.width,
-        availableHeight / layout.height,
+        availableWidth / imageWidth,
+        availableHeight / imageHeight,
       )
-      const drawWidth = layout.width * scale
-      const drawHeight = layout.height * scale
+      const drawWidth = imageWidth * scale
+      const drawHeight = imageHeight * scale
       const x = margin + (availableWidth - drawWidth) / 2
       const y = margin + (availableHeight - drawHeight) / 2
       if (pageIndex > 0) pdf.addPage('a4', 'landscape')
+      // 无论网页当前是浅色还是深色主题，PDF 页底始终显式铺白。
+      pdf.setFillColor(255, 255, 255)
+      pdf.rect(0, 0, pageWidth, pageHeight, 'F')
       pdf.addImage(canvas, 'PNG', x, y, drawWidth, drawHeight, undefined, 'FAST')
     } finally {
       // jsPDF 写入图片数据后即可释放页面画布，避免长程序同时保留几十张大图。
@@ -809,6 +834,88 @@ async function buildCompletePdf(
 
   if (isCancelled()) return null
   return { data: pdf.output('blob'), pageCount: pages.length }
+}
+
+/** ZIP 内文件名保留段名，前缀序号保证同名程序段也不会互相覆盖。 */
+function segmentImageName(index: number, label: string, extension: 'png' | 'svg') {
+  const safeLabel = label
+    // Windows 不允许的字符与 ASCII 控制字符要一起替换，名称必须能安全落盘。
+    // eslint-disable-next-line no-control-regex
+    .replace(/[<>:"/\\|?*\u0000-\u001f]/g, '-')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/[. ]+$/g, '')
+    .slice(0, 80)
+  return String(index + 1).padStart(3, '0') + '-' + (safeLabel || '程序段') + '.' + extension
+}
+
+async function zipSegmentImages(entries: Record<string, Uint8Array>, isCancelled: () => boolean) {
+  if (isCancelled()) return null
+  const { zipSync } = await import('fflate')
+  const bytes = zipSync(entries, { level: 0 })
+  return new Blob([bytes], { type: 'application/zip' })
+}
+
+/** 分段 PNG：每段一张独立白底图片，再一次性打包下载。 */
+async function buildSegmentedPngArchive(
+  program: Program,
+  rungs: PreparedRung[],
+  mode: ProgramImageMode,
+  isCancelled: () => boolean,
+) {
+  const entries: Record<string, Uint8Array> = {}
+  for (let index = 0; index < rungs.length; index += 1) {
+    if (isCancelled()) return null
+    const rung = rungs[index]
+    assertProgramImageFits(mode, [rung])
+    const canvas = mode === 'plain'
+      ? buildPlainImage([rung], planPlainLayout([rung]))
+      : buildCompleteImage(program, [rung], planCompleteLayout([rung]), {
+        pageNumber: index + 1,
+        pageCount: rungs.length,
+        rungOffset: index,
+        totalRungs: rungs.length,
+      })
+    try {
+      const blob = await canvasToBlob(canvas)
+      entries[segmentImageName(index, rung.label, 'png')] = new Uint8Array(
+        await blob.arrayBuffer(),
+      )
+    } finally {
+      releaseCanvas(canvas)
+    }
+    await yieldToMain()
+  }
+  const data = await zipSegmentImages(entries, isCancelled)
+  return data ? { data, fileCount: rungs.length } : null
+}
+
+/** 分段 SVG：每段一张独立白底矢量图，再一次性打包下载。 */
+async function buildSegmentedSvgArchive(
+  program: Program,
+  rungs: VectorRung[],
+  mode: ProgramImageMode,
+  isCancelled: () => boolean,
+) {
+  const entries: Record<string, Uint8Array> = {}
+  const encoder = new TextEncoder()
+  for (let index = 0; index < rungs.length; index += 1) {
+    if (isCancelled()) return null
+    const rung = rungs[index]
+    const markup = mode === 'plain'
+      ? await buildPlainVector([rung], planPlainLayout([rung]), isCancelled)
+      : await buildCompleteVector(program, [rung], planCompleteLayout([rung]), isCancelled, {
+        pageNumber: index + 1,
+        pageCount: rungs.length,
+        rungOffset: index,
+        totalRungs: rungs.length,
+      })
+    if (!markup) return null
+    entries[segmentImageName(index, rung.label, 'svg')] = encoder.encode(markup)
+    await yieldToMain()
+  }
+  const data = await zipSegmentImages(entries, isCancelled)
+  return data ? { data, fileCount: rungs.length } : null
 }
 
 function round2(value: number) {
@@ -979,6 +1086,7 @@ async function buildCompleteVector(
   rungs: VectorRung[],
   layout: CompleteLayout,
   isCancelled: () => boolean,
+  page?: CompletePageContext,
 ) {
   const {
     pagePad,
@@ -1007,7 +1115,8 @@ async function buildCompleteVector(
   body.push(vectorText(
     width - pagePad,
     pagePad + rightNoteBaseline,
-    program.profile.toUpperCase() + ' 指令档案',
+    program.profile.toUpperCase() + ' 指令档案'
+      + (page ? ' · 第 ' + page.pageNumber + ' / ' + page.pageCount + ' 页' : ''),
     { size: 11, weight: 500, fill: MUTED, anchor: 'end' },
   ))
   body.push(vectorLine(pagePad, pagePad + ruleOffset, width - pagePad, pagePad + ruleOffset))
@@ -1020,20 +1129,23 @@ async function buildCompleteVector(
       const rung = rungs[index]
       const card = cards[index]
       if (!card) continue
-      const counter = String(index + 1).padStart(2, '0') + ' / ' + String(rungs.length).padStart(2, '0')
+      const rungNumber = (page?.rungOffset ?? 0) + index + 1
+      const totalRungs = page?.totalRungs ?? rungs.length
+      const counter = String(rungNumber).padStart(2, '0') + ' / ' + String(totalRungs).padStart(2, '0')
       const counterWidth = context ? (() => {
         setFont(context, 500, 10)
         return context.measureText(counter).width
       })() : 64
       const contentRight = pagePad + cardWidth - cardPad - counterWidth - 16
+      const titleX = pagePad + cardPad
       let label = rung.label
       let labelWidth = 0
       if (context) {
         setFont(context, 650, 13)
-        label = fitText(context, rung.label, Math.max(60, contentRight - card.rungX))
+        label = fitText(context, rung.label, Math.max(60, contentRight - titleX))
         labelWidth = context.measureText(label).width
       } else {
-        label = fitTextApprox(rung.label, Math.max(60, contentRight - card.rungX), 13)
+        label = fitTextApprox(rung.label, Math.max(60, contentRight - titleX), 13)
         labelWidth = Array.from(label).reduce((total, character) => (
           total + (isNarrowGlyph(character) ? 13 * 0.58 : 13)
         ), 0)
@@ -1042,13 +1154,13 @@ async function buildCompleteVector(
         + '" height="' + round2(card.height) + '" fill="' + WHITE
         + '" stroke="' + RULE + '" stroke-width="1" />')
       body.push(vectorLine(pagePad, card.y + cardHeader, pagePad + cardWidth, card.y + cardHeader))
-      body.push(vectorText(card.rungX, card.y + cardTitleBaseline, label, {
+      body.push(vectorText(titleX, card.y + cardTitleBaseline, label, {
         size: 13, weight: 650, fill: INK,
       }))
 
       if (rung.title) {
         let title = rung.title
-        const titleLeft = card.rungX + labelWidth + 14
+        const titleLeft = titleX + labelWidth + 14
         const titleLimit = Math.max(40, contentRight - titleLeft)
         if (context) {
           setFont(context, 450, 12)
@@ -1082,6 +1194,7 @@ export default function ProgramImageExporter({
   program,
   mode,
   format = 'png',
+  segmented = false,
   onComplete,
   onError,
 }: ProgramImageExporterProps) {
@@ -1125,9 +1238,6 @@ export default function ProgramImageExporter({
       // 光栅化出来的每段小图都要在导出结束（含失败、取消）后统一释放。
       const prepared: PreparedRung[] = []
       try {
-        if (format === 'pdf' && mode !== 'complete') {
-          throw new Error('分页 PDF 只支持完整程序导出')
-        }
         await waitForFonts()
         if (cancelled) return
         await nextFrame()
@@ -1163,6 +1273,23 @@ export default function ProgramImageExporter({
           if (vectorRungs.length !== exportProgram.rungs.length) {
             throw new Error('有程序段没有绘制内容，无法生成 SVG')
           }
+          if (segmented) {
+            const archive = await buildSegmentedSvgArchive(
+              program,
+              vectorRungs,
+              mode,
+              () => cancelled || controller.signal.aborted,
+            )
+            if (archive && !cancelled) {
+              onComplete({
+                format: 'archive',
+                imageFormat: 'svg',
+                data: archive.data,
+                fileCount: archive.fileCount,
+              })
+            }
+            return
+          }
           const markup = mode === 'plain'
             ? await buildPlainVector(
               vectorRungs,
@@ -1196,7 +1323,7 @@ export default function ProgramImageExporter({
             // 每准备完一段，就按最终版面预算检查一次：一旦确定超限立即停手，
             // 不把剩下几十段也光栅化一遍，更不会等到最后才让整个画布失败。
             // PDF 会按程序段分页，因此不能拿整份程序去套单张画布上限。
-            if (format !== 'pdf') assertProgramImageFits(mode, prepared)
+            if (format !== 'pdf' && !segmented) assertProgramImageFits(mode, prepared)
           }
         }
         if (prepared.length !== exportProgram.rungs.length) {
@@ -1208,13 +1335,32 @@ export default function ProgramImageExporter({
         }
 
         if (format === 'pdf') {
-          const result = await buildCompletePdf(
+          const result = await buildProgramPdf(
+            mode,
             program,
             prepared,
             () => cancelled || controller.signal.aborted,
           )
           if (result && !cancelled) {
             onComplete({ format: 'pdf', data: result.data, pageCount: result.pageCount })
+          }
+          return
+        }
+
+        if (segmented) {
+          const archive = await buildSegmentedPngArchive(
+            program,
+            prepared,
+            mode,
+            () => cancelled || controller.signal.aborted,
+          )
+          if (archive && !cancelled) {
+            onComplete({
+              format: 'archive',
+              imageFormat: 'png',
+              data: archive.data,
+              fileCount: archive.fileCount,
+            })
           }
           return
         }
@@ -1232,7 +1378,9 @@ export default function ProgramImageExporter({
         if (!cancelled) onComplete({ format: 'png', data: blob })
       } catch (reason) {
         if (!cancelled) {
-          const fallback = format === 'svg'
+          const fallback = segmented
+            ? '分段图片生成失败'
+            : format === 'svg'
             ? 'SVG 生成失败'
             : format === 'pdf'
             ? 'PDF 生成失败'

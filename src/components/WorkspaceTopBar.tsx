@@ -53,8 +53,12 @@ export interface WorkspaceTopBarProps {
   saveStatus?: 'idle' | 'saving' | 'saved' | 'error'
   onImportProject: () => void
   onExportProject: () => void
-  onExportImage: (mode: 'complete' | 'plain', format: 'svg' | 'png') => void
-  onExportPdf: () => void
+  onExportImage: (
+    mode: 'complete' | 'plain',
+    format: 'svg' | 'png',
+    segmented?: boolean,
+  ) => void
+  onExportPdf: (mode: 'complete' | 'plain') => void
   onExportSfc: (format: 'svg' | 'png') => void
   /** 图片/顺序功能图正在生成：导出入口置灰，避免重复排队占满主线程。 */
   exporting?: boolean
@@ -438,9 +442,21 @@ export default function WorkspaceTopBar({
         <ImageIcon size={16} />
         <span>纯梯形图</span>
       </button>
-      <button type="button" role="menuitem" {...exportGuard} onClick={() => chooseFileMenuAction(onExportPdf)}>
+      <button type="button" role="menuitem" {...exportGuard} onClick={() => chooseFileMenuAction(() => onExportImage('complete', exportFormat, true))}>
+        <ImageIcon size={16} />
+        <span>完整程序（分段图片）</span>
+      </button>
+      <button type="button" role="menuitem" {...exportGuard} onClick={() => chooseFileMenuAction(() => onExportImage('plain', exportFormat, true))}>
+        <ImageIcon size={16} />
+        <span>纯梯形图（分段图片）</span>
+      </button>
+      <button type="button" role="menuitem" {...exportGuard} onClick={() => chooseFileMenuAction(() => onExportPdf('complete'))}>
         <ExportIcon size={16} />
         <span>完整程序（分页 PDF）</span>
+      </button>
+      <button type="button" role="menuitem" {...exportGuard} onClick={() => chooseFileMenuAction(() => onExportPdf('plain'))}>
+        <ExportIcon size={16} />
+        <span>纯梯形图（分页 PDF）</span>
       </button>
       <button type="button" role="menuitem" {...exportGuard} onClick={() => chooseFileMenuAction(() => onExportSfc(exportFormat))}>
         <StepIcon size={16} />

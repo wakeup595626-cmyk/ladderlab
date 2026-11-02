@@ -41,6 +41,7 @@
     "preview": "vite preview --strictPort"
   },
   "dependencies": {
+    "fflate": "^0.8.3",
     "jspdf": "4.2.1",
     "react": "^19.3.1",
     "react-dom": "^19.3.1"

@@ -71,21 +71,26 @@ describe('programImageLayout', () => {
     expect(first.y).toBe(COMPLETE_LAYOUT.pagePad + COMPLETE_LAYOUT.headerHeight)
     expect(first.height).toBe(programCardHeight(250))
     expect(first.height).toBe(250 + 88)
-    expect(first.rungX).toBe(COMPLETE_LAYOUT.pagePad + COMPLETE_LAYOUT.cardPad)
+    expect(first.rungX).toBe(
+      COMPLETE_LAYOUT.pagePad + (layout.cardWidth - 640) / 2,
+    )
     expect(first.rungY).toBe(first.y + COMPLETE_LAYOUT.cardHeader + COMPLETE_LAYOUT.cardLead)
     expect(second.y).toBe(first.y + first.height + COMPLETE_LAYOUT.gap)
+    expect(second.rungX).toBe(COMPLETE_LAYOUT.pagePad + COMPLETE_LAYOUT.cardPad)
+    expect(first.rungX + 640 / 2).toBe(layout.width / 2)
+    expect(second.rungX + 900 / 2).toBe(layout.width / 2)
     expect(second.rungY + 410 + COMPLETE_LAYOUT.cardBottom).toBe(second.y + second.height)
     // 卡片底边之后只剩一个页边，不能再多出空白。
     expect(layout.height).toBe(second.y + second.height + COMPLETE_LAYOUT.pagePad)
   })
 
-  it('纯梯形图逐段放置，段与段之间只留固定间距', () => {
+  it('纯梯形图逐段居中，段与段之间只留固定间距', () => {
     const layout = planPlainLayout([
       { width: 320, height: 120 },
       { width: 640, height: 260 },
       { width: 500, height: 180 },
     ])
-    expect(layout.placements.map((placement) => placement.x)).toEqual([40, 40, 40])
+    expect(layout.placements.map((placement) => placement.x)).toEqual([200, 40, 110])
     expect(layout.placements.map((placement) => placement.y)).toEqual([40, 190, 480])
     expect(layout.width).toBe(640 + 80)
     expect(layout.height).toBe(80 + 560 + 60)
