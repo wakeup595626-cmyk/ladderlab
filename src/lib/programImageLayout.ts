@@ -85,8 +85,8 @@ export function planPlainLayout(rungs: readonly RungExtent[]): PlainLayout {
   let y = padding
   const placements = rungs.map((rung) => {
     const placement = {
-      // 分页 PDF 里每一段都单独居中；窄段不会贴着整页左边缘。
-      x: padding + (contentWidth - rung.width) / 2,
+      // 所有程序段共用同一条左基线，PDF 与分段图片的左边始终对齐。
+      x: padding,
       y,
       width: rung.width,
       height: rung.height,
@@ -112,8 +112,8 @@ export function planCompleteLayout(rungs: readonly RungExtent[]): CompleteLayout
     const card = {
       y,
       height,
-      // 标题仍在卡片左侧，梯形图本身按卡片可用宽度水平居中。
-      rungX: pagePad + (cardWidth - rung.width) / 2,
+      // 标题与梯形图都从卡片内容区左侧起笔，逐段之间不产生横向漂移。
+      rungX: pagePad + cardPad,
       rungY: y + cardHeader + cardLead,
     }
     y += height + gap

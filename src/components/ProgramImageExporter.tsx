@@ -11,7 +11,11 @@ import {
   type PlainLayout,
   type RungExtent,
 } from '../lib/programImageLayout'
-import { planPlainImagePages, planProgramImagePages } from '../lib/programImagePaging'
+import {
+  SEGMENT_IMAGE_LIMITS,
+  planPlainImagePages,
+  planProgramImagePages,
+} from '../lib/programImagePaging'
 import {
   assertSvgDocument,
   declareSvgDocument,
@@ -46,7 +50,7 @@ interface ProgramImageExporterProps {
   program: Program
   mode: ProgramImageMode
   format?: ProgramImageFormat
-  /** 每段单独成图并打包成 ZIP，不把整份程序压进一张超长画布。 */
+  /** 多段自动装进一张白底图后打包成 ZIP，不把整份程序压进一张超长画布。 */
   segmented?: boolean
   onComplete: (result: ProgramImageResult) => void
   onError: (message: string) => void
@@ -784,25 +788,33 @@ async function buildProgramPdf(
   const availableWidth = pageWidth - margin * 2
   const availableHeight = pageHeight - margin * 2
 
+  /*
+   * PDF 里的每一页共用同一个缩放比例与同一条左边距。
+   * 若逐页单独缩放，窄页会被放得更大，40px 页边换算成毫米后就比宽页更宽，
+   * 视觉上仍会左边缘参差；统一比例后，所有程序段的左基线完全相同。
+   */
+  const pagePlans = pages.map((page) => {
+    const pageRungs = rungs.slice(page.start, page.end)
+    assertProgramImageFits(mode, pageRungs)
+    return mode === 'plain'
+      ? { mode: 'plain' as const, pageRungs, layout: planPlainLayout(pageRungs) }
+      : { mode: 'complete' as const, pageRungs, layout: planCompleteLayout(pageRungs) }
+  })
+  const widestPage = pagePlans.reduce((widest, plan) => Math.max(widest, plan.layout.width), 0)
+  const tallestPage = pagePlans.reduce((tallest, plan) => Math.max(tallest, plan.layout.height), 0)
+  const scale = Math.min(availableWidth / widestPage, availableHeight / tallestPage)
+
   for (let pageIndex = 0; pageIndex < pages.length; pageIndex += 1) {
     if (isCancelled()) return null
     const page = pages[pageIndex]
-    const pageRungs = rungs.slice(page.start, page.end)
-    assertProgramImageFits(mode, pageRungs)
+    const pagePlan = pagePlans[pageIndex]
+    const pageRungs = pagePlan.pageRungs
     let canvas: HTMLCanvasElement
-    let imageWidth: number
-    let imageHeight: number
 
-    if (mode === 'plain') {
-      const layout = planPlainLayout(pageRungs)
-      imageWidth = layout.width
-      imageHeight = layout.height
-      canvas = buildPlainImage(pageRungs, layout)
+    if (pagePlan.mode === 'plain') {
+      canvas = buildPlainImage(pageRungs, pagePlan.layout)
     } else {
-      const layout = planCompleteLayout(pageRungs)
-      imageWidth = layout.width
-      imageHeight = layout.height
-      canvas = buildCompleteImage(program, pageRungs, layout, {
+      canvas = buildCompleteImage(program, pageRungs, pagePlan.layout, {
         pageNumber: pageIndex + 1,
         pageCount: pages.length,
         rungOffset: page.start,
@@ -811,14 +823,11 @@ async function buildProgramPdf(
     }
 
     try {
-      const scale = Math.min(
-        availableWidth / imageWidth,
-        availableHeight / imageHeight,
-      )
-      const drawWidth = imageWidth * scale
-      const drawHeight = imageHeight * scale
-      const x = margin + (availableWidth - drawWidth) / 2
-      const y = margin + (availableHeight - drawHeight) / 2
+      const drawWidth = pagePlan.layout.width * scale
+      const drawHeight = pagePlan.layout.height * scale
+      // 所有页面从同一个左边距起笔；右/下留白由内容自然决定。
+      const x = margin
+      const y = margin
       if (pageIndex > 0) pdf.addPage('a4', 'landscape')
       // 无论网页当前是浅色还是深色主题，PDF 页底始终显式铺白。
       pdf.setFillColor(255, 255, 255)
@@ -836,17 +845,16 @@ async function buildProgramPdf(
   return { data: pdf.output('blob'), pageCount: pages.length }
 }
 
-/** ZIP 内文件名保留段名，前缀序号保证同名程序段也不会互相覆盖。 */
-function segmentImageName(index: number, label: string, extension: 'png' | 'svg') {
-  const safeLabel = label
-    // Windows 不允许的字符与 ASCII 控制字符要一起替换，名称必须能安全落盘。
-    // eslint-disable-next-line no-control-regex
-    .replace(/[<>:"/\\|?*\u0000-\u001f]/g, '-')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .replace(/[. ]+$/g, '')
-    .slice(0, 80)
-  return String(index + 1).padStart(3, '0') + '-' + (safeLabel || '程序段') + '.' + extension
+/** ZIP 内按页命名，文件名直接写出这张图装下的程序段范围。 */
+function segmentImageName(
+  pageIndex: number,
+  start: number,
+  end: number,
+  extension: 'png' | 'svg',
+) {
+  const from = start + 1
+  const range = from === end ? `第${from}段` : `第${from}-${end}段`
+  return String(pageIndex + 1).padStart(3, '0') + '-' + range + '.' + extension
 }
 
 async function zipSegmentImages(entries: Record<string, Uint8Array>, isCancelled: () => boolean) {
@@ -856,7 +864,7 @@ async function zipSegmentImages(entries: Record<string, Uint8Array>, isCancelled
   return new Blob([bytes], { type: 'application/zip' })
 }
 
-/** 分段 PNG：每段一张独立白底图片，再一次性打包下载。 */
+/** 分段 PNG：每张白底图自动装满 4–5 段，高段少装并顺延，再打包下载。 */
 async function buildSegmentedPngArchive(
   program: Program,
   rungs: PreparedRung[],
@@ -864,21 +872,25 @@ async function buildSegmentedPngArchive(
   isCancelled: () => boolean,
 ) {
   const entries: Record<string, Uint8Array> = {}
-  for (let index = 0; index < rungs.length; index += 1) {
+  const pages = mode === 'plain'
+    ? planPlainImagePages(rungs, SEGMENT_IMAGE_LIMITS)
+    : planProgramImagePages(rungs, SEGMENT_IMAGE_LIMITS)
+  for (let pageIndex = 0; pageIndex < pages.length; pageIndex += 1) {
     if (isCancelled()) return null
-    const rung = rungs[index]
-    assertProgramImageFits(mode, [rung])
+    const page = pages[pageIndex]
+    const pageRungs = rungs.slice(page.start, page.end)
+    assertProgramImageFits(mode, pageRungs)
     const canvas = mode === 'plain'
-      ? buildPlainImage([rung], planPlainLayout([rung]))
-      : buildCompleteImage(program, [rung], planCompleteLayout([rung]), {
-        pageNumber: index + 1,
-        pageCount: rungs.length,
-        rungOffset: index,
+      ? buildPlainImage(pageRungs, planPlainLayout(pageRungs))
+      : buildCompleteImage(program, pageRungs, planCompleteLayout(pageRungs), {
+        pageNumber: pageIndex + 1,
+        pageCount: pages.length,
+        rungOffset: page.start,
         totalRungs: rungs.length,
       })
     try {
       const blob = await canvasToBlob(canvas)
-      entries[segmentImageName(index, rung.label, 'png')] = new Uint8Array(
+      entries[segmentImageName(pageIndex, page.start, page.end, 'png')] = new Uint8Array(
         await blob.arrayBuffer(),
       )
     } finally {
@@ -887,10 +899,10 @@ async function buildSegmentedPngArchive(
     await yieldToMain()
   }
   const data = await zipSegmentImages(entries, isCancelled)
-  return data ? { data, fileCount: rungs.length } : null
+  return data ? { data, fileCount: pages.length } : null
 }
 
-/** 分段 SVG：每段一张独立白底矢量图，再一次性打包下载。 */
+/** 分段 SVG：与 PNG 共用同一套装页规则，每张都是白底矢量图。 */
 async function buildSegmentedSvgArchive(
   program: Program,
   rungs: VectorRung[],
@@ -899,23 +911,27 @@ async function buildSegmentedSvgArchive(
 ) {
   const entries: Record<string, Uint8Array> = {}
   const encoder = new TextEncoder()
-  for (let index = 0; index < rungs.length; index += 1) {
+  const pages = mode === 'plain'
+    ? planPlainImagePages(rungs, SEGMENT_IMAGE_LIMITS)
+    : planProgramImagePages(rungs, SEGMENT_IMAGE_LIMITS)
+  for (let pageIndex = 0; pageIndex < pages.length; pageIndex += 1) {
     if (isCancelled()) return null
-    const rung = rungs[index]
+    const page = pages[pageIndex]
+    const pageRungs = rungs.slice(page.start, page.end)
     const markup = mode === 'plain'
-      ? await buildPlainVector([rung], planPlainLayout([rung]), isCancelled)
-      : await buildCompleteVector(program, [rung], planCompleteLayout([rung]), isCancelled, {
-        pageNumber: index + 1,
-        pageCount: rungs.length,
-        rungOffset: index,
+      ? await buildPlainVector(pageRungs, planPlainLayout(pageRungs), isCancelled)
+      : await buildCompleteVector(program, pageRungs, planCompleteLayout(pageRungs), isCancelled, {
+        pageNumber: pageIndex + 1,
+        pageCount: pages.length,
+        rungOffset: page.start,
         totalRungs: rungs.length,
       })
     if (!markup) return null
-    entries[segmentImageName(index, rung.label, 'svg')] = encoder.encode(markup)
+    entries[segmentImageName(pageIndex, page.start, page.end, 'svg')] = encoder.encode(markup)
     await yieldToMain()
   }
   const data = await zipSegmentImages(entries, isCancelled)
-  return data ? { data, fileCount: rungs.length } : null
+  return data ? { data, fileCount: pages.length } : null
 }
 
 function round2(value: number) {

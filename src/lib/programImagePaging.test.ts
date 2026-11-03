@@ -3,6 +3,7 @@ import { COMPLETE_LAYOUT, PLAIN_LAYOUT, programCardHeight } from './programImage
 import {
   PDF_PAGE_LIMITS,
   PLAIN_PDF_PAGE_LIMITS,
+  SEGMENT_IMAGE_LIMITS,
   planPlainImagePages,
   planProgramImagePages,
 } from './programImagePaging'
@@ -80,5 +81,34 @@ describe('planPlainImagePages', () => {
     ])
     expect(pages.map((page) => [page.start, page.end])).toEqual([[0, 1], [1, 2], [2, 3]])
     expect(pages[1].height).toBeGreaterThan(PLAIN_PDF_PAGE_LIMITS.maxHeight)
+  })
+})
+
+describe('分段图片自动装页', () => {
+  it('常规程序段每张白底图装 5 段，而不是一段一张', () => {
+    const rungs = Array.from({ length: 12 }, () => ({ width: 640, height: 114 }))
+    const plain = planPlainImagePages(rungs, SEGMENT_IMAGE_LIMITS)
+    const complete = planProgramImagePages(rungs, SEGMENT_IMAGE_LIMITS)
+
+    expect(plain.map((page) => [page.start, page.end])).toEqual([
+      [0, 5], [5, 10], [10, 12],
+    ])
+    expect(complete.map((page) => [page.start, page.end])).toEqual([
+      [0, 5], [5, 10], [10, 12],
+    ])
+  })
+
+  it('遇到高段时减少同页数量，剩余段顺延且不拆断', () => {
+    const rungs = Array.from({ length: 7 }, () => ({ width: 640, height: 350 }))
+    const plain = planPlainImagePages(rungs, SEGMENT_IMAGE_LIMITS)
+    const complete = planProgramImagePages(rungs, SEGMENT_IMAGE_LIMITS)
+
+    expect(plain.map((page) => page.end - page.start)).toEqual([4, 3])
+    expect(complete.map((page) => page.end - page.start)).toEqual([3, 3, 1])
+    for (const pages of [plain, complete]) {
+      expect(pages[0].start).toBe(0)
+      expect(pages[pages.length - 1].end).toBe(rungs.length)
+      pages.slice(1).forEach((page, index) => expect(page.start).toBe(pages[index].end))
+    }
   })
 })

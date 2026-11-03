@@ -59,26 +59,51 @@ async function downloadSegmentArchive(
   return { bytes, entries }
 }
 
-function expectSegmentEntries(
+async function expectSegmentEntries(
+  page: import('@playwright/test').Page,
   entries: Record<string, Uint8Array>,
   rungCount: number,
   extension: 'png' | 'svg',
 ) {
   const names = Object.keys(entries).sort()
-  expect(names).toHaveLength(rungCount)
-  names.forEach((name, index) => {
-    expect(name).toMatch(new RegExp('^' + String(index + 1).padStart(3, '0') + '-' + '.*\\.' + extension + '$'))
-  })
-  for (const name of names) {
+  expect(names.length).toBeGreaterThan(0)
+  // 分段图是一页多段，图片张数必须明显少于程序段数。
+  expect(names.length).toBeLessThan(rungCount)
+  let nextStart = 1
+  for (const [index, name] of names.entries()) {
+    const match = new RegExp('^(\\d{3})-第(\\d+)(?:-(\\d+))?段\\.' + extension + '$').exec(name)
+    expect(match, name).not.toBeNull()
+    const prefix = Number(match?.[1])
+    const start = Number(match?.[2])
+    const end = Number(match?.[3] ?? match?.[2])
+    expect(prefix).toBe(index + 1)
+    expect(start).toBe(nextStart)
+    expect(end).toBeGreaterThanOrEqual(start)
+    expect(end - start + 1).toBeLessThanOrEqual(5)
+    nextStart = end + 1
+
     const data = entries[name]
     if (extension === 'svg') {
       const source = new TextDecoder().decode(data)
       expect(source).toContain('<svg')
       expect(source).toContain('fill="#ffffff"')
+      const placedRungs = await page.evaluate((markup) => {
+        const doc = new DOMParser().parseFromString(markup, 'image/svg+xml')
+        return Array.from(doc.documentElement.children).filter((node) => (
+          node.tagName === 'g'
+          && node.getAttribute('transform')?.startsWith('translate(')
+        )).length
+      }, source)
+      expect(placedRungs, name + ' 应装下 ' + (end - start + 1) + ' 段').toBe(end - start + 1)
     } else {
       expect(Buffer.from(data.subarray(0, PNG_SIGNATURE.length))).toEqual(PNG_SIGNATURE)
+      if (end > start) {
+        // 两段以上的白底图高度必然超过单段图，防止退回“一段一张”。
+        expect(Buffer.from(data).readUInt32BE(20)).toBeGreaterThan(300)
+      }
     }
   }
+  expect(nextStart).toBe(rungCount + 1)
 }
 
 test('AI 课设只生成提示词，并能复制完整需求交给本机 Agent', async ({ page, context }) => {
@@ -194,8 +219,9 @@ test('装配流水线可把完整程序与纯梯形图分别导出成分段图�
     'svg',
     /-完整程序-分段图片-.*\.zip$/,
   )
-  expectSegmentEntries(completeSvg.entries, rungCount, 'svg')
-  await expect(page.getByText('已导出完整程序-分段图片，共 ' + rungCount + ' 张')).toBeVisible()
+  await expectSegmentEntries(page, completeSvg.entries, rungCount, 'svg')
+  const completeBatchCount = Object.keys(completeSvg.entries).length
+  await expect(page.getByText('已导出完整程序-分段图片，共 ' + completeBatchCount + ' 张')).toBeVisible()
 
   const plainSvg = await downloadSegmentArchive(
     page,
@@ -203,7 +229,7 @@ test('装配流水线可把完整程序与纯梯形图分别导出成分段图�
     'svg',
     /-纯梯形图-分段图片-.*\.zip$/,
   )
-  expectSegmentEntries(plainSvg.entries, rungCount, 'svg')
+  await expectSegmentEntries(page, plainSvg.entries, rungCount, 'svg')
 
   const completePng = await downloadSegmentArchive(
     page,
@@ -211,7 +237,7 @@ test('装配流水线可把完整程序与纯梯形图分别导出成分段图�
     'png',
     /-完整程序-分段图片-.*\.zip$/,
   )
-  expectSegmentEntries(completePng.entries, rungCount, 'png')
+  await expectSegmentEntries(page, completePng.entries, rungCount, 'png')
 
   const plainPng = await downloadSegmentArchive(
     page,
@@ -219,6 +245,6 @@ test('装配流水线可把完整程序与纯梯形图分别导出成分段图�
     'png',
     /-纯梯形图-分段图片-.*\.zip$/,
   )
-  expectSegmentEntries(plainPng.entries, rungCount, 'png')
+  await expectSegmentEntries(page, plainPng.entries, rungCount, 'png')
   expect(errors).toEqual([])
 })

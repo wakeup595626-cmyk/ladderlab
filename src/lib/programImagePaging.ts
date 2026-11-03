@@ -34,6 +34,16 @@ export const PLAIN_PDF_PAGE_LIMITS = {
   maxRungs: 5,
 } as const
 
+/**
+ * 分段图片不是“一段一张”，而是一张白底图尽量装满。
+ * 常规程序段每页 5 段；遇到高段或长段时按真实高度自动减少，
+ * 剩余程序段顺延到下一张，绝不把单段裁断。
+ */
+export const SEGMENT_IMAGE_LIMITS = {
+  maxHeight: 1600,
+  maxRungs: 5,
+} as const
+
 function planPages(
   rungs: readonly RungExtent[],
   limits: ProgramImagePageLimits,
