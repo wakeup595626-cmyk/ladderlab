@@ -4,7 +4,7 @@ export type TagKind = 'BOOL' | 'INT'
 
 export type ContactKind = 'NO' | 'NC' | 'P' | 'N' | 'CMP'
 
-export type OutputKind = 'COIL' | 'SET' | 'RESET' | 'TON' | 'TOF' | 'TONR' | 'CTU' | 'MOVE' | 'ADD' | 'SUB' | 'SHL' | 'ROL' | 'PATTERN'
+export type OutputKind = 'COIL' | 'SET' | 'RESET' | 'TON' | 'TOF' | 'TONR' | 'CTU' | 'MOVE' | 'ADD' | 'SUB' | 'SHL' | 'ROL' | 'PATTERN' | 'NETWORK' | 'R_TRIG'
 
 export type CompareOp = '==' | '<>' | '>' | '>=' | '<' | '<='
 
@@ -27,6 +27,8 @@ export interface TagDef {
    * 只有这类变量在引用清零后才会被自动回收；手写变量和导入工程的变量一律保留。
    */
   auto?: boolean
+  /** 教学仿真的“首次扫描”标记：建运行时时为 TRUE，第一次扫描结束后清 FALSE。 */
+  firstScan?: boolean
 }
 
 export interface ContactNode {
@@ -69,11 +71,31 @@ export interface OutputElement {
   pattern?: number[]
 }
 
+/** 多输出网络里的一个输出节点，字段与普通程序段输出完全一致。 */
+export interface NetworkOutputNode extends OutputElement {
+  type: 'output'
+}
+
+export interface NetworkParallelNode {
+  type: 'parallel'
+  id: string
+  branches: NetworkElement[][]
+  open?: boolean
+  autoTagId?: string
+}
+
+export type NetworkElement = ContactNode | NetworkParallelNode | NetworkOutputNode
+
 export interface Rung {
   id: string
   label: string
   nodes: LadderNode[]
   output: OutputElement
+  /**
+   * PPT 里一个程序段可以同时驱动多个输出。nodes 仍是母线后的串联前置条件，
+   * network 保存随后的触点、并联和任意数量输出；普通单输出工程不写此字段。
+   */
+  network?: NetworkElement[]
 }
 
 export interface Program {

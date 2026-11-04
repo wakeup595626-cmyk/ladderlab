@@ -1,0 +1,1541 @@
+{
+  "schema": 1,
+  "name": "装配流水线 PPT03 十九段原图复刻",
+  "profile": "v21",
+  "tags": [
+    {
+      "id": "t01",
+      "name": "SD",
+      "address": "%I0.0",
+      "kind": "BOOL",
+      "initial": false,
+      "comment": "启动开关 SD（保持型）"
+    },
+    {
+      "id": "t02",
+      "name": "RS",
+      "address": "%I0.1",
+      "kind": "BOOL",
+      "initial": false,
+      "comment": "复位按钮 RS"
+    },
+    {
+      "id": "t03",
+      "name": "ME",
+      "address": "%I0.2",
+      "kind": "BOOL",
+      "initial": false,
+      "comment": "移位／单步按钮 ME（上升沿有效）"
+    },
+    {
+      "id": "t04",
+      "name": "StationA",
+      "address": "%Q0.0",
+      "kind": "BOOL",
+      "initial": false,
+      "comment": "工位 A 动作"
+    },
+    {
+      "id": "t05",
+      "name": "StationB",
+      "address": "%Q0.1",
+      "kind": "BOOL",
+      "initial": false,
+      "comment": "工位 B 动作"
+    },
+    {
+      "id": "t06",
+      "name": "StationC",
+      "address": "%Q0.2",
+      "kind": "BOOL",
+      "initial": false,
+      "comment": "工位 C 动作"
+    },
+    {
+      "id": "t07",
+      "name": "StationD",
+      "address": "%Q0.3",
+      "kind": "BOOL",
+      "initial": false,
+      "comment": "工位 D 动作（运料）"
+    },
+    {
+      "id": "t08",
+      "name": "StationE",
+      "address": "%Q0.4",
+      "kind": "BOOL",
+      "initial": false,
+      "comment": "工位 E 动作（运料）"
+    },
+    {
+      "id": "t09",
+      "name": "StationF",
+      "address": "%Q0.5",
+      "kind": "BOOL",
+      "initial": false,
+      "comment": "工位 F 动作（运料）"
+    },
+    {
+      "id": "t10",
+      "name": "StationG",
+      "address": "%Q0.6",
+      "kind": "BOOL",
+      "initial": false,
+      "comment": "工位 G 动作（运料）"
+    },
+    {
+      "id": "t11",
+      "name": "StationH",
+      "address": "%Q0.7",
+      "kind": "BOOL",
+      "initial": false,
+      "comment": "工位 H 动作（仓库入库）"
+    },
+    {
+      "id": "t12",
+      "name": "FirstScan",
+      "address": "%M1.0",
+      "kind": "BOOL",
+      "initial": false,
+      "comment": "首次扫描标志（第一扫描为 TRUE，扫描结束自动清零）",
+      "firstScan": true
+    },
+    {
+      "id": "t13",
+      "name": "SingleMode",
+      "address": "%M20.0",
+      "kind": "BOOL",
+      "initial": false,
+      "comment": "单步模式 M20.0"
+    },
+    {
+      "id": "t14",
+      "name": "StartRising",
+      "address": "%M20.1",
+      "kind": "BOOL",
+      "initial": false,
+      "comment": "启动上升沿 M20.1"
+    },
+    {
+      "id": "t15",
+      "name": "ShiftRising",
+      "address": "%M20.2",
+      "kind": "BOOL",
+      "initial": false,
+      "comment": "移位上升沿 M20.2"
+    },
+    {
+      "id": "t16",
+      "name": "AdvancePulse",
+      "address": "%M20.3",
+      "kind": "BOOL",
+      "initial": false,
+      "comment": "推进脉冲 M20.3"
+    },
+    {
+      "id": "t17",
+      "name": "StepPermit",
+      "address": "%M20.4",
+      "kind": "BOOL",
+      "initial": false,
+      "comment": "换步许可 M20.4"
+    },
+    {
+      "id": "t18",
+      "name": "TimerDone",
+      "address": "%M20.6",
+      "kind": "BOOL",
+      "initial": false,
+      "comment": "工位定时完成 M20.6"
+    },
+    {
+      "id": "t19",
+      "name": "StepByte",
+      "address": "%MB100",
+      "kind": "INT",
+      "initial": 0,
+      "comment": "步骤字 MB100：初始步骤及第 1～7 步"
+    },
+    {
+      "id": "t20",
+      "name": "InitialStep",
+      "address": "%M100.0",
+      "kind": "BOOL",
+      "initial": false,
+      "comment": "初始步骤 M100.0",
+      "bitOf": "StepByte"
+    },
+    {
+      "id": "t21",
+      "name": "Step1D",
+      "address": "%M100.1",
+      "kind": "BOOL",
+      "initial": false,
+      "comment": "第 1 步 D 运料",
+      "bitOf": "StepByte"
+    },
+    {
+      "id": "t22",
+      "name": "Step2A",
+      "address": "%M100.2",
+      "kind": "BOOL",
+      "initial": false,
+      "comment": "第 2 步 A 操作",
+      "bitOf": "StepByte"
+    },
+    {
+      "id": "t23",
+      "name": "Step3E",
+      "address": "%M100.3",
+      "kind": "BOOL",
+      "initial": false,
+      "comment": "第 3 步 E 运料",
+      "bitOf": "StepByte"
+    },
+    {
+      "id": "t24",
+      "name": "Step4B",
+      "address": "%M100.4",
+      "kind": "BOOL",
+      "initial": false,
+      "comment": "第 4 步 B 操作",
+      "bitOf": "StepByte"
+    },
+    {
+      "id": "t25",
+      "name": "Step5F",
+      "address": "%M100.5",
+      "kind": "BOOL",
+      "initial": false,
+      "comment": "第 5 步 F 运料",
+      "bitOf": "StepByte"
+    },
+    {
+      "id": "t26",
+      "name": "Step6C",
+      "address": "%M100.6",
+      "kind": "BOOL",
+      "initial": false,
+      "comment": "第 6 步 C 操作",
+      "bitOf": "StepByte"
+    },
+    {
+      "id": "t27",
+      "name": "Step7G",
+      "address": "%M100.7",
+      "kind": "BOOL",
+      "initial": false,
+      "comment": "第 7 步 G 运料",
+      "bitOf": "StepByte"
+    },
+    {
+      "id": "t28",
+      "name": "FinalStepByte",
+      "address": "%MB101",
+      "kind": "INT",
+      "initial": 0,
+      "comment": "第 8 步步骤字 MB101"
+    },
+    {
+      "id": "t29",
+      "name": "Step8H",
+      "address": "%M101.0",
+      "kind": "BOOL",
+      "initial": false,
+      "comment": "第 8 步 H 入库",
+      "bitOf": "FinalStepByte"
+    }
+  ],
+  "rungs": [
+    {
+      "id": "r01",
+      "label": "首次扫描：进入“初始步骤”，全部工位关闭",
+      "nodes": [
+        {
+          "type": "contact",
+          "id": "n001",
+          "kind": "NO",
+          "tag": "FirstScan"
+        }
+      ],
+      "output": {
+        "id": "o01",
+        "kind": "NETWORK",
+        "tag": ""
+      },
+      "network": [
+        {
+          "type": "parallel",
+          "id": "p001",
+          "branches": [
+            [
+              {
+                "type": "output",
+                "id": "x001",
+                "kind": "MOVE",
+                "tag": "StepByte",
+                "value": 1
+              },
+              {
+                "type": "output",
+                "id": "x002",
+                "kind": "MOVE",
+                "tag": "FinalStepByte",
+                "value": 0
+              }
+            ],
+            [
+              {
+                "type": "output",
+                "id": "x003",
+                "kind": "RESET",
+                "tag": "SingleMode"
+              },
+              {
+                "type": "output",
+                "id": "x004",
+                "kind": "RESET",
+                "tag": "StationA"
+              },
+              {
+                "type": "output",
+                "id": "x005",
+                "kind": "RESET",
+                "tag": "StationB"
+              },
+              {
+                "type": "output",
+                "id": "x006",
+                "kind": "RESET",
+                "tag": "StationC"
+              },
+              {
+                "type": "output",
+                "id": "x007",
+                "kind": "RESET",
+                "tag": "StationD"
+              }
+            ],
+            [
+              {
+                "type": "output",
+                "id": "x008",
+                "kind": "RESET",
+                "tag": "StationE"
+              },
+              {
+                "type": "output",
+                "id": "x009",
+                "kind": "RESET",
+                "tag": "StationF"
+              },
+              {
+                "type": "output",
+                "id": "x010",
+                "kind": "RESET",
+                "tag": "StationG"
+              },
+              {
+                "type": "output",
+                "id": "x011",
+                "kind": "RESET",
+                "tag": "StationH"
+              }
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "r02",
+      "label": "复位：第 1 步 D 有效，保留当前模式",
+      "nodes": [
+        {
+          "type": "contact",
+          "id": "n002",
+          "kind": "NC",
+          "tag": "FirstScan"
+        },
+        {
+          "type": "contact",
+          "id": "n003",
+          "kind": "NO",
+          "tag": "RS"
+        }
+      ],
+      "output": {
+        "id": "o02",
+        "kind": "NETWORK",
+        "tag": ""
+      },
+      "network": [
+        {
+          "type": "parallel",
+          "id": "p002",
+          "branches": [
+            [
+              {
+                "type": "output",
+                "id": "x012",
+                "kind": "MOVE",
+                "tag": "StepByte",
+                "value": 2
+              },
+              {
+                "type": "output",
+                "id": "x013",
+                "kind": "MOVE",
+                "tag": "FinalStepByte",
+                "value": 0
+              }
+            ],
+            [
+              {
+                "type": "output",
+                "id": "x014",
+                "kind": "RESET",
+                "tag": "StationA"
+              },
+              {
+                "type": "output",
+                "id": "x015",
+                "kind": "RESET",
+                "tag": "StationB"
+              },
+              {
+                "type": "output",
+                "id": "x016",
+                "kind": "RESET",
+                "tag": "StationC"
+              },
+              {
+                "type": "output",
+                "id": "x017",
+                "kind": "SET",
+                "tag": "StationD"
+              }
+            ],
+            [
+              {
+                "type": "output",
+                "id": "x018",
+                "kind": "RESET",
+                "tag": "StationE"
+              },
+              {
+                "type": "output",
+                "id": "x019",
+                "kind": "RESET",
+                "tag": "StationF"
+              },
+              {
+                "type": "output",
+                "id": "x020",
+                "kind": "RESET",
+                "tag": "StationG"
+              },
+              {
+                "type": "output",
+                "id": "x021",
+                "kind": "RESET",
+                "tag": "StationH"
+              }
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "r03",
+      "label": "启动沿检测",
+      "nodes": [
+        {
+          "type": "contact",
+          "id": "n004",
+          "kind": "NO",
+          "tag": "SD"
+        }
+      ],
+      "output": {
+        "id": "o03",
+        "kind": "NETWORK",
+        "tag": ""
+      },
+      "network": [
+        {
+          "type": "output",
+          "id": "x022",
+          "kind": "R_TRIG",
+          "tag": "DB2"
+        },
+        {
+          "type": "output",
+          "id": "x023",
+          "kind": "COIL",
+          "tag": "StartRising"
+        }
+      ]
+    },
+    {
+      "id": "r04",
+      "label": "移位沿检测",
+      "nodes": [
+        {
+          "type": "contact",
+          "id": "n005",
+          "kind": "NO",
+          "tag": "ME"
+        }
+      ],
+      "output": {
+        "id": "o04",
+        "kind": "NETWORK",
+        "tag": ""
+      },
+      "network": [
+        {
+          "type": "output",
+          "id": "x024",
+          "kind": "R_TRIG",
+          "tag": "DB3"
+        },
+        {
+          "type": "output",
+          "id": "x025",
+          "kind": "COIL",
+          "tag": "ShiftRising"
+        }
+      ]
+    },
+    {
+      "id": "r05",
+      "label": "按移位：进入单步模式",
+      "nodes": [
+        {
+          "type": "contact",
+          "id": "n006",
+          "kind": "NC",
+          "tag": "FirstScan"
+        },
+        {
+          "type": "contact",
+          "id": "n007",
+          "kind": "NC",
+          "tag": "RS"
+        },
+        {
+          "type": "contact",
+          "id": "n008",
+          "kind": "NO",
+          "tag": "ShiftRising"
+        }
+      ],
+      "output": {
+        "id": "o05",
+        "kind": "SET",
+        "tag": "SingleMode"
+      }
+    },
+    {
+      "id": "r06",
+      "label": "重新闭合启动：恢复自动",
+      "nodes": [
+        {
+          "type": "contact",
+          "id": "n009",
+          "kind": "NC",
+          "tag": "FirstScan"
+        },
+        {
+          "type": "contact",
+          "id": "n010",
+          "kind": "NC",
+          "tag": "RS"
+        },
+        {
+          "type": "contact",
+          "id": "n011",
+          "kind": "NO",
+          "tag": "StartRising"
+        },
+        {
+          "type": "contact",
+          "id": "n012",
+          "kind": "NC",
+          "tag": "ShiftRising"
+        }
+      ],
+      "output": {
+        "id": "o06",
+        "kind": "RESET",
+        "tag": "SingleMode"
+      }
+    },
+    {
+      "id": "r07",
+      "label": "自动模式：每个工位定时 1 s",
+      "nodes": [
+        {
+          "type": "contact",
+          "id": "n013",
+          "kind": "NC",
+          "tag": "FirstScan"
+        },
+        {
+          "type": "contact",
+          "id": "n014",
+          "kind": "NC",
+          "tag": "RS"
+        },
+        {
+          "type": "contact",
+          "id": "n015",
+          "kind": "NC",
+          "tag": "InitialStep"
+        },
+        {
+          "type": "contact",
+          "id": "n016",
+          "kind": "NC",
+          "tag": "SingleMode"
+        },
+        {
+          "type": "contact",
+          "id": "n017",
+          "kind": "NC",
+          "tag": "AdvancePulse"
+        }
+      ],
+      "output": {
+        "id": "o07",
+        "kind": "NETWORK",
+        "tag": ""
+      },
+      "network": [
+        {
+          "type": "output",
+          "id": "x026",
+          "kind": "TON",
+          "tag": "DB4",
+          "pt": 1000
+        },
+        {
+          "type": "output",
+          "id": "x027",
+          "kind": "COIL",
+          "tag": "TimerDone"
+        }
+      ]
+    },
+    {
+      "id": "r08",
+      "label": "产生推进脉冲：已有工件时响应移位或自动到时",
+      "nodes": [
+        {
+          "type": "contact",
+          "id": "n018",
+          "kind": "NC",
+          "tag": "FirstScan"
+        },
+        {
+          "type": "contact",
+          "id": "n019",
+          "kind": "NC",
+          "tag": "RS"
+        },
+        {
+          "type": "contact",
+          "id": "n020",
+          "kind": "NC",
+          "tag": "InitialStep"
+        }
+      ],
+      "output": {
+        "id": "o08",
+        "kind": "NETWORK",
+        "tag": ""
+      },
+      "network": [
+        {
+          "type": "parallel",
+          "id": "p003",
+          "branches": [
+            [
+              {
+                "type": "contact",
+                "id": "n021",
+                "kind": "NO",
+                "tag": "ShiftRising"
+              }
+            ],
+            [
+              {
+                "type": "contact",
+                "id": "n022",
+                "kind": "NC",
+                "tag": "SingleMode"
+              },
+              {
+                "type": "contact",
+                "id": "n023",
+                "kind": "NO",
+                "tag": "TimerDone"
+              }
+            ]
+          ]
+        },
+        {
+          "type": "output",
+          "id": "x028",
+          "kind": "COIL",
+          "tag": "AdvancePulse"
+        }
+      ]
+    },
+    {
+      "id": "r09",
+      "label": "发放本扫描的一次换步许可",
+      "nodes": [
+        {
+          "type": "contact",
+          "id": "n024",
+          "kind": "NO",
+          "tag": "AdvancePulse"
+        }
+      ],
+      "output": {
+        "id": "o09",
+        "kind": "COIL",
+        "tag": "StepPermit"
+      }
+    },
+    {
+      "id": "r10",
+      "label": "启动：退出“初始步骤”，进入“第 1 步”",
+      "nodes": [
+        {
+          "type": "contact",
+          "id": "n025",
+          "kind": "NC",
+          "tag": "FirstScan"
+        },
+        {
+          "type": "contact",
+          "id": "n026",
+          "kind": "NC",
+          "tag": "RS"
+        },
+        {
+          "type": "contact",
+          "id": "n027",
+          "kind": "NO",
+          "tag": "InitialStep"
+        }
+      ],
+      "output": {
+        "id": "o10",
+        "kind": "NETWORK",
+        "tag": ""
+      },
+      "network": [
+        {
+          "type": "parallel",
+          "id": "p004",
+          "branches": [
+            [
+              {
+                "type": "contact",
+                "id": "n028",
+                "kind": "NO",
+                "tag": "SD"
+              }
+            ],
+            [
+              {
+                "type": "contact",
+                "id": "n029",
+                "kind": "NO",
+                "tag": "ShiftRising"
+              }
+            ]
+          ]
+        },
+        {
+          "type": "contact",
+          "id": "n030",
+          "kind": "NC",
+          "tag": "SingleMode"
+        },
+        {
+          "type": "output",
+          "id": "x029",
+          "kind": "SET",
+          "tag": "Step1D"
+        },
+        {
+          "type": "output",
+          "id": "x030",
+          "kind": "RESET",
+          "tag": "InitialStep"
+        }
+      ]
+    },
+    {
+      "id": "r11",
+      "label": "第 1 步 D：本步动作与换步分支",
+      "nodes": [
+        {
+          "type": "contact",
+          "id": "n031",
+          "kind": "NO",
+          "tag": "Step1D"
+        }
+      ],
+      "output": {
+        "id": "o11",
+        "kind": "NETWORK",
+        "tag": ""
+      },
+      "network": [
+        {
+          "type": "parallel",
+          "id": "p006",
+          "branches": [
+            [
+              {
+                "type": "output",
+                "id": "x031",
+                "kind": "SET",
+                "tag": "StationD"
+              }
+            ],
+            [
+              {
+                "type": "contact",
+                "id": "n032",
+                "kind": "NO",
+                "tag": "StepPermit"
+              },
+              {
+                "type": "parallel",
+                "id": "p005",
+                "branches": [
+                  [
+                    {
+                      "type": "output",
+                      "id": "x032",
+                      "kind": "RESET",
+                      "tag": "StationD"
+                    },
+                    {
+                      "type": "output",
+                      "id": "x033",
+                      "kind": "SET",
+                      "tag": "StationA"
+                    }
+                  ],
+                  [
+                    {
+                      "type": "output",
+                      "id": "x034",
+                      "kind": "SET",
+                      "tag": "Step2A"
+                    },
+                    {
+                      "type": "output",
+                      "id": "x035",
+                      "kind": "RESET",
+                      "tag": "Step1D"
+                    },
+                    {
+                      "type": "output",
+                      "id": "x036",
+                      "kind": "RESET",
+                      "tag": "StepPermit"
+                    }
+                  ]
+                ]
+              }
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "r12",
+      "label": "第 2 步 A：本步动作与换步分支",
+      "nodes": [
+        {
+          "type": "contact",
+          "id": "n033",
+          "kind": "NO",
+          "tag": "Step2A"
+        }
+      ],
+      "output": {
+        "id": "o12",
+        "kind": "NETWORK",
+        "tag": ""
+      },
+      "network": [
+        {
+          "type": "parallel",
+          "id": "p008",
+          "branches": [
+            [
+              {
+                "type": "output",
+                "id": "x037",
+                "kind": "SET",
+                "tag": "StationA"
+              }
+            ],
+            [
+              {
+                "type": "contact",
+                "id": "n034",
+                "kind": "NO",
+                "tag": "StepPermit"
+              },
+              {
+                "type": "parallel",
+                "id": "p007",
+                "branches": [
+                  [
+                    {
+                      "type": "output",
+                      "id": "x038",
+                      "kind": "RESET",
+                      "tag": "StationA"
+                    },
+                    {
+                      "type": "output",
+                      "id": "x039",
+                      "kind": "SET",
+                      "tag": "StationE"
+                    }
+                  ],
+                  [
+                    {
+                      "type": "output",
+                      "id": "x040",
+                      "kind": "SET",
+                      "tag": "Step3E"
+                    },
+                    {
+                      "type": "output",
+                      "id": "x041",
+                      "kind": "RESET",
+                      "tag": "Step2A"
+                    },
+                    {
+                      "type": "output",
+                      "id": "x042",
+                      "kind": "RESET",
+                      "tag": "StepPermit"
+                    }
+                  ]
+                ]
+              }
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "r13",
+      "label": "第 3 步 E：本步动作与换步分支",
+      "nodes": [
+        {
+          "type": "contact",
+          "id": "n035",
+          "kind": "NO",
+          "tag": "Step3E"
+        }
+      ],
+      "output": {
+        "id": "o13",
+        "kind": "NETWORK",
+        "tag": ""
+      },
+      "network": [
+        {
+          "type": "parallel",
+          "id": "p010",
+          "branches": [
+            [
+              {
+                "type": "output",
+                "id": "x043",
+                "kind": "SET",
+                "tag": "StationE"
+              }
+            ],
+            [
+              {
+                "type": "contact",
+                "id": "n036",
+                "kind": "NO",
+                "tag": "StepPermit"
+              },
+              {
+                "type": "parallel",
+                "id": "p009",
+                "branches": [
+                  [
+                    {
+                      "type": "output",
+                      "id": "x044",
+                      "kind": "RESET",
+                      "tag": "StationE"
+                    },
+                    {
+                      "type": "output",
+                      "id": "x045",
+                      "kind": "SET",
+                      "tag": "StationB"
+                    }
+                  ],
+                  [
+                    {
+                      "type": "output",
+                      "id": "x046",
+                      "kind": "SET",
+                      "tag": "Step4B"
+                    },
+                    {
+                      "type": "output",
+                      "id": "x047",
+                      "kind": "RESET",
+                      "tag": "Step3E"
+                    },
+                    {
+                      "type": "output",
+                      "id": "x048",
+                      "kind": "RESET",
+                      "tag": "StepPermit"
+                    }
+                  ]
+                ]
+              }
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "r14",
+      "label": "第 4 步 B：本步动作与换步分支",
+      "nodes": [
+        {
+          "type": "contact",
+          "id": "n037",
+          "kind": "NO",
+          "tag": "Step4B"
+        }
+      ],
+      "output": {
+        "id": "o14",
+        "kind": "NETWORK",
+        "tag": ""
+      },
+      "network": [
+        {
+          "type": "parallel",
+          "id": "p012",
+          "branches": [
+            [
+              {
+                "type": "output",
+                "id": "x049",
+                "kind": "SET",
+                "tag": "StationB"
+              }
+            ],
+            [
+              {
+                "type": "contact",
+                "id": "n038",
+                "kind": "NO",
+                "tag": "StepPermit"
+              },
+              {
+                "type": "parallel",
+                "id": "p011",
+                "branches": [
+                  [
+                    {
+                      "type": "output",
+                      "id": "x050",
+                      "kind": "RESET",
+                      "tag": "StationB"
+                    },
+                    {
+                      "type": "output",
+                      "id": "x051",
+                      "kind": "SET",
+                      "tag": "StationF"
+                    }
+                  ],
+                  [
+                    {
+                      "type": "output",
+                      "id": "x052",
+                      "kind": "SET",
+                      "tag": "Step5F"
+                    },
+                    {
+                      "type": "output",
+                      "id": "x053",
+                      "kind": "RESET",
+                      "tag": "Step4B"
+                    },
+                    {
+                      "type": "output",
+                      "id": "x054",
+                      "kind": "RESET",
+                      "tag": "StepPermit"
+                    }
+                  ]
+                ]
+              }
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "r15",
+      "label": "第 5 步 F：本步动作与换步分支",
+      "nodes": [
+        {
+          "type": "contact",
+          "id": "n039",
+          "kind": "NO",
+          "tag": "Step5F"
+        }
+      ],
+      "output": {
+        "id": "o15",
+        "kind": "NETWORK",
+        "tag": ""
+      },
+      "network": [
+        {
+          "type": "parallel",
+          "id": "p014",
+          "branches": [
+            [
+              {
+                "type": "output",
+                "id": "x055",
+                "kind": "SET",
+                "tag": "StationF"
+              }
+            ],
+            [
+              {
+                "type": "contact",
+                "id": "n040",
+                "kind": "NO",
+                "tag": "StepPermit"
+              },
+              {
+                "type": "parallel",
+                "id": "p013",
+                "branches": [
+                  [
+                    {
+                      "type": "output",
+                      "id": "x056",
+                      "kind": "RESET",
+                      "tag": "StationF"
+                    },
+                    {
+                      "type": "output",
+                      "id": "x057",
+                      "kind": "SET",
+                      "tag": "StationC"
+                    }
+                  ],
+                  [
+                    {
+                      "type": "output",
+                      "id": "x058",
+                      "kind": "SET",
+                      "tag": "Step6C"
+                    },
+                    {
+                      "type": "output",
+                      "id": "x059",
+                      "kind": "RESET",
+                      "tag": "Step5F"
+                    },
+                    {
+                      "type": "output",
+                      "id": "x060",
+                      "kind": "RESET",
+                      "tag": "StepPermit"
+                    }
+                  ]
+                ]
+              }
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "r16",
+      "label": "第 6 步 C：本步动作与换步分支",
+      "nodes": [
+        {
+          "type": "contact",
+          "id": "n041",
+          "kind": "NO",
+          "tag": "Step6C"
+        }
+      ],
+      "output": {
+        "id": "o16",
+        "kind": "NETWORK",
+        "tag": ""
+      },
+      "network": [
+        {
+          "type": "parallel",
+          "id": "p016",
+          "branches": [
+            [
+              {
+                "type": "output",
+                "id": "x061",
+                "kind": "SET",
+                "tag": "StationC"
+              }
+            ],
+            [
+              {
+                "type": "contact",
+                "id": "n042",
+                "kind": "NO",
+                "tag": "StepPermit"
+              },
+              {
+                "type": "parallel",
+                "id": "p015",
+                "branches": [
+                  [
+                    {
+                      "type": "output",
+                      "id": "x062",
+                      "kind": "RESET",
+                      "tag": "StationC"
+                    },
+                    {
+                      "type": "output",
+                      "id": "x063",
+                      "kind": "SET",
+                      "tag": "StationG"
+                    }
+                  ],
+                  [
+                    {
+                      "type": "output",
+                      "id": "x064",
+                      "kind": "SET",
+                      "tag": "Step7G"
+                    },
+                    {
+                      "type": "output",
+                      "id": "x065",
+                      "kind": "RESET",
+                      "tag": "Step6C"
+                    },
+                    {
+                      "type": "output",
+                      "id": "x066",
+                      "kind": "RESET",
+                      "tag": "StepPermit"
+                    }
+                  ]
+                ]
+              }
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "r17",
+      "label": "第 7 步 G：本步动作与换步分支",
+      "nodes": [
+        {
+          "type": "contact",
+          "id": "n043",
+          "kind": "NO",
+          "tag": "Step7G"
+        }
+      ],
+      "output": {
+        "id": "o17",
+        "kind": "NETWORK",
+        "tag": ""
+      },
+      "network": [
+        {
+          "type": "parallel",
+          "id": "p018",
+          "branches": [
+            [
+              {
+                "type": "output",
+                "id": "x067",
+                "kind": "SET",
+                "tag": "StationG"
+              }
+            ],
+            [
+              {
+                "type": "contact",
+                "id": "n044",
+                "kind": "NO",
+                "tag": "StepPermit"
+              },
+              {
+                "type": "parallel",
+                "id": "p017",
+                "branches": [
+                  [
+                    {
+                      "type": "output",
+                      "id": "x068",
+                      "kind": "RESET",
+                      "tag": "StationG"
+                    },
+                    {
+                      "type": "output",
+                      "id": "x069",
+                      "kind": "SET",
+                      "tag": "StationH"
+                    }
+                  ],
+                  [
+                    {
+                      "type": "output",
+                      "id": "x070",
+                      "kind": "SET",
+                      "tag": "Step8H"
+                    },
+                    {
+                      "type": "output",
+                      "id": "x071",
+                      "kind": "RESET",
+                      "tag": "Step7G"
+                    },
+                    {
+                      "type": "output",
+                      "id": "x072",
+                      "kind": "RESET",
+                      "tag": "StepPermit"
+                    }
+                  ]
+                ]
+              }
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "r18",
+      "label": "第 8 步 H：入库动作，完成后继续自动循环",
+      "nodes": [
+        {
+          "type": "contact",
+          "id": "n045",
+          "kind": "NO",
+          "tag": "Step8H"
+        }
+      ],
+      "output": {
+        "id": "o18",
+        "kind": "NETWORK",
+        "tag": ""
+      },
+      "network": [
+        {
+          "type": "parallel",
+          "id": "p020",
+          "branches": [
+            [
+              {
+                "type": "output",
+                "id": "x073",
+                "kind": "SET",
+                "tag": "StationH"
+              }
+            ],
+            [
+              {
+                "type": "contact",
+                "id": "n046",
+                "kind": "NO",
+                "tag": "StepPermit"
+              },
+              {
+                "type": "contact",
+                "id": "n047",
+                "kind": "NO",
+                "tag": "SD"
+              },
+              {
+                "type": "contact",
+                "id": "n048",
+                "kind": "NC",
+                "tag": "SingleMode"
+              },
+              {
+                "type": "parallel",
+                "id": "p019",
+                "branches": [
+                  [
+                    {
+                      "type": "output",
+                      "id": "x074",
+                      "kind": "RESET",
+                      "tag": "StationH"
+                    },
+                    {
+                      "type": "output",
+                      "id": "x075",
+                      "kind": "SET",
+                      "tag": "StationD"
+                    }
+                  ],
+                  [
+                    {
+                      "type": "output",
+                      "id": "x076",
+                      "kind": "SET",
+                      "tag": "Step1D"
+                    },
+                    {
+                      "type": "output",
+                      "id": "x077",
+                      "kind": "RESET",
+                      "tag": "Step8H"
+                    },
+                    {
+                      "type": "output",
+                      "id": "x078",
+                      "kind": "RESET",
+                      "tag": "StepPermit"
+                    }
+                  ]
+                ]
+              }
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "r19",
+      "label": "第 8 步 H：入库动作，完成后结束本轮",
+      "nodes": [
+        {
+          "type": "contact",
+          "id": "n049",
+          "kind": "NO",
+          "tag": "Step8H"
+        }
+      ],
+      "output": {
+        "id": "o19",
+        "kind": "NETWORK",
+        "tag": ""
+      },
+      "network": [
+        {
+          "type": "parallel",
+          "id": "p023",
+          "branches": [
+            [
+              {
+                "type": "output",
+                "id": "x079",
+                "kind": "SET",
+                "tag": "StationH"
+              }
+            ],
+            [
+              {
+                "type": "contact",
+                "id": "n050",
+                "kind": "NO",
+                "tag": "StepPermit"
+              },
+              {
+                "type": "parallel",
+                "id": "p021",
+                "branches": [
+                  [
+                    {
+                      "type": "contact",
+                      "id": "n051",
+                      "kind": "NC",
+                      "tag": "SD"
+                    }
+                  ],
+                  [
+                    {
+                      "type": "contact",
+                      "id": "n052",
+                      "kind": "NO",
+                      "tag": "SingleMode"
+                    }
+                  ]
+                ]
+              },
+              {
+                "type": "parallel",
+                "id": "p022",
+                "branches": [
+                  [
+                    {
+                      "type": "output",
+                      "id": "x080",
+                      "kind": "RESET",
+                      "tag": "StationH"
+                    }
+                  ],
+                  [
+                    {
+                      "type": "output",
+                      "id": "x081",
+                      "kind": "SET",
+                      "tag": "InitialStep"
+                    },
+                    {
+                      "type": "output",
+                      "id": "x082",
+                      "kind": "RESET",
+                      "tag": "Step8H"
+                    },
+                    {
+                      "type": "output",
+                      "id": "x083",
+                      "kind": "RESET",
+                      "tag": "StepPermit"
+                    }
+                  ]
+                ]
+              }
+            ]
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -2,6 +2,7 @@ import type {
   ContactNode,
   ContactKind,
   LadderNode,
+  NetworkElement,
   OutputElement,
   OutputKind,
   Program,
@@ -314,15 +315,26 @@ export function tagUsageCounts(program: Program): Map<string, number> {
       else node.branches.forEach(walk)
     }
   }
+  const walkNetwork = (chain: NetworkElement[]) => {
+    for (const node of chain) {
+      if (node.type === 'contact') add(node.tag)
+      else if (node.type === 'output') addOutput(node)
+      else node.branches.forEach(walkNetwork)
+    }
+  }
+  const addOutput = (output: OutputElement) => {
+    add(output.tag)
+    add(output.resetTag)
+    add(output.qTag)
+    add(output.valueTag)
+    add(output.sourceTag)
+    add(output.pulseTag)
+    add(output.stepTag)
+  }
   for (const rung of program.rungs) {
     walk(rung.nodes)
-    add(rung.output.tag)
-    add(rung.output.resetTag)
-    add(rung.output.qTag)
-    add(rung.output.valueTag)
-    add(rung.output.sourceTag)
-    add(rung.output.pulseTag)
-    add(rung.output.stepTag)
+    addOutput(rung.output)
+    walkNetwork(rung.network ?? [])
   }
   for (const tag of program.tags) {
     if (tag.bitOf === undefined) continue
@@ -423,14 +435,25 @@ export function tagsInRung(program: Program, rung: Rung): TagDef[] {
       else node.branches.forEach(walk)
     }
   }
+  const takeOutput = (output: OutputElement) => {
+    take(output.tag)
+    take(output.resetTag)
+    take(output.qTag)
+    take(output.valueTag)
+    take(output.sourceTag)
+    take(output.pulseTag)
+    take(output.stepTag)
+  }
+  const walkNetwork = (chain: NetworkElement[]) => {
+    for (const node of chain) {
+      if (node.type === 'contact') take(node.tag)
+      else if (node.type === 'output') takeOutput(node)
+      else node.branches.forEach(walkNetwork)
+    }
+  }
   walk(rung.nodes)
-  take(rung.output.tag)
-  take(rung.output.resetTag)
-  take(rung.output.qTag)
-  take(rung.output.valueTag)
-  take(rung.output.sourceTag)
-  take(rung.output.pulseTag)
-  take(rung.output.stepTag)
+  takeOutput(rung.output)
+  walkNetwork(rung.network ?? [])
   return [...picked.values()]
 }
 
@@ -637,6 +660,34 @@ export function updateRungLabel(program: Program, rungId: string, label: string)
   return withRung(program, rungId, (item) => ({ ...item, label }))
 }
 
+function cloneOutputElement(output: OutputElement, id = output.id): OutputElement {
+  return {
+    ...output,
+    id,
+    ...(output.pattern ? { pattern: [...output.pattern] } : {}),
+  }
+}
+
+function cloneNetworkElement(node: NetworkElement, regenerateIds = true): NetworkElement {
+  if (node.type === 'contact') {
+    return {
+      ...node,
+      id: regenerateIds ? uid('c') : node.id,
+      ...(node.compare ? { compare: { ...node.compare } } : {}),
+    }
+  }
+  if (node.type === 'output') {
+    return { ...cloneOutputElement(node, regenerateIds ? uid('x') : node.id), type: 'output' }
+  }
+  return {
+    ...node,
+    id: regenerateIds ? uid('par') : node.id,
+    branches: node.branches.map((branch) => (
+      branch.map((child) => cloneNetworkElement(child, regenerateIds))
+    )),
+  }
+}
+
 function cloneRungForProgram(program: Program, source: Rung, labelSuffix = ''): Rung {
   const cloneNode = (node: LadderNode): LadderNode =>
     node.type === 'contact'
@@ -652,7 +703,7 @@ function cloneRungForProgram(program: Program, source: Rung, labelSuffix = ''): 
     id: uid('r'),
     label: labelSuffix && source.label ? `${source.label}${labelSuffix}` : source.label,
     nodes: source.nodes.map(cloneNode),
-    output: {
+    output: cloneOutputElement({
       ...source.output,
       id: uid('o'),
       tag: ['TON', 'TOF', 'TONR'].includes(source.output.kind)
@@ -660,8 +711,8 @@ function cloneRungForProgram(program: Program, source: Rung, labelSuffix = ''): 
         : source.output.kind === 'CTU' ? nextInstanceName(program, 'C') : source.output.tag,
       // resetTag 是 TONR / CTU 的运行输入，复制后应保留；只解除真正的输出绑定。
       ...(clearsOutputs ? { qTag: undefined, valueTag: undefined } : {}),
-      ...(source.output.pattern ? { pattern: [...source.output.pattern] } : {}),
-    },
+    }),
+    ...(source.network ? { network: source.network.map((node: NetworkElement) => cloneNetworkElement(node)) } : {}),
   }
 }
 
@@ -674,10 +725,10 @@ export function snapshotRung(rung: Rung): Rung {
   return {
     ...rung,
     nodes: rung.nodes.map(cloneNode),
-    output: {
-      ...rung.output,
-      ...(rung.output.pattern ? { pattern: [...rung.output.pattern] } : {}),
-    },
+    output: cloneOutputElement(rung.output),
+    ...(rung.network ? {
+      network: rung.network.map((node: NetworkElement) => cloneNetworkElement(node, false)),
+    } : {}),
   }
 }
 

@@ -83,6 +83,8 @@ import { createRuntime, step, writeRuntimeValue } from './engine/simulate'
 import type {
   ContactKind,
   LadderNode,
+  NetworkElement,
+  OutputElement,
   OutputKind,
   Program,
   Rung,
@@ -551,19 +553,32 @@ function runtimeSignature(program: Program): string {
       : ['p', node.id, node.open === true ? 1 : 0,
         node.branches.map((branch) => branch.map(encodeNode))]
   )
+  const encodeOutput = (output: OutputElement): unknown => [
+    output.id, output.kind, output.tag,
+    output.qTag ?? null, output.valueTag ?? null, output.resetTag ?? null,
+    output.sourceTag ?? null, output.pulseTag ?? null, output.stepTag ?? null,
+    output.value ?? null, output.pt ?? null, output.pv ?? null,
+    output.pattern ?? null,
+  ]
+  const encodeNetwork = (node: NetworkElement): unknown => (
+    node.type === 'contact'
+      ? ['c', node.id, node.kind, node.tag, node.compare?.op ?? null, node.compare?.value ?? null]
+      : node.type === 'output'
+        ? ['o', encodeOutput(node)]
+        : ['p', node.id, node.open === true ? 1 : 0,
+          node.branches.map((branch) => branch.map(encodeNetwork))]
+  )
   return JSON.stringify({
     profile: program.profile,
     tags: program.tags.map((tag) => [
       tag.id, tag.name, tag.kind, tag.address, tag.bitOf ?? null, tag.initial,
+      tag.firstScan === true ? 1 : 0,
     ]),
     rungs: contentRungs(program).map((rung) => [
       rung.id,
       rung.nodes.map(encodeNode),
-      [
-        rung.output.id, rung.output.kind, rung.output.tag,
-        rung.output.qTag ?? null, rung.output.valueTag ?? null, rung.output.resetTag ?? null,
-        rung.output.sourceTag ?? null, rung.output.pulseTag ?? null, rung.output.stepTag ?? null,
-      ],
+      encodeOutput(rung.output),
+      rung.network ? rung.network.map(encodeNetwork) : null,
     ]),
   })
 }

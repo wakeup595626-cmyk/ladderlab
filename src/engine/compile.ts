@@ -11,6 +11,7 @@ import type {
   CompileResult,
   ContactKind,
   LadderNode,
+  NetworkElement,
   Problem,
   Program,
   TagDef,
@@ -254,6 +255,15 @@ function walkChain(chain: LadderNode[], visit: (node: LadderNode) => void) {
   }
 }
 
+function walkNetwork(chain: NetworkElement[], visit: (node: NetworkElement) => void) {
+  for (const node of chain) {
+    visit(node)
+    if (node.type === 'parallel') {
+      for (const branch of node.branches) walkNetwork(branch, visit)
+    }
+  }
+}
+
 /**
  * 节点 ID 既是 React 列表身份，也是撤销、定位和运行时状态的索引；
  * 所有触点与并联节点都必须全局唯一。
@@ -297,6 +307,18 @@ function validateIds(ctx: Ctx) {
         : `并联节点“${node.id || '无 ID'}”`
       check(nodeIds, '节点', node.id, label, rung.id, node.id)
     })
+    walkNetwork(rung.network ?? [], (node) => {
+      const label = node.type === 'contact'
+        ? `${CONTACT_LABELS[node.kind]}“${node.id || '无 ID'}”`
+        : node.type === 'parallel'
+          ? `并联节点“${node.id || '无 ID'}”`
+          : `${node.kind} 输出“${node.tag || node.id || '无 ID'}”`
+      if (node.type === 'output') {
+        check(outputIds, '输出', node.id, label, rung.id, node.id)
+      } else {
+        check(nodeIds, '节点', node.id, label, rung.id, node.id)
+      }
+    })
     const outputLabel = `${rung.output.kind} 输出“${rung.output.tag || rung.output.id || '无 ID'}”`
     check(outputIds, '输出', rung.output.id, outputLabel, rung.id, rung.output.id)
   }
@@ -325,6 +347,9 @@ function validateTagTable(ctx: Ctx) {
 
     if (tag.kind === 'BOOL' && typeof tag.initial !== 'boolean') {
       error(ctx, `BOOL 变量“${name}”的初始值必须是 TRUE 或 FALSE。`)
+    }
+    if (tag.firstScan && tag.kind !== 'BOOL') {
+      error(ctx, `变量“${name}”的 firstScan 标记只能用于 BOOL 变量。`)
     }
     if (tag.kind === 'INT' && !Number.isFinite(tag.initial)) {
       error(ctx, `INT 变量“${name}”的初始值必须是有效数字。`)
@@ -375,24 +400,30 @@ function validateTagTable(ctx: Ctx) {
 function collectInstances(ctx: Ctx) {
   const seen = new Map<string, string>()
   for (const rung of contentRungs(ctx.program)) {
-    const output = rung.output
-    if (output.kind === 'TON' || output.kind === 'TOF' || output.kind === 'TONR') {
-      ctx.timers.add(normalizeReference(output.tag))
-    }
-    if (output.kind === 'CTU') {
-      ctx.counters.add(normalizeReference(output.tag))
-    }
-    if (output.kind === 'TON' || output.kind === 'TOF' || output.kind === 'TONR' || output.kind === 'CTU') {
-      const name = normalizeReference(output.tag)
-      if (!name) continue
-      const previous = seen.get(name)
-      if (previous) {
-        error(ctx, `指令实例名“${name}”重复（${previous} 与 ${rung.label || rung.id}）。`, rung.id, output.id)
-      } else {
-        seen.set(name, rung.label || rung.id)
+    const outputs = [rung.output]
+    walkNetwork(rung.network ?? [], (node) => {
+      if (node.type === 'output') outputs.push(node)
+    })
+    for (const output of outputs) {
+      if (output.kind === 'TON' || output.kind === 'TOF' || output.kind === 'TONR') {
+        ctx.timers.add(normalizeReference(output.tag))
       }
-      if (ctx.tags.has(name)) {
-        error(ctx, `指令实例名“${name}”与变量表重名，请换一个名称。`, rung.id, output.id)
+      if (output.kind === 'CTU') {
+        ctx.counters.add(normalizeReference(output.tag))
+      }
+      if (output.kind === 'TON' || output.kind === 'TOF' || output.kind === 'TONR'
+        || output.kind === 'CTU' || output.kind === 'R_TRIG') {
+        const name = normalizeReference(output.tag)
+        if (!name) continue
+        const previous = seen.get(name)
+        if (previous) {
+          error(ctx, `指令实例名“${name}”重复（${previous} 与 ${rung.label || rung.id}）。`, rung.id, output.id)
+        } else {
+          seen.set(name, rung.label || rung.id)
+        }
+        if (ctx.tags.has(name)) {
+          error(ctx, `指令实例名“${name}”与变量表重名，请换一个名称。`, rung.id, output.id)
+        }
       }
     }
   }
@@ -462,6 +493,19 @@ function checkOutput(ctx: Ctx, rungId: string, output: Program['rungs'][number][
   const profile = getProfile(ctx.program.profile)
   if (!supportsOutput(profile.id, output.kind)) {
     error(ctx, `指令 ${output.kind} 在当前档案 ${profile.shortName} 中不可用。`, rungId, output.id)
+  }
+
+  // 多输出网络本身是一个容器，真正需要校验的是 network 里的每个输出。
+  if (output.kind === 'NETWORK') return
+
+  if (output.kind === 'R_TRIG') {
+    const instanceName = normalizeReference(output.tag)
+    if (!instanceName) {
+      error(ctx, 'R_TRIG 缺少实例名。', rungId, output.id)
+    } else if (!NAME_RE.test(instanceName)) {
+      error(ctx, `R_TRIG 实例名“${instanceName}”不合法：只能使用字母、数字、下划线，且不能以数字开头。`, rungId, output.id)
+    }
+    return
   }
 
   /** 写入目标只能是变量表里的普通变量名，不能使用实例字段或空引用。 */
@@ -724,6 +768,31 @@ function checkOutput(ctx: Ctx, rungId: string, output: Program['rungs'][number][
   }
 }
 
+function checkNetwork(ctx: Ctx, rungId: string, rung: Program['rungs'][number]) {
+  if (!rung.network?.length) {
+    error(ctx, '多输出程序段缺少 network 内容。', rungId, rung.output.id)
+    return
+  }
+  let outputCount = 0
+  walkNetwork(rung.network, (node) => {
+    if (node.type === 'contact') {
+      checkContact(ctx, rungId, node)
+      return
+    }
+    if (node.type === 'parallel') {
+      if (node.open !== true && node.branches.some((branch) => branch.length === 0)) {
+        warning(ctx, `并联节点“${node.id || '无 ID'}”已闭合，但包含空支路；该支路按不通电处理。`, rungId, node.id)
+      }
+      return
+    }
+    outputCount += 1
+    checkOutput(ctx, rungId, node)
+  })
+  if (outputCount === 0) {
+    error(ctx, '多输出程序段至少要有一个输出元件。', rungId, rung.output.id)
+  }
+}
+
 export function compile(program: Program): CompileResult {
   const ctx: Ctx = {
     program,
@@ -753,7 +822,11 @@ export function compile(program: Program): CompileResult {
         warning(ctx, `并联节点“${node.id || '无 ID'}”已闭合，但包含空支路；该支路按不通电处理。`, rung.id, node.id)
       }
     })
-    checkOutput(ctx, rung.id, rung.output)
+    if (rung.output.kind === 'NETWORK') {
+      checkNetwork(ctx, rung.id, rung)
+    } else {
+      checkOutput(ctx, rung.id, rung.output)
+    }
   }
 
   return { errors: ctx.errors, warnings: ctx.warnings }

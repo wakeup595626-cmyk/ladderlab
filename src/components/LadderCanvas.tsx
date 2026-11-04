@@ -15,6 +15,7 @@ import type {
   ContactKind,
   ContactNode,
   LadderNode,
+  NetworkElement,
   OutputElement,
   Program,
   Runtime,
@@ -119,6 +120,7 @@ interface Size {
 
 /** One measurement pass per rung; nested parallel groups reuse the same results. */
 type LayoutMemo = Map<LadderNode, Size>
+type NetworkLayoutMemo = Map<NetworkElement, Size>
 
 interface DrawContext {
   runtime: Runtime
@@ -133,6 +135,8 @@ interface DrawContext {
   metrics: LadderMetrics
   /** Shared node measurements for the current rung render. */
   measureMemo?: LayoutMemo
+  /** Shared measurements for the read-only multi-output network extension. */
+  networkMeasureMemo?: NetworkLayoutMemo
   onSelect: (selection: Selection) => void
   onEdit?: (
     selection: Selection,
@@ -333,6 +337,8 @@ const OUTPUT_LABELS: Record<OutputElement['kind'], string> = {
   SHL: '左移位',
   ROL: '循环左移',
   PATTERN: '教学灯字序列',
+  NETWORK: '多输出网络',
+  R_TRIG: '上升沿触发',
 }
 
 function contactSize(node: ContactNode, m: LadderMetrics): Size {
@@ -437,6 +443,76 @@ function measureNode(
     // 未闭合时右侧要留出「合并分支」按钮，否则按钮会压到输出线上。
     width: contentW + (node.open === true ? m.openMergeW : 0),
     height: placements[placements.length - 1] + branches[branches.length - 1].height,
+    lineY: branches[0].lineY,
+  }
+  memo.set(node, size)
+  return size
+}
+
+/**
+ * PPT 中一条支路可以串联多个输出线圈。这里沿用梯形图的水平节距，
+ * 但把“并联组”和“指令/线圈”都看成同一层的网络元素。
+ */
+function measureNetworkChain(
+  chain: NetworkElement[],
+  m: LadderMetrics,
+  memo: NetworkLayoutMemo = new Map(),
+): Size {
+  if (chain.length === 0) {
+    return { width: 0, height: m.contactH, lineY: m.contactLineY }
+  }
+
+  let width = 0
+  let top = 0
+  let bottom = 0
+  chain.forEach((node, index) => {
+    const size = measureNetworkNode(node, m, memo)
+    width += size.width
+    if (index < chain.length - 1) width += m.parallelGutter
+    top = Math.max(top, size.lineY)
+    bottom = Math.max(bottom, size.height - size.lineY)
+  })
+
+  return { width, height: top + bottom, lineY: top }
+}
+
+function measureNetworkNode(
+  node: NetworkElement,
+  m: LadderMetrics,
+  memo: NetworkLayoutMemo = new Map(),
+): Size {
+  const cached = memo.get(node)
+  if (cached) return cached
+
+  if (node.type === 'contact') {
+    const size = contactSize(node, m)
+    memo.set(node, size)
+    return size
+  }
+  if (node.type === 'output') {
+    const size = outputSize(node, m)
+    memo.set(node, size)
+    return size
+  }
+
+  if (node.branches.length === 0) {
+    const size = {
+      width: m.emptyChainW + m.parallelGutter * 2 + m.parallelJoinW,
+      height: m.emptyChainH,
+      lineY: m.emptyChainLineY,
+    }
+    memo.set(node, size)
+    return size
+  }
+
+  const branches = node.branches.map((branch) => measureNetworkChain(branch, m, memo))
+  const placements = parallelBranchOffsets(branches, m)
+  const size = {
+    width: Math.max(...branches.map((branch) => branch.width))
+      + m.parallelGutter * 2
+      + m.parallelJoinW,
+    height: placements[placements.length - 1]
+      + branches[branches.length - 1].height,
     lineY: branches[0].lineY,
   }
   memo.set(node, size)
@@ -846,11 +922,12 @@ function renderContact(
   context: DrawContext,
   path: number[],
   incomingPower: boolean,
+  readOnly = false,
 ): ReactNode {
   const m = context.metrics
   const size = contactSize(node, m)
-  const selected = isSelected(context, path)
-  const primary = isPrimarySelected(context, path)
+  const selected = !readOnly && isSelected(context, path)
+  const primary = !readOnly && isPrimarySelected(context, path)
   const grouped = selected && (context.selection?.paths?.length ?? 0) > 1
   const powered = context.runtime.nodePower[node.id] === true
   const details = tagDetails(context.tags, node.tag)
@@ -859,9 +936,10 @@ function renderContact(
   const centerX = size.width / 2
   const selection = { rungId: context.rungId, path }
   const sourceKey = 'node:' + context.rungId + ':' + path.join('.')
-  const source = context.dragSource === sourceKey
+  const source = !readOnly && context.dragSource === sourceKey
   const nodeTarget: DropTarget = { type: 'node', rungId: context.rungId, path }
-  const dropActive = !source && nodeMatches(context.dragTarget, context.rungId, path)
+  const dropActive = !readOnly && !source
+    && nodeMatches(context.dragTarget, context.rungId, path)
   // 命中框与选中框始终跟触点本身同高：并联支路再多也不缩水。
   const hitHeight = size.height - 6
 
@@ -875,12 +953,13 @@ function renderContact(
         selected ? 'is-selected' : '',
         grouped ? 'is-group-selected' : '',
         grouped && primary ? 'is-primary-selected' : '',
+        readOnly ? 'is-read-only' : '',
         source ? 'is-drag-source' : '',
         dropActive ? 'is-drop-target' : '',
       ].filter(Boolean).join(' ')}
       data-drop={JSON.stringify(nodeTarget)}
-      role="button"
-      tabIndex={0}
+      role={readOnly ? undefined : 'button'}
+      tabIndex={readOnly ? undefined : 0}
       aria-label={
         CONTACT_LABELS[node.kind] + '，' + details.name + '，'
         + details.address + '，单击编辑操作数，双击打开更多参数'
@@ -888,7 +967,7 @@ function renderContact(
       data-node-id={node.id}
       data-node-path={path.join('.')}
       data-operand={details.bound ? details.address : details.name}
-      onClick={(event) => {
+      onClick={readOnly ? undefined : (event) => {
         event.stopPropagation()
         // 和桌面软件一致：Ctrl/Cmd 逐项加选，Shift 选同一线路上的连续一段。
         // 多选时不弹快速编辑，避免遮住接下来要按的 Ctrl+C。
@@ -902,12 +981,12 @@ function renderContact(
         }
         selectAndEdit(context, selection, event.currentTarget)
       }}
-      onDoubleClick={(event) => {
+      onDoubleClick={readOnly ? undefined : (event) => {
         event.preventDefault()
         event.stopPropagation()
         selectDetails(context, selection, event.currentTarget)
       }}
-      onKeyDown={(event) => {
+      onKeyDown={readOnly ? undefined : (event) => {
         activateDetailsWithKeyboard(
           event,
           () => selectDetails(context, selection, event.currentTarget),
@@ -917,7 +996,7 @@ function renderContact(
           () => selectAndEdit(context, selection, event.currentTarget),
         )
       }}
-      onPointerDown={(event) => {
+      onPointerDown={readOnly ? undefined : (event) => {
         event.stopPropagation()
         context.beginDrag(
           event,
@@ -1020,15 +1099,17 @@ function renderContact(
       >
         {shorten(symbol, m.nameChars)}
       </text>
-      {renderNodeGrip(size.width, size.height)}
-      <rect
-        className="ll-selection-box"
-        x="2"
-        y="3"
-        width={size.width - 4}
-        height={hitHeight}
-        rx="4"
-      />
+      {!readOnly && renderNodeGrip(size.width, size.height)}
+      {!readOnly && (
+        <rect
+          className="ll-selection-box"
+          x="2"
+          y="3"
+          width={size.width - 4}
+          height={hitHeight}
+          rx="4"
+        />
+      )}
     </g>
   )
 }
@@ -1145,6 +1226,138 @@ function renderChain(
   return <g>{parts}</g>
 }
 
+function networkChainPower(
+  chain: NetworkElement[],
+  runtime: Runtime,
+): boolean {
+  if (chain.length === 0) return false
+  return runtime.nodePower[chain[chain.length - 1].id] === true
+}
+
+function renderNetworkNode(
+  node: NetworkElement,
+  context: DrawContext,
+  incomingPower: boolean,
+): ReactNode {
+  if (node.type === 'contact') {
+    return renderContact(node, context, [], incomingPower, true)
+  }
+  if (node.type === 'output') {
+    return renderOutput(node, context, context.rungId, false, true)
+  }
+  return renderNetworkParallel(node, context, incomingPower)
+}
+
+function renderNetworkChain(
+  chain: NetworkElement[],
+  context: DrawContext,
+  incomingPower: boolean,
+): ReactNode {
+  if (chain.length === 0) return null
+  const m = context.metrics
+  const memo = context.networkMeasureMemo ?? new Map<NetworkElement, Size>()
+  const size = measureNetworkChain(chain, m, memo)
+  const parts: ReactNode[] = []
+  let cursorX = 0
+  let currentPower = incomingPower
+
+  chain.forEach((node, index) => {
+    const nodeSize = measureNetworkNode(node, m, memo)
+    const nodeY = size.lineY - nodeSize.lineY
+    parts.push(
+      <g key={node.id} transform={'translate(' + cursorX + ', ' + nodeY + ')'}>
+        {renderNetworkNode(node, context, currentPower)}
+      </g>,
+    )
+    cursorX += nodeSize.width
+    currentPower = context.runtime.nodePower[node.id] === true
+    if (index < chain.length - 1) {
+      parts.push(
+        <path
+          key={node.id + '-wire'}
+          className={'ll-wire' + (currentPower ? ' is-on' : '')}
+          d={'M ' + cursorX + ' ' + size.lineY + ' H '
+            + (cursorX + m.parallelGutter)}
+        />,
+      )
+      cursorX += m.parallelGutter
+    }
+  })
+
+  return <g>{parts}</g>
+}
+
+function renderNetworkParallel(
+  node: Extract<NetworkElement, { type: 'parallel' }>,
+  context: DrawContext,
+  incomingPower: boolean,
+): ReactNode {
+  const m = context.metrics
+  const memo = context.networkMeasureMemo ?? new Map<NetworkElement, Size>()
+  const size = measureNetworkNode(node, m, memo)
+  const branchSizes = node.branches.map((branch) => measureNetworkChain(branch, m, memo))
+  const branchYs = parallelBranchOffsets(branchSizes, m)
+  const splitX = m.parallelGutter / 2
+  const branchOriginX = m.parallelGutter
+  const collectX = size.width - m.parallelGutter / 2
+  const entryY = size.lineY
+  const centers = branchYs.map((y, index) => y + branchSizes[index].lineY)
+  const firstCenter = centers[0] ?? entryY
+  const lastCenter = centers[centers.length - 1] ?? entryY
+  const outputPower = context.runtime.nodePower[node.id] === true
+  const frameTop = Math.max(2, Math.min(...branchYs) - 8)
+  const frameBottom = Math.min(
+    size.height - 2,
+    Math.max(...branchYs.map((y, index) => y + branchSizes[index].height)) + 8,
+  )
+
+  return (
+    <g className="ll-network-parallel" data-node-id={node.id}>
+      <title>并联分支 · {node.branches.length} 条支路</title>
+      <rect
+        className="ll-branch-frame"
+        x={0}
+        y={frameTop}
+        width={size.width}
+        height={Math.max(16, frameBottom - frameTop)}
+        rx="8"
+      />
+      <path
+        className={'ll-wire' + (incomingPower ? ' is-on' : '')}
+        d={'M 0 ' + entryY + ' H ' + splitX
+          + ' M ' + splitX + ' ' + firstCenter + ' V ' + lastCenter}
+      />
+      {node.branches.map((branch, index) => {
+        const branchSize = branchSizes[index]
+        const branchPower = networkChainPower(branch, context.runtime)
+        const endX = branchOriginX + branchSize.width
+        return (
+          <g key={node.id + '-branch-' + index}>
+            <path
+              className={'ll-wire' + (incomingPower ? ' is-on' : '')}
+              d={'M ' + splitX + ' ' + centers[index] + ' H ' + branchOriginX}
+            />
+            {branchSize.width > 0 && (
+              <path
+                className={'ll-wire' + (branchPower ? ' is-on' : '')}
+                d={'M ' + endX + ' ' + centers[index] + ' H ' + collectX}
+              />
+            )}
+            <g transform={'translate(' + branchOriginX + ', ' + branchYs[index] + ')'}>
+              {renderNetworkChain(branch, context, incomingPower)}
+            </g>
+          </g>
+        )
+      })}
+      <path
+        className={'ll-wire' + (outputPower ? ' is-on' : '')}
+        d={'M ' + collectX + ' ' + firstCenter + ' V ' + lastCenter
+          + ' M ' + collectX + ' ' + entryY + ' H ' + size.width}
+      />
+    </g>
+  )
+}
+
 interface InstructionPinSpec {
   label: string
   /** 博途把参数值画在框外，框内只保留引脚名。 */
@@ -1167,7 +1380,7 @@ interface InstructionSpec {
 }
 
 const INSTANCE_HEADER_KINDS = new Set<OutputElement['kind']>([
-  'TON', 'TOF', 'TONR', 'CTU',
+  'TON', 'TOF', 'TONR', 'CTU', 'R_TRIG',
 ])
 
 function operandLabel(
@@ -1264,6 +1477,16 @@ function instructionSpec(
           left: { label: 'IN', externalValue: source },
           right: { label: 'OUT1', externalValue: targetValue, externalNote: targetNote },
         },
+      ],
+    }
+  }
+
+  if (output.kind === 'R_TRIG') {
+    return {
+      title: 'R_TRIG',
+      subtitle: 'Edge',
+      rows: [
+        { left: { label: 'CLK' }, right: { label: 'Q' } },
       ],
     }
   }
@@ -1559,10 +1782,12 @@ function renderOutput(
   context: DrawContext,
   rungId: string,
   placeholder = false,
+  readOnly = false,
 ): ReactNode {
+  if (output.kind === 'NETWORK') return null
   const m = context.metrics
   const size = outputSize(output, m)
-  const selected = isSelected(context, null)
+  const selected = !readOnly && isSelected(context, null)
   const powered = context.runtime.outputPower[output.id] === true
   const q = readOutputQ(output, context.runtime)
   const details = tagDetails(context.tags, output.tag)
@@ -1575,7 +1800,7 @@ function renderOutput(
   const coilLeadIn = symbolX - 15
   const coilLeadOut = symbolX + 15
   const selection = { rungId, path: null }
-  const isDropTarget = context.dragTarget?.type === 'output'
+  const isDropTarget = !readOnly && context.dragTarget?.type === 'output'
     && context.dragTarget.rungId === rungId
 
   return (
@@ -1586,30 +1811,31 @@ function renderOutput(
         isCoil ? 'll-coil' : 'll-instruction',
         powered ? 'is-powered' : '',
         q ? 'is-true' : '',
+        readOnly ? 'is-read-only' : '',
         selected ? 'is-selected' : '',
         isDropTarget ? 'is-drop-target' : '',
       ].filter(Boolean).join(' ')}
       data-drop={JSON.stringify({ type: 'output', rungId })}
       data-output-id={output.id}
       data-operand={details.bound ? details.address : details.name}
-      role="button"
-      tabIndex={0}
+      role={readOnly ? undefined : 'button'}
+      tabIndex={readOnly ? undefined : 0}
       aria-label={
         placeholder
           ? '输出，尚未绑定变量，单击编辑操作数，双击打开更多参数'
           : OUTPUT_LABELS[output.kind] + '输出，' + details.name + '，'
             + details.address + '，单击编辑操作数，双击打开更多参数'
       }
-      onClick={(event) => {
+      onClick={readOnly ? undefined : (event) => {
         event.stopPropagation()
         selectAndEdit(context, selection, event.currentTarget)
       }}
-      onDoubleClick={(event) => {
+      onDoubleClick={readOnly ? undefined : (event) => {
         event.preventDefault()
         event.stopPropagation()
         selectDetails(context, selection, event.currentTarget)
       }}
-      onKeyDown={(event) => {
+      onKeyDown={readOnly ? undefined : (event) => {
         activateDetailsWithKeyboard(
           event,
           () => selectDetails(context, selection, event.currentTarget),
@@ -1695,14 +1921,16 @@ function renderOutput(
         renderInstructionGraphic(output, context, size, centerY, powered, symbol, address)
       )}
 
-      <rect
-        className="ll-selection-box"
-        x="2"
-        y="3"
-        width={size.width - 4}
-        height={size.height - 6}
-        rx="4"
-      />
+      {!readOnly && (
+        <rect
+          className="ll-selection-box"
+          x="2"
+          y="3"
+          width={size.width - 4}
+          height={size.height - 6}
+          rx="4"
+        />
+      )}
     </g>
   )
 }
@@ -1713,35 +1941,56 @@ function measureRung(
   m: LadderMetrics,
 ) {
   const measureMemo: LayoutMemo = new Map()
+  const networkMeasureMemo: NetworkLayoutMemo = new Map()
   const placeholder = isBlankRung(rung)
   const measuredChain = measureChain(rung.nodes, m, undefined, measureMemo)
   // An empty rung is a draft wire, not an empty network with an invisible coil.
   const chain = placeholder ? { ...measuredChain, width: m.slotW } : measuredChain
-  const output = placeholder ? { width: 0, height: 0, lineY: 0 } : outputSize(rung.output, m)
+  const hasNetwork = !placeholder && Boolean(rung.network?.length)
+  const network = hasNetwork
+    ? measureNetworkChain(rung.network ?? [], m, networkMeasureMemo)
+    : { width: 0, height: 0, lineY: 0 }
+  const output = placeholder || hasNetwork
+    ? { width: 0, height: 0, lineY: 0 }
+    : outputSize(rung.output, m)
   const chainX = m.railLeft + m.chainLeft
+  const networkX = chainX + chain.width + m.chainToOutput
   const naturalWidth = placeholder
     ? Math.max(m.minWidth, chainX + chain.width + m.slotW + m.railRight)
-    : chainX + chain.width + m.chainToOutput
-      + output.width + m.outputToRail + m.railRight
+    : hasNetwork
+      ? networkX + network.width + m.outputToRail + m.railRight
+      : chainX + chain.width + m.chainToOutput
+        + output.width + m.outputToRail + m.railRight
   const width = Math.max(m.minWidth, naturalWidth, Math.ceil(availableWidth))
   // 主线路固定在图框内的同一高度：含指令框的程序段不会把整段触点压低，
   // 相邻程序段的元件才能落在同一条水平线上。
-  const top = Math.max(m.contactLineY, m.coilLineY, m.boxLineY)
-  const bottom = Math.max(chain.height - chain.lineY, output.height - output.lineY)
+  const top = Math.max(m.contactLineY, m.coilLineY, m.boxLineY, network.lineY)
+  const bottom = Math.max(
+    chain.height - chain.lineY,
+    output.height - output.lineY,
+    network.height - network.lineY,
+  )
   const height = top + bottom + 22
   const centerY = top + 11
   return {
     chain,
+    network,
+    hasNetwork,
     output,
     chainX,
-    outputX: width - m.railRight - m.outputToRail - output.width,
+    networkX,
+    outputX: hasNetwork
+      ? networkX + network.width
+      : width - m.railRight - m.outputToRail - output.width,
     width,
     naturalWidth,
     height,
     chainY: centerY - chain.lineY,
     outputY: centerY - output.lineY,
+    networkY: centerY - network.lineY,
     centerY,
     measureMemo,
+    networkMeasureMemo,
   }
 }
 
@@ -1754,12 +2003,23 @@ export function naturalRungWidth(rung: Program['rungs'][number]): number {
   return measureRung(rung, 0, DEFAULT_METRICS).width
 }
 
-function collectNodeIds(nodes: LadderNode[]): string[] {
-  return nodes.flatMap((node) => (
+function collectNetworkIds(nodes: NetworkElement[]): string[] {
+  return nodes.flatMap((node) => {
+    if (node.type === 'contact' || node.type === 'output') return [node.id]
+    return [node.id, ...node.branches.flatMap(collectNetworkIds)]
+  })
+}
+
+function collectNodeIds(
+  nodes: LadderNode[],
+  network: NetworkElement[] = [],
+): string[] {
+  const local = nodes.flatMap((node) => (
     node.type === 'contact'
       ? [node.id]
-      : [node.id, ...node.branches.flatMap(collectNodeIds)]
+      : [node.id, ...node.branches.flatMap((branch) => collectNodeIds(branch))]
   ))
+  return [...local, ...collectNetworkIds(network)]
 }
 
 const insertPulseTimers = new WeakMap<SVGGraphicsElement, number>()
@@ -1918,8 +2178,11 @@ function RungSection({
     segment: segmentLabel,
     metrics,
     measureMemo: layout.measureMemo,
+    networkMeasureMemo: layout.networkMeasureMemo,
   }
-  const powered = context.runtime.rungPower[rung.id] === true
+  const powered = layout.hasNetwork
+    ? networkChainPower(rung.network ?? [], context.runtime)
+    : context.runtime.rungPower[rung.id] === true
   // 选中某个元件后，这一行才淡显插入位和拖拽手柄：
   // 既保留空白画面的克制，也让第一次使用的人看得见“这里能点、能拖”。
   const rungSelected = context.selection?.rungId === rung.id
@@ -1981,7 +2244,7 @@ function RungSection({
   useLayoutEffect(() => {
     const container = scrollRef.current
     if (!container) return
-    const ids = collectNodeIds(rung.nodes)
+    const ids = collectNodeIds(rung.nodes, rung.network)
     const previous = seenNodesRef.current
     const previousOutput = seenOutputRef.current
     seenNodesRef.current = new Set(ids)
@@ -2004,7 +2267,7 @@ function RungSection({
     const insideParallel = focus.closest('.ll-parallel') !== null
     if (!insideParallel) pulseInsertedNode(focus)
     revealInserted(container, focus, output && focus !== output ? output : null)
-  }, [rung.nodes, rung.output.id])
+  }, [rung.nodes, rung.network, rung.output.id])
 
   function commitTitle() {
     if (titleDraft === null) return
@@ -2360,18 +2623,47 @@ function RungSection({
             {renderChain(rung.nodes, rungContext, [], true)}
           </g>
           {!placeholder && (
-            <>
-              <line
-                className={'ll-power-wire' + (powered ? ' is-on' : '')}
-                x1={layout.chainX + layout.chain.width}
-                y1={layout.centerY}
-                x2={layout.outputX}
-                y2={layout.centerY}
-              />
-              <g transform={'translate(' + layout.outputX + ', ' + layout.outputY + ')'}>
-                {renderOutput(rung.output, rungContext, rung.id, false)}
-              </g>
-            </>
+            layout.hasNetwork ? (
+              <>
+                <line
+                  className={'ll-power-wire' + (powered ? ' is-on' : '')}
+                  x1={layout.chainX + layout.chain.width}
+                  y1={layout.centerY}
+                  x2={layout.networkX}
+                  y2={layout.centerY}
+                />
+                <g
+                  className="ll-network"
+                  transform={'translate(' + layout.networkX + ', ' + layout.networkY + ')'}
+                >
+                  {renderNetworkChain(
+                    rung.network ?? [],
+                    rungContext,
+                    context.runtime.rungPower[rung.id] === true,
+                  )}
+                </g>
+                <line
+                  className={'ll-power-wire' + (powered ? ' is-on' : '')}
+                  x1={layout.outputX}
+                  y1={layout.centerY}
+                  x2={layout.width - metrics.railRight}
+                  y2={layout.centerY}
+                />
+              </>
+            ) : (
+              <>
+                <line
+                  className={'ll-power-wire' + (powered ? ' is-on' : '')}
+                  x1={layout.chainX + layout.chain.width}
+                  y1={layout.centerY}
+                  x2={layout.outputX}
+                  y2={layout.centerY}
+                />
+                <g transform={'translate(' + layout.outputX + ', ' + layout.outputY + ')'}>
+                  {renderOutput(rung.output, rungContext, rung.id, false)}
+                </g>
+              </>
+            )
           )}
           {powered && !placeholder && spark && (
             <g className="ll-energy" aria-hidden="true">
@@ -2448,6 +2740,51 @@ function sameNodeRuntime(
   ))
 }
 
+function sameNetworkOutputRuntime(
+  previous: Runtime,
+  next: Runtime,
+  output: OutputElement,
+): boolean {
+  if ((previous.outputPower[output.id] ?? false)
+    !== (next.outputPower[output.id] ?? false)) return false
+  if (['COIL', 'SET', 'RESET'].includes(output.kind)
+    && (previous.bools[output.tag] ?? false) !== (next.bools[output.tag] ?? false)) {
+    return false
+  }
+  if (['TON', 'TOF', 'TONR'].includes(output.kind)) {
+    const before = previous.timers[output.tag]
+    const after = next.timers[output.tag]
+    if ((before?.et ?? 0) !== (after?.et ?? 0) || (before?.q ?? false) !== (after?.q ?? false)) {
+      return false
+    }
+  }
+  if (output.kind === 'CTU') {
+    const before = previous.counters[output.tag]
+    const after = next.counters[output.tag]
+    if ((before?.cv ?? 0) !== (after?.cv ?? 0) || (before?.q ?? false) !== (after?.q ?? false)) {
+      return false
+    }
+  }
+  return output.kind !== 'PATTERN'
+    || (previous.patterns[output.id]?.index ?? 0)
+      === (next.patterns[output.id]?.index ?? 0)
+}
+
+function sameNetworkRuntime(
+  previous: Runtime,
+  next: Runtime,
+  chain: NetworkElement[],
+): boolean {
+  return chain.every((node) => {
+    if ((previous.nodePower[node.id] ?? false) !== (next.nodePower[node.id] ?? false)) {
+      return false
+    }
+    if (node.type === 'contact') return true
+    if (node.type === 'output') return sameNetworkOutputRuntime(previous, next, node)
+    return node.branches.every((branch) => sameNetworkRuntime(previous, next, branch))
+  })
+}
+
 /**
  * 扫描运行时每拍都会生成新的 Runtime 对象，但绝大多数程序段看到的能流、
  * 计时值和计数都没有变化。只比较本段真正渲染的运行时字段，避免 1000 段
@@ -2461,9 +2798,11 @@ function sameRuntimeForRung(
   if ((previous.rungPower[rung.id] ?? false) !== (next.rungPower[rung.id] ?? false)) {
     return false
   }
-  if ((previous.outputPower[rung.output.id] ?? false)
-    !== (next.outputPower[rung.output.id] ?? false)) return false
+  if (!rung.network?.length
+    && (previous.outputPower[rung.output.id] ?? false)
+      !== (next.outputPower[rung.output.id] ?? false)) return false
   if (!rung.nodes.every((node) => sameNodeRuntime(previous, next, node))) return false
+  if (rung.network?.length && !sameNetworkRuntime(previous, next, rung.network)) return false
 
   const output = rung.output
   if (['TON', 'TOF', 'TONR'].includes(output.kind)) {

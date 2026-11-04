@@ -532,6 +532,21 @@
   fill: transparent;
 }
 
+/* Network outputs replicated from the course PPT are structural geometry:
+   selecting them must not open an operand editor for the synthetic container. */
+.ll-network .ll-node,
+.ll-network .ll-node * {
+  cursor: default;
+}
+
+.ll-network {
+  pointer-events: none;
+}
+
+.ll-network .ll-node-hit {
+  pointer-events: none;
+}
+
 /* 一律用子选择器：并联节点里面还套着别的 .ll-node，
    写成后代选择器会让整棵子树一起被描边、一起变蓝。 */
 .ll-node:hover > .ll-node-hit {

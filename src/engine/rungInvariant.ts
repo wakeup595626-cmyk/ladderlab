@@ -3,6 +3,7 @@ import type { Program, Rung } from './types'
 
 export function isBlankRung(rung: Rung): boolean {
   return rung.nodes.length === 0
+    && !(rung.network?.length)
     && rung.output.kind === 'COIL'
     && rung.output.tag.trim() === ''
     && rung.label.trim() === ''

@@ -1,4 +1,11 @@
-import type { ContactNode, LadderNode, OutputElement, Program, Runtime } from './types'
+import type {
+  ContactNode,
+  LadderNode,
+  NetworkElement,
+  OutputElement,
+  Program,
+  Runtime,
+} from './types'
 import { parseAddress } from './address'
 import { normalizeReference, parseBitAddress, splitReference } from './references'
 import { contentRungs } from './rungInvariant'
@@ -46,6 +53,15 @@ function walkNodes(program: Program, visit: (node: ContactNode) => void) {
     else node.branches.forEach(walk)
   })
   contentRungs(program).forEach((rung) => walk(rung.nodes))
+}
+
+/** 多输出网络里的触点也要初始化沿状态，否则首扫描会凭空产生上升沿。 */
+function walkNetworkNodes(program: Program, visit: (node: ContactNode) => void) {
+  const walk = (nodes: NetworkElement[]) => nodes.forEach((node) => {
+    if (node.type === 'contact') visit(node)
+    else if (node.type === 'parallel') node.branches.forEach(walk)
+  })
+  contentRungs(program).forEach((rung) => walk(rung.network ?? []))
 }
 
 /** Synchronize an explicit INT-byte / BOOL-bit alias in either direction. */
@@ -161,7 +177,8 @@ function evalChain(chain: LadderNode[], incoming: boolean, runtime: Runtime): bo
   return power
 }
 
-function applyOutput(output: OutputElement, power: boolean, runtime: Runtime, dtMs: number, program: Program) {
+/** 执行一个输出，并返回它向右侧继续传递的能流（用于同段串联多个输出）。 */
+function applyOutput(output: OutputElement, power: boolean, runtime: Runtime, dtMs: number, program: Program): boolean {
   const write = (name: string, value: boolean | number) => {
     const normalized = normalizeReference(name)
     const tag = program.tags.find((item) => tagName(item) === normalized)
@@ -172,9 +189,9 @@ function applyOutput(output: OutputElement, power: boolean, runtime: Runtime, dt
   }
   const instance = normalizeReference(output.tag)
   switch (output.kind) {
-    case 'COIL': write(output.tag, power); break
-    case 'SET': if (power) write(output.tag, true); break
-    case 'RESET': if (power) write(output.tag, false); break
+    case 'COIL': write(output.tag, power); return power
+    case 'SET': if (power) write(output.tag, true); return power
+    case 'RESET': if (power) write(output.tag, false); return power
     case 'TON': {
       const timer = runtime.timers[instance] ?? { et: 0, q: false, prevIn: false }
       if (power) {
@@ -185,7 +202,7 @@ function applyOutput(output: OutputElement, power: boolean, runtime: Runtime, dt
       runtime.timers[instance] = timer
       if (output.qTag) write(output.qTag, timer.q)
       if (output.valueTag) write(output.valueTag, timer.et)
-      break
+      return timer.q
     }
     case 'TOF': {
       const timer = runtime.timers[instance] ?? { et: 0, q: false, prevIn: false }
@@ -198,7 +215,7 @@ function applyOutput(output: OutputElement, power: boolean, runtime: Runtime, dt
       runtime.timers[instance] = timer
       if (output.qTag) write(output.qTag, timer.q)
       if (output.valueTag) write(output.valueTag, timer.et)
-      break
+      return timer.q
     }
     case 'TONR': {
       const timer = runtime.timers[instance] ?? { et: 0, q: false, prevIn: false }
@@ -211,7 +228,7 @@ function applyOutput(output: OutputElement, power: boolean, runtime: Runtime, dt
       runtime.timers[instance] = timer
       if (output.qTag) write(output.qTag, timer.q)
       if (output.valueTag) write(output.valueTag, timer.et)
-      break
+      return timer.q
     }
     case 'CTU': {
       const counter = runtime.counters[instance] ?? { cv: 0, q: false, prevIn: false }
@@ -226,16 +243,16 @@ function applyOutput(output: OutputElement, power: boolean, runtime: Runtime, dt
       runtime.counters[instance] = counter
       if (output.qTag) write(output.qTag, counter.q)
       if (output.valueTag) write(output.valueTag, counter.cv)
-      break
+      return counter.q
     }
     case 'MOVE':
       if (power) write(output.tag, output.sourceTag ? readIntValue(runtime, output.sourceTag) : output.value ?? 0)
-      break
+      return power
     case 'ADD':
     case 'SUB':
     case 'SHL':
     case 'ROL': {
-      if (!power) break
+      if (!power) return power
       const source = output.sourceTag ? readIntValue(runtime, output.sourceTag) : readIntValue(runtime, output.tag)
       const operand = output.valueTag ? readIntValue(runtime, output.valueTag) : output.value ?? 1
       let result = operand
@@ -261,7 +278,7 @@ function applyOutput(output: OutputElement, power: boolean, runtime: Runtime, dt
         }
       }
       write(output.tag, result)
-      break
+      return power
     }
     case 'PATTERN': {
       const state = runtime.patterns[output.id] ?? { index: 0, prevIn: false }
@@ -277,9 +294,56 @@ function applyOutput(output: OutputElement, power: boolean, runtime: Runtime, dt
       }
       state.prevIn = pulse
       runtime.patterns[output.id] = state
-      break
+      return power
     }
+    case 'R_TRIG': {
+      const key = 'trig:' + output.id
+      const previous = runtime.edges[key] ?? false
+      runtime.edges[key] = power
+      return power && !previous
+    }
+    default: return power
   }
+}
+
+/**
+ * 按“每条并联支路都执行、串联逐级传能流”的规则求值网络。
+ * 不能用 some() 短路，否则后面的并联支路里 SET/RESET 等输出会被跳过。
+ */
+function evalNetwork(
+  chain: NetworkElement[],
+  incoming: boolean,
+  runtime: Runtime,
+  dtMs: number,
+  program: Program,
+): boolean {
+  let power = incoming
+  for (const node of chain) {
+    if (node.type === 'contact') {
+      const closed = evalContact(node, runtime)
+      power = power && closed
+      runtime.nodePower[node.id] = power
+      continue
+    }
+    if (node.type === 'parallel') {
+      const active = node.open === true ? node.branches.slice(0, 1) : node.branches
+      let any = false
+      for (const branch of active) {
+        const branchPower = node.open !== true && branch.length === 0
+          ? false
+          : evalNetwork(branch, power, runtime, dtMs, program)
+        if (branchPower) any = true
+      }
+      power = power && any
+      runtime.nodePower[node.id] = power
+      continue
+    }
+    const inputPower = power
+    runtime.outputPower[node.id] = inputPower
+    power = applyOutput(node, inputPower, runtime, dtMs, program)
+    runtime.nodePower[node.id] = power
+  }
+  return power
 }
 
 export function createRuntime(program: Program): Runtime {
@@ -291,21 +355,31 @@ export function createRuntime(program: Program): Runtime {
   }
   for (const tag of program.tags) {
     const name = tagName(tag)
-    if (tag.kind === 'BOOL') runtime.bools[name] = Boolean(tag.initial)
+    if (tag.kind === 'BOOL') runtime.bools[name] = tag.firstScan ? true : Boolean(tag.initial)
     else runtime.ints[name] = wrapInt(typeof tag.initial === 'number' ? tag.initial : 0)
   }
   for (const tag of program.tags) {
     if (tag.kind === 'INT') syncAlias(runtime, program, tagName(tag), 'INT')
   }
   for (const rung of contentRungs(program)) {
-    const output = rung.output
-    const instanceName = normalizeReference(output.tag)
-    if (['TON', 'TOF', 'TONR'].includes(output.kind)) runtime.timers[instanceName] = { et: 0, q: false, prevIn: false }
-    if (output.kind === 'CTU') runtime.counters[instanceName] = { cv: 0, q: false, prevIn: false }
-    if (output.kind === 'PATTERN') runtime.patterns[output.id] = { index: 0, prevIn: false }
+    const outputs = [rung.output]
+    const collect = (nodes: NetworkElement[]) => nodes.forEach((node) => {
+      if (node.type === 'output') outputs.push(node)
+      else if (node.type === 'parallel') node.branches.forEach(collect)
+    })
+    collect(rung.network ?? [])
+    for (const output of outputs) {
+      const instanceName = normalizeReference(output.tag)
+      if (['TON', 'TOF', 'TONR'].includes(output.kind)) runtime.timers[instanceName] = { et: 0, q: false, prevIn: false }
+      if (output.kind === 'CTU') runtime.counters[instanceName] = { cv: 0, q: false, prevIn: false }
+      if (output.kind === 'PATTERN') runtime.patterns[output.id] = { index: 0, prevIn: false }
+    }
   }
   // A closed switch at startup must not create a false rising edge.
   walkNodes(program, (node) => {
+    if (node.kind === 'P' || node.kind === 'N') runtime.edges[node.id] = readBoolValue(runtime, node.tag)
+  })
+  walkNetworkNodes(program, (node) => {
     if (node.kind === 'P' || node.kind === 'N') runtime.edges[node.id] = readBoolValue(runtime, node.tag)
   })
   return runtime
@@ -328,8 +402,19 @@ export function step(program: Program, previous: Runtime, dtMs: number): Runtime
   for (const rung of contentRungs(program)) {
     const power = evalChain(rung.nodes, true, runtime)
     runtime.rungPower[rung.id] = power
-    runtime.outputPower[rung.output.id] = power
-    applyOutput(rung.output, power, runtime, dtMs, program)
+    if (rung.network?.length) {
+      const result = evalNetwork(rung.network, power, runtime, dtMs, program)
+      runtime.outputPower[rung.output.id] = result
+    } else {
+      runtime.outputPower[rung.output.id] = power
+      applyOutput(rung.output, power, runtime, dtMs, program)
+    }
+  }
+  // 首次扫描标志只在第一扫描为 TRUE，扫描结束后统一清除。
+  if (previous.scanCount === 0) {
+    for (const tag of program.tags) {
+      if (tag.firstScan && tag.kind === 'BOOL') runtime.bools[tagName(tag)] = false
+    }
   }
   return runtime
 }

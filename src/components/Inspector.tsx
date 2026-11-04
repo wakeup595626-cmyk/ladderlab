@@ -73,6 +73,8 @@ const OUTPUT_NAMES: Record<OutputKind, string> = {
   SHL: '左移位 SHL',
   ROL: '字节循环左移 ROL',
   PATTERN: '教学灯字序列 PATTERN',
+  NETWORK: '多输出网络 NETWORK',
+  R_TRIG: '上升沿触发 R_TRIG',
 }
 
 function isTimerKind(kind: OutputKind): boolean {
@@ -1110,6 +1112,17 @@ function PropertiesPanel({
 
   if (isOutput || !selectedNode) {
     const output = selectedRung.output
+    if (output.kind === 'NETWORK') {
+      return (
+        <div className="property-form">
+          <div className="property-heading">
+            <span className="property-type">程序段</span>
+            <h3>多输出网络 NETWORK</h3>
+            <p>本段包含多个输出，网络内部只读；请在梯形图中查看各并联支路。</p>
+          </div>
+        </div>
+      )
+    }
     const boolTags = program.tags.filter((tag) => tag.kind === 'BOOL')
     const intTags = program.tags.filter((tag) => tag.kind === 'INT')
     const supports = (kind: OutputKind) => supportsOutput(program.profile, kind)

@@ -1,4 +1,4 @@
-import type { LadderNode, Program } from '../engine/types'
+import type { LadderNode, NetworkElement, OutputElement, Program } from '../engine/types'
 
 /** 界面编辑、工程解析和保存共用同一组文本上限，避免一侧放行、另一侧拒收。 */
 export const FIELD_LIMITS = {
@@ -72,19 +72,36 @@ export function programTextFieldIssues(program: Program): string[] {
       }
     }
     visit(rung.nodes)
-    const output = rung.output
-    const refs = [
-      output.tag,
-      output.resetTag,
-      output.qTag,
-      output.valueTag,
-      output.sourceTag,
-      output.pulseTag,
-      output.stepTag,
-    ]
-    for (const ref of refs) {
-      if (ref && !withinFieldLimit('reference', ref)) issues.push(fieldLimitMessage('reference', ref))
+    const checkOutput = (output: OutputElement) => {
+      const refs = [
+        output.tag,
+        output.resetTag,
+        output.qTag,
+        output.valueTag,
+        output.sourceTag,
+        output.pulseTag,
+        output.stepTag,
+      ]
+      for (const ref of refs) {
+        if (ref && !withinFieldLimit('reference', ref)) issues.push(fieldLimitMessage('reference', ref))
+      }
     }
+    const visitNetwork = (nodes: NetworkElement[]) => {
+      for (const node of nodes) {
+        if (node.type === 'contact') {
+          if (!withinFieldLimit('reference', node.tag)) issues.push(fieldLimitMessage('reference', node.tag))
+        } else if (node.type === 'parallel') {
+          if (node.autoTagId && !withinFieldLimit('reference', node.autoTagId)) {
+            issues.push(fieldLimitMessage('reference', node.autoTagId))
+          }
+          node.branches.forEach(visitNetwork)
+        } else {
+          checkOutput(node)
+        }
+      }
+    }
+    checkOutput(rung.output)
+    visitNetwork(rung.network ?? [])
   }
   return issues
 }
@@ -115,7 +132,8 @@ export function programStructureIssues(program: Program): string[] {
   let contentRungs = 0
   for (const rung of program.rungs) {
     // 末尾空白占位段不算内容段，与导入端保持一致。
-    if (rung.nodes.length > 0 || rung.label.trim() !== '' || rung.output.tag.trim() !== '') contentRungs += 1
+    if (rung.nodes.length > 0 || (rung.network?.length ?? 0) > 0
+      || rung.label.trim() !== '' || rung.output.tag.trim() !== '') contentRungs += 1
   }
   if (contentRungs > STRUCTURE_LIMITS.rungs) {
     issues.push(`程序段数量超过上限 ${STRUCTURE_LIMITS.rungs} 条（末尾空白占位段不计入上限）。`)
@@ -132,8 +150,18 @@ export function programStructureIssues(program: Program): string[] {
       }
     }
   }
+  const walkNetwork = (nodes: NetworkElement[], depth: number): void => {
+    for (const node of nodes) {
+      nodeCount += 1
+      if (depth > STRUCTURE_LIMITS.depth) tooDeep = true
+      if (node.type === 'parallel') {
+        for (const branch of node.branches) walkNetwork(branch, depth + 1)
+      }
+    }
+  }
   for (const rung of program.rungs) {
     walk(rung.nodes, 0)
+    walkNetwork(rung.network ?? [], 0)
     if ((rung.output.pattern?.length ?? 0) > STRUCTURE_LIMITS.pattern) {
       issues.push(`灯字序列最多支持 ${STRUCTURE_LIMITS.pattern} 个。`)
     }

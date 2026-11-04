@@ -26,7 +26,7 @@ export const PROFILES: Profile[] = [
     tagline: '经典指令集',
     description: '课程实验子集：位逻辑、边沿、比较、定时计数及整数传送移位。',
     contacts: ['NO', 'NC', 'P', 'N', 'CMP'],
-    outputs: ['COIL', 'SET', 'RESET', 'TON', 'TOF', 'CTU', 'MOVE', 'ADD', 'SUB', 'SHL', 'ROL', 'PATTERN'],
+    outputs: ['COIL', 'SET', 'RESET', 'TON', 'TOF', 'CTU', 'MOVE', 'ADD', 'SUB', 'SHL', 'ROL', 'PATTERN', 'NETWORK', 'R_TRIG'],
   },
   {
     id: 'v21',
@@ -37,7 +37,7 @@ export const PROFILES: Profile[] = [
     tagline: '现代指令集',
     description: '课程实验指令子集：位逻辑、边沿、比较、定时计数、整数移位和累计定时。',
     contacts: ['NO', 'NC', 'P', 'N', 'CMP'],
-    outputs: ['COIL', 'SET', 'RESET', 'TON', 'TOF', 'TONR', 'CTU', 'MOVE', 'ADD', 'SUB', 'SHL', 'ROL', 'PATTERN'],
+    outputs: ['COIL', 'SET', 'RESET', 'TON', 'TOF', 'TONR', 'CTU', 'MOVE', 'ADD', 'SUB', 'SHL', 'ROL', 'PATTERN', 'NETWORK', 'R_TRIG'],
   },
 ]
 

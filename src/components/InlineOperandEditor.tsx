@@ -75,6 +75,8 @@ const OUTPUT_NAMES: Record<OutputKind, string> = {
   SHL: '左移 SHL',
   ROL: '循环左移 ROL',
   PATTERN: '灯字序列',
+  NETWORK: '多输出网络',
+  R_TRIG: '上升沿触发 R_TRIG',
 }
 
 const ANCHOR_GAP = 11

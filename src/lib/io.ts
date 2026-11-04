@@ -1,6 +1,9 @@
 import type {
   ContactKind,
+  ContactNode,
   LadderNode,
+  NetworkElement,
+  OutputElement,
   OutputKind,
   Program,
   ProfileId,
@@ -19,7 +22,7 @@ const CONTACT_LABELS: Record<ContactKind, string> = {
   N: '下降沿触点',
   CMP: '比较触点',
 }
-const OUTPUT_KINDS: OutputKind[] = ['COIL', 'SET', 'RESET', 'TON', 'TOF', 'TONR', 'CTU', 'MOVE', 'ADD', 'SUB', 'SHL', 'ROL', 'PATTERN']
+const OUTPUT_KINDS: OutputKind[] = ['COIL', 'SET', 'RESET', 'TON', 'TOF', 'TONR', 'CTU', 'MOVE', 'ADD', 'SUB', 'SHL', 'ROL', 'PATTERN', 'NETWORK', 'R_TRIG']
 const TAG_KINDS: TagKind[] = ['BOOL', 'INT']
 const PROFILES: ProfileId[] = ['v14', 'v21']
 const MAX_DEPTH = STRUCTURE_LIMITS.depth
@@ -95,6 +98,7 @@ function isBlankRungInput(value: unknown): boolean {
   const rung = value as Record<string, unknown>
   const output = rung.output
   if (!Array.isArray(rung.nodes) || rung.nodes.length !== 0) return false
+  if (Array.isArray(rung.network) && rung.network.length > 0) return false
   if (typeof rung.label !== 'string' || rung.label.trim() !== '') return false
   if (typeof output !== 'object' || output === null || Array.isArray(output)) return false
   const parsedOutput = output as Record<string, unknown>
@@ -120,13 +124,25 @@ function validateReferences(
   const timers = new Set<string>()
   const counters = new Set<string>()
 
+  const networkOutputs = (rung: Program['rungs'][number]): OutputElement[] => {
+    const outputs: OutputElement[] = []
+    const walk = (nodes: NetworkElement[]) => nodes.forEach((node) => {
+      if (node.type === 'output') outputs.push(node)
+      else if (node.type === 'parallel') node.branches.forEach(walk)
+    })
+    walk(rung.network ?? [])
+    return outputs
+  }
+
   for (const rung of rungs) {
-    const instance = rung.output.tag.trim()
-    if (!instance) continue
-    if (rung.output.kind === 'TON' || rung.output.kind === 'TOF' || rung.output.kind === 'TONR') {
-      timers.add(instance)
-    } else if (rung.output.kind === 'CTU') {
-      counters.add(instance)
+    for (const output of [rung.output, ...networkOutputs(rung)]) {
+      const instance = output.tag.trim()
+      if (!instance) continue
+      if (output.kind === 'TON' || output.kind === 'TOF' || output.kind === 'TONR') {
+        timers.add(instance)
+      } else if (output.kind === 'CTU') {
+        counters.add(instance)
+      }
     }
   }
 
@@ -172,7 +188,7 @@ function validateReferences(
     }
   }
 
-  const visitNodes = (nodes: LadderNode[], rungNumber: number) => {
+  const visitNodes = (nodes: Array<LadderNode | NetworkElement>, rungNumber: number) => {
     for (const node of nodes) {
       if (node.type === 'parallel') {
         if (node.autoTagId && !tagIds.has(node.autoTagId)) {
@@ -185,6 +201,7 @@ function validateReferences(
         node.branches.forEach((branch) => visitNodes(branch, rungNumber))
         continue
       }
+      if (node.type === 'output') continue
 
       const label = CONTACT_LABELS[node.kind]
       const reference = node.tag.trim()
@@ -242,26 +259,42 @@ function validateReferences(
     const blankPlaceholder = rung.nodes.length === 0
       && rung.output.kind === 'COIL'
       && !rung.output.tag.trim()
+      && !(rung.network?.length)
     if (blankPlaceholder) return
     visitNodes(rung.nodes, rungNumber)
-    const output = rung.output
-    if (output.kind !== 'TON' && output.kind !== 'TOF' && output.kind !== 'TONR' && output.kind !== 'CTU') {
-      if (!output.tag.trim()) {
-        report({
-          code: 'undefined-reference',
-          rungNumber,
-          message: `第 ${rungNumber} 条程序段的${output.kind} 输出变量没有填写。`,
-        })
-      } else {
-        requireVariable(output.tag, rungNumber, `${output.kind} 输出变量`)
+    visitNodes(rung.network ?? [], rungNumber)
+    const checkOutputFields = (output: OutputElement) => {
+      if (output.kind === 'NETWORK') return
+      if (output.kind === 'R_TRIG') {
+        if (!output.tag.trim()) {
+          report({
+            code: 'undefined-reference',
+            rungNumber,
+            message: `第 ${rungNumber} 条程序段的 R_TRIG 实例名没有填写。`,
+          })
+        }
+        return
       }
+      if (output.kind !== 'TON' && output.kind !== 'TOF' && output.kind !== 'TONR' && output.kind !== 'CTU') {
+        if (!output.tag.trim()) {
+          report({
+            code: 'undefined-reference',
+            rungNumber,
+            message: `第 ${rungNumber} 条程序段的${output.kind} 输出变量没有填写。`,
+          })
+        } else {
+          requireVariable(output.tag, rungNumber, `${output.kind} 输出变量`)
+        }
+      }
+      requireVariable(output.resetTag, rungNumber, '复位变量')
+      requireVariable(output.qTag, rungNumber, '状态输出变量')
+      requireVariable(output.valueTag, rungNumber, '数值输出变量')
+      requireVariable(output.sourceTag, rungNumber, '源变量')
+      requireVariable(output.stepTag, rungNumber, '步号变量')
+      requireBoolOrInstanceQ(output.pulseTag, rungNumber, 'PATTERN 节拍变量')
     }
-    requireVariable(output.resetTag, rungNumber, '复位变量')
-    requireVariable(output.qTag, rungNumber, '状态输出变量')
-    requireVariable(output.valueTag, rungNumber, '数值输出变量')
-    requireVariable(output.sourceTag, rungNumber, '源变量')
-    requireVariable(output.stepTag, rungNumber, '步号变量')
-    requireBoolOrInstanceQ(output.pulseTag, rungNumber, 'PATTERN 节拍变量')
+    if (rung.output.kind !== 'NETWORK') checkOutputFields(rung.output)
+    networkOutputs(rung).forEach(checkOutputFields)
   })
 }
 
@@ -308,6 +341,93 @@ function parseNode(value: unknown, where: string, depth = 0): LadderNode {
     }
   }
   return fail(`${where}.type 只能是 contact 或 parallel。`)
+}
+
+function parseOutputElement(value: unknown, where: string, outputIds: Set<string>): OutputElement {
+  const output = record(value, where)
+  const kind = text(output.kind, `${where}.kind`) as OutputKind
+  if (!OUTPUT_KINDS.includes(kind)) fail(`${where}.kind 不是支持的输出类型。`)
+  if (Array.isArray(output.pattern) && output.pattern.length > MAX_PATTERN) {
+    fail(`${where}.pattern 最多支持 ${MAX_PATTERN} 个灯字。`)
+  }
+  const outputId = text(output.id, `${where}.id`).trim()
+  if (!outputId) fail(`${where}.id 不能为空。`)
+  if (outputIds.has(outputId)) fail(`输出 ID“${outputId}”重复。`)
+  outputIds.add(outputId)
+  return {
+    id: outputId,
+    kind,
+    tag: capped(
+      text(output.tag, `${where}.tag`).trim(),
+      FIELD_LIMITS.reference,
+      '变量引用',
+      `${where}.tag`,
+    ),
+    ...(output.pt !== undefined ? { pt: number(output.pt, `${where}.pt`) } : {}),
+    ...(output.pv !== undefined ? { pv: number(output.pv, `${where}.pv`) } : {}),
+    ...(output.resetTag !== undefined ? {
+      resetTag: capped(text(output.resetTag, `${where}.resetTag`).trim(), FIELD_LIMITS.reference, '变量引用', `${where}.resetTag`),
+    } : {}),
+    ...(output.qTag !== undefined ? {
+      qTag: capped(text(output.qTag, `${where}.qTag`).trim(), FIELD_LIMITS.reference, '变量引用', `${where}.qTag`),
+    } : {}),
+    ...(output.valueTag !== undefined ? {
+      valueTag: capped(text(output.valueTag, `${where}.valueTag`).trim(), FIELD_LIMITS.reference, '变量引用', `${where}.valueTag`),
+    } : {}),
+    ...(output.sourceTag !== undefined ? {
+      sourceTag: capped(text(output.sourceTag, `${where}.sourceTag`).trim(), FIELD_LIMITS.reference, '变量引用', `${where}.sourceTag`),
+    } : {}),
+    ...(output.value !== undefined ? { value: number(output.value, `${where}.value`) } : {}),
+    ...(output.pulseTag !== undefined ? {
+      pulseTag: capped(text(output.pulseTag, `${where}.pulseTag`).trim(), FIELD_LIMITS.reference, '变量引用', `${where}.pulseTag`),
+    } : {}),
+    ...(output.stepTag !== undefined ? {
+      stepTag: capped(text(output.stepTag, `${where}.stepTag`).trim(), FIELD_LIMITS.reference, '变量引用', `${where}.stepTag`),
+    } : {}),
+    ...(output.pattern !== undefined ? {
+      pattern: Array.isArray(output.pattern)
+        ? output.pattern.map((item, index) => number(item, `${where}.pattern[${index}]`))
+        : fail(`${where}.pattern 必须是数组。`),
+    } : {}),
+  }
+}
+
+function parseNetworkElement(
+  value: unknown,
+  where: string,
+  outputIds: Set<string>,
+  depth = 0,
+): NetworkElement {
+  if (depth > MAX_DEPTH) fail(`${where} 的并联层数超过 ${MAX_DEPTH} 层。`)
+  const node = record(value, where)
+  const type = text(node.type, `${where}.type`)
+  if (type === 'contact') return parseNode(value, where, depth) as ContactNode
+  if (type === 'parallel') {
+    if (!Array.isArray(node.branches) || node.branches.length === 0) fail(`${where}.branches 必须是非空数组。`)
+    const autoTagId = typeof node.autoTagId === 'string' && node.autoTagId.trim()
+      ? capped(node.autoTagId.trim(), FIELD_LIMITS.reference, '变量引用', `${where}.autoTagId`)
+      : undefined
+    const branches = node.branches.map((branch, index) => {
+      if (!Array.isArray(branch)) fail(`${where}.branches[${index}] 必须是数组。`)
+      return branch.map((item, itemIndex) => parseNetworkElement(
+        item,
+        `${where}.branches[${index}][${itemIndex}]`,
+        outputIds,
+        depth + 1,
+      ))
+    })
+    return {
+      type: 'parallel',
+      id: text(node.id, `${where}.id`).trim(),
+      branches,
+      ...(node.open === true ? { open: true } : {}),
+      ...(autoTagId ? { autoTagId } : {}),
+    }
+  }
+  if (type === 'output') {
+    return { type: 'output', ...parseOutputElement(node, where, outputIds) }
+  }
+  return fail(`${where}.type 只能是 contact、parallel 或 output。`)
 }
 
 function parseProgramValue(input: unknown, strict: boolean): ParsedProgramStructure {
@@ -395,6 +515,7 @@ function parseProgramValue(input: unknown, strict: boolean): ParsedProgramStruct
       } : {}),
       // 保留“自动变量”标记，重新导入后仍能跟着指令一起增删；缺省（旧工程）按手写变量处理。
       ...(tag.auto === true ? { auto: true } : {}),
+      ...(tag.firstScan === true ? { firstScan: true } : {}),
     }
   })
 
@@ -404,51 +525,15 @@ function parseProgramValue(input: unknown, strict: boolean): ParsedProgramStruct
     const where = `rungs[${index}]`
     const rung = record(item, where)
     if (!Array.isArray(rung.nodes)) fail(`${where}.nodes 必须是数组。`)
-    const output = record(rung.output, `${where}.output`)
-    const kind = text(output.kind, `${where}.output.kind`) as OutputKind
-    if (!OUTPUT_KINDS.includes(kind)) fail(`${where}.output.kind 不是支持的输出类型。`)
-    if (Array.isArray(output.pattern) && output.pattern.length > MAX_PATTERN) {
-      fail(`${where}.output.pattern 最多支持 ${MAX_PATTERN} 个灯字。`)
-    }
-    const outputId = text(output.id, `${where}.output.id`).trim()
-    if (!outputId) fail(`${where}.output.id 不能为空。`)
-    if (outputIds.has(outputId)) fail(`输出 ID“${outputId}”重复。`)
-    outputIds.add(outputId)
-    const parsedOutput = {
-      id: outputId,
-      kind,
-      tag: capped(
-        text(output.tag, `${where}.output.tag`).trim(),
-        FIELD_LIMITS.reference,
-        '变量引用',
-        `${where}.output.tag`,
-      ),
-      ...(output.pt !== undefined ? { pt: number(output.pt, `${where}.output.pt`) } : {}),
-      ...(output.pv !== undefined ? { pv: number(output.pv, `${where}.output.pv`) } : {}),
-      ...(output.resetTag !== undefined ? {
-        resetTag: capped(text(output.resetTag, `${where}.output.resetTag`).trim(), FIELD_LIMITS.reference, '变量引用', `${where}.output.resetTag`),
-      } : {}),
-      ...(output.qTag !== undefined ? {
-        qTag: capped(text(output.qTag, `${where}.output.qTag`).trim(), FIELD_LIMITS.reference, '变量引用', `${where}.output.qTag`),
-      } : {}),
-      ...(output.valueTag !== undefined ? {
-        valueTag: capped(text(output.valueTag, `${where}.output.valueTag`).trim(), FIELD_LIMITS.reference, '变量引用', `${where}.output.valueTag`),
-      } : {}),
-      ...(output.sourceTag !== undefined ? {
-        sourceTag: capped(text(output.sourceTag, `${where}.output.sourceTag`).trim(), FIELD_LIMITS.reference, '变量引用', `${where}.output.sourceTag`),
-      } : {}),
-      ...(output.value !== undefined ? { value: number(output.value, `${where}.output.value`) } : {}),
-      ...(output.pulseTag !== undefined ? {
-        pulseTag: capped(text(output.pulseTag, `${where}.output.pulseTag`).trim(), FIELD_LIMITS.reference, '变量引用', `${where}.output.pulseTag`),
-      } : {}),
-      ...(output.stepTag !== undefined ? {
-        stepTag: capped(text(output.stepTag, `${where}.output.stepTag`).trim(), FIELD_LIMITS.reference, '变量引用', `${where}.output.stepTag`),
-      } : {}),
-      ...(output.pattern !== undefined ? {
-        pattern: Array.isArray(output.pattern)
-          ? output.pattern.map((value, index) => number(value, `${where}.output.pattern[${index}]`))
-          : fail(`${where}.output.pattern 必须是数组。`),
-      } : {}),
+    const parsedOutput = parseOutputElement(rung.output, `${where}.output`, outputIds)
+    let parsedNetwork: NetworkElement[] | undefined
+    if (rung.network !== undefined) {
+      if (!Array.isArray(rung.network)) fail(`${where}.network 必须是数组。`)
+      parsedNetwork = rung.network.map((node, nodeIndex) => parseNetworkElement(
+        node,
+        `${where}.network[${nodeIndex}]`,
+        outputIds,
+      ))
     }
     const rungId = text(rung.id, `${where}.id`).trim()
     if (!rungId) fail(`${where}.id 不能为空。`)
@@ -461,22 +546,26 @@ function parseProgramValue(input: unknown, strict: boolean): ParsedProgramStruct
         : '',
       nodes: rung.nodes.map((node, nodeIndex) => parseNode(node, `${where}.nodes[${nodeIndex}]`)),
       output: parsedOutput,
+      ...(parsedNetwork ? { network: parsedNetwork } : {}),
     }
   })
 
   const nodeIds = new Set<string>()
   let nodeCount = 0
-  const validateNodes = (nodes: LadderNode[]) => {
+  const validateNodes = (nodes: Array<LadderNode | NetworkElement>) => {
     for (const node of nodes) {
       nodeCount += 1
       if (nodeCount > MAX_NODES) fail(`节点总数超过上限 ${MAX_NODES}。`)
       if (!node.id) fail('节点 ID 不能为空。')
       if (nodeIds.has(node.id)) fail(`元件 ID“${node.id}”重复。`)
       nodeIds.add(node.id)
-      if (node.type === 'parallel') node.branches.forEach(validateNodes)
+      if (node.type === 'parallel') node.branches.forEach((branch) => validateNodes(branch))
     }
   }
-  parsedRungs.forEach((rung) => validateNodes(rung.nodes))
+  parsedRungs.forEach((rung) => {
+    validateNodes(rung.nodes)
+    validateNodes(rung.network ?? [])
+  })
 
   const normalized = ensureTrailingBlankRung({
     schema: 1,
