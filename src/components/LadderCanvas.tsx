@@ -1872,13 +1872,6 @@ function renderOutput(
             className={'ll-wire' + (powered ? ' is-on' : '')}
             d={'M ' + coilLeadOut + ' ' + centerY + ' H ' + size.width}
           />
-          <line
-            className={'ll-terminal ll-coil-terminal' + (powered ? ' is-on' : '')}
-            x1={size.width}
-            y1={centerY - 9}
-            x2={size.width}
-            y2={centerY + 9}
-          />
           <path
             className={'ll-coil-arc' + (powered ? ' is-on' : '')}
             d={'M ' + (symbolX - 10) + ' ' + (centerY - 17)

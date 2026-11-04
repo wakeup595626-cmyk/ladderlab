@@ -632,10 +632,6 @@
   stroke-width: 2.5;
 }
 
-.ll-coil-terminal {
-  stroke-width: 3;
-}
-
 /*
  * 梯形图本体始终沿用博途的黑色图线；回路通断只在程序段标题栏显示。
  * is-on / has-input-power / is-powered 仍保留给运行时和自动化验收使用。
