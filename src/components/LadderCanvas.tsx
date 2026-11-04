@@ -2615,12 +2615,6 @@ function RungSection({
         </div>
       </header>
 
-      {placeholder && (
-        <div className="ll-empty-hint" aria-hidden="true">
-          <span className="ll-empty-hint-plus">+</span>
-          <span>点 + 插入常开触点</span>
-        </div>
-      )}
       <div className="ll-svg-scroll" ref={scrollRef}>
         <svg
           className="ll-diagram"

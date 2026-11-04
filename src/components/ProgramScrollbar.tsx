@@ -28,10 +28,9 @@ const TRACK_INSET = 14
 // only the pane's 24px gutter to live in, so the gap shrinks before it clips.
 const SCROLLBAR_WIDTH = 20
 const OUTSIDE_GAP = 24
-// A proportional thumb moves ~10px of document per pointer pixel on a long
-// program. Students read that as a jump, so drag travel is geared down while
-// the thumb itself still reports the real scroll position.
-const DRAG_GAIN = 0.45
+// Keep a small amount of damping for long programs, but stay close enough to
+// native scrollbar tracking that the thumb does not visibly lag the pointer.
+const DRAG_GAIN = 0.8
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value))
