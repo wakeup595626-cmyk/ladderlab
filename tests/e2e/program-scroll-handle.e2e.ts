@@ -103,8 +103,8 @@ test('纸面外侧滑块可直接拖动滚动程序块', async ({ page }) => {
     await pane.evaluate((element) => element.scrollTop)
   )).toBe(0)
 
-  // Dragging is geared down: 150px of pointer travel should scroll a few
-  // hundred pixels, not fling the reader through the whole program.
+  // Dragging stays lightly damped for long programs, while still following
+  // the pointer closely enough to feel direct.
   await page.mouse.move(startX, startY)
   await page.mouse.down()
   await page.mouse.move(startX, startY + 150, { steps: 8 })
@@ -112,8 +112,8 @@ test('纸面外侧滑块可直接拖动滚动程序块', async ({ page }) => {
 
   await expect.poll(async () => (
     await pane.evaluate((element) => element.scrollTop)
-  )).toBeGreaterThan(250)
-  expect(await pane.evaluate((element) => element.scrollTop)).toBeLessThan(1200)
+  )).toBeGreaterThan(1200)
+  expect(await pane.evaluate((element) => element.scrollTop)).toBeLessThan(2400)
 
   await scrollbar.focus()
   await page.keyboard.press('End')
