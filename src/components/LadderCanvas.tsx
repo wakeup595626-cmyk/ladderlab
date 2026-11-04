@@ -1238,6 +1238,7 @@ function renderNetworkNode(
   node: NetworkElement,
   context: DrawContext,
   incomingPower: boolean,
+  terminalCapX?: number,
 ): ReactNode {
   if (node.type === 'contact') {
     return renderContact(node, context, [], incomingPower, true)
@@ -1245,13 +1246,27 @@ function renderNetworkNode(
   if (node.type === 'output') {
     return renderOutput(node, context, context.rungId, false, true)
   }
-  return renderNetworkParallel(node, context, incomingPower)
+  return renderNetworkParallel(node, context, incomingPower, terminalCapX)
+}
+
+function renderTerminalCap(x: number, y: number, powered: boolean): ReactNode {
+  return (
+    <line
+      className={'ll-terminal ll-branch-terminal' + (powered ? ' is-on' : '')}
+      data-terminal-cap="true"
+      x1={x}
+      y1={y - 10}
+      x2={x}
+      y2={y + 10}
+    />
+  )
 }
 
 function renderNetworkChain(
   chain: NetworkElement[],
   context: DrawContext,
   incomingPower: boolean,
+  terminalCapX?: number,
 ): ReactNode {
   if (chain.length === 0) return null
   const m = context.metrics
@@ -1264,14 +1279,18 @@ function renderNetworkChain(
   chain.forEach((node, index) => {
     const nodeSize = measureNetworkNode(node, m, memo)
     const nodeY = size.lineY - nodeSize.lineY
+    const isLast = index === chain.length - 1
+    const nodeTerminalCapX = terminalCapX === undefined || !isLast
+      ? undefined
+      : terminalCapX - cursorX
     parts.push(
       <g key={node.id} transform={'translate(' + cursorX + ', ' + nodeY + ')'}>
-        {renderNetworkNode(node, context, currentPower)}
+        {renderNetworkNode(node, context, currentPower, nodeTerminalCapX)}
       </g>,
     )
     cursorX += nodeSize.width
     currentPower = context.runtime.nodePower[node.id] === true
-    if (index < chain.length - 1) {
+    if (!isLast) {
       parts.push(
         <path
           key={node.id + '-wire'}
@@ -1281,6 +1300,19 @@ function renderNetworkChain(
         />,
       )
       cursorX += m.parallelGutter
+    } else if (terminalCapX !== undefined && node.type !== 'parallel') {
+      parts.push(
+        <path
+          key={node.id + '-terminal-wire'}
+          className={'ll-wire' + (currentPower ? ' is-on' : '')}
+          d={'M ' + cursorX + ' ' + size.lineY + ' H ' + terminalCapX}
+        />,
+      )
+      parts.push(
+        <g key={node.id + '-terminal-cap'}>
+          {renderTerminalCap(terminalCapX, size.lineY, currentPower)}
+        </g>,
+      )
     }
   })
 
@@ -1291,6 +1323,7 @@ function renderNetworkParallel(
   node: Extract<NetworkElement, { type: 'parallel' }>,
   context: DrawContext,
   incomingPower: boolean,
+  terminalCapX?: number,
 ): ReactNode {
   const m = context.metrics
   const memo = context.networkMeasureMemo ?? new Map<NetworkElement, Size>()
@@ -1298,8 +1331,9 @@ function renderNetworkParallel(
   const branchSizes = node.branches.map((branch) => measureNetworkChain(branch, m, memo))
   const branchYs = parallelBranchOffsets(branchSizes, m)
   const splitX = m.parallelGutter / 2
-  const branchOriginX = m.parallelGutter
   const collectX = size.width - m.parallelGutter / 2
+  const terminal = terminalCapX !== undefined
+  const capX = terminalCapX ?? collectX
   const entryY = size.lineY
   const centers = branchYs.map((y, index) => y + branchSizes[index].lineY)
   const firstCenter = centers[0] ?? entryY
@@ -1310,6 +1344,7 @@ function renderNetworkParallel(
     size.height - 2,
     Math.max(...branchYs.map((y, index) => y + branchSizes[index].height)) + 8,
   )
+  const frameWidth = terminal ? Math.max(size.width, capX) : size.width
 
   return (
     <g className="ll-network-parallel" data-node-id={node.id}>
@@ -1318,7 +1353,7 @@ function renderNetworkParallel(
         className="ll-branch-frame"
         x={0}
         y={frameTop}
-        width={size.width}
+        width={frameWidth}
         height={Math.max(16, frameBottom - frameTop)}
         rx="8"
       />
@@ -1330,6 +1365,7 @@ function renderNetworkParallel(
       {node.branches.map((branch, index) => {
         const branchSize = branchSizes[index]
         const branchPower = networkChainPower(branch, context.runtime)
+        const branchOriginX = terminal ? capX - branchSize.width : m.parallelGutter
         const endX = branchOriginX + branchSize.width
         return (
           <g key={node.id + '-branch-' + index}>
@@ -1337,23 +1373,30 @@ function renderNetworkParallel(
               className={'ll-wire' + (incomingPower ? ' is-on' : '')}
               d={'M ' + splitX + ' ' + centers[index] + ' H ' + branchOriginX}
             />
-            {branchSize.width > 0 && (
+            {!terminal && branchSize.width > 0 && (
               <path
                 className={'ll-wire' + (branchPower ? ' is-on' : '')}
                 d={'M ' + endX + ' ' + centers[index] + ' H ' + collectX}
               />
             )}
             <g transform={'translate(' + branchOriginX + ', ' + branchYs[index] + ')'}>
-              {renderNetworkChain(branch, context, incomingPower)}
+              {renderNetworkChain(
+                branch,
+                context,
+                incomingPower,
+                terminal ? capX - branchOriginX : undefined,
+              )}
             </g>
           </g>
         )
       })}
-      <path
-        className={'ll-wire' + (outputPower ? ' is-on' : '')}
-        d={'M ' + collectX + ' ' + firstCenter + ' V ' + lastCenter
-          + ' M ' + collectX + ' ' + entryY + ' H ' + size.width}
-      />
+      {!terminal && (
+        <path
+          className={'ll-wire' + (outputPower ? ' is-on' : '')}
+          d={'M ' + collectX + ' ' + firstCenter + ' V ' + lastCenter
+            + ' M ' + collectX + ' ' + entryY + ' H ' + size.width}
+        />
+      )}
     </g>
   )
 }
@@ -2633,15 +2676,9 @@ function RungSection({
                     rung.network ?? [],
                     rungContext,
                     context.runtime.rungPower[rung.id] === true,
+                    layout.network.width,
                   )}
                 </g>
-                <line
-                  className={'ll-power-wire' + (powered ? ' is-on' : '')}
-                  x1={layout.outputX}
-                  y1={layout.centerY}
-                  x2={layout.width - metrics.railRight}
-                  y2={layout.centerY}
-                />
               </>
             ) : (
               <>
@@ -2655,6 +2692,11 @@ function RungSection({
                 <g transform={'translate(' + layout.outputX + ', ' + layout.outputY + ')'}>
                   {renderOutput(rung.output, rungContext, rung.id, false)}
                 </g>
+                {renderTerminalCap(
+                  layout.outputX + layout.output.width,
+                  layout.centerY,
+                  powered,
+                )}
               </>
             )
           )}
