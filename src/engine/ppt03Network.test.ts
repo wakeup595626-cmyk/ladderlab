@@ -154,16 +154,19 @@ describe('PPT03 nineteen-network assembly line', () => {
     expect(runtime.bools.SingleMode).toBe(true)
     assertOnlyStation(runtime, null)
 
+    // 回到 INIT 后再次按 ME 必须能重新起步，而不是被 r10 的单步常闭触点吞掉。
     runtime = write(runtime, { ME: true })
     runtime = scan(runtime)
-    expect(activeStep(runtime)).toBe('INIT')
+    expect(activeStep(runtime)).toBe('D')
+    expect(runtime.bools.SingleMode).toBe(true)
+    assertOnlyStation(runtime, 'StationD')
     runtime = write(runtime, { ME: false })
     runtime = scan(runtime, 3)
-    expect(activeStep(runtime)).toBe('INIT')
+    expect(activeStep(runtime)).toBe('D')
 
     runtime = write(runtime, { SD: false })
     runtime = scan(runtime)
-    expect(activeStep(runtime)).toBe('INIT')
+    expect(activeStep(runtime)).toBe('D')
     runtime = write(runtime, { SD: true })
     runtime = scan(runtime)
     expect(runtime.bools.SingleMode).toBe(false)
@@ -173,5 +176,61 @@ describe('PPT03 nineteen-network assembly line', () => {
     const restarted = waitForStep(runtime, 'A')
     expect(restarted.elapsedMs).toBeGreaterThanOrEqual(980)
     expect(restarted.elapsedMs).toBeLessThanOrEqual(1200)
+  })
+
+  it('starts and restarts from INIT on the first ME rising edge', () => {
+    let runtime = scan(createRuntime(program))
+    expect(activeStep(runtime)).toBe('INIT')
+
+    runtime = write(runtime, { ME: true })
+    runtime = scan(runtime)
+    expect(activeStep(runtime)).toBe('D')
+    expect(runtime.bools.SingleMode).toBe(true)
+    expect(runtime.bools.ShiftRising).toBe(true)
+    assertOnlyStation(runtime, 'StationD')
+
+    runtime = write(runtime, { ME: false })
+    runtime = scan(runtime)
+    expect(activeStep(runtime)).toBe('D')
+    expect(runtime.bools.ShiftRising).toBe(false)
+  })
+
+  it('turns StationH off when leaving the eighth step in auto and single-step modes', () => {
+    let runtime = scan(createRuntime(program))
+    runtime = write(runtime, { SD: true })
+    runtime = scan(runtime)
+
+    for (const target of ['A', 'E', 'B', 'F', 'C', 'G', 'H'] as const) {
+      runtime = waitForStep(runtime, target).runtime
+      assertOnlyStation(runtime, 'Station' + target)
+    }
+
+    // 自动循环的 H 退出分支必须把 Q0.7 清掉，不能只推进步骤字。
+    runtime = waitForStep(runtime, 'D').runtime
+    expect(runtime.bools.StationH).toBe(false)
+    assertOnlyStation(runtime, 'StationD')
+
+    // 切到单步后，走到 H 再按 ME 结束本轮，H 也必须熄灭。
+    runtime = write(runtime, { ME: true })
+    runtime = scan(runtime)
+    expect(runtime.bools.SingleMode).toBe(true)
+    expect(activeStep(runtime)).toBe('A')
+    runtime = write(runtime, { ME: false })
+    runtime = scan(runtime)
+    for (const target of ['E', 'B', 'F', 'C', 'G', 'H'] as const) {
+      runtime = write(runtime, { ME: true })
+      runtime = scan(runtime)
+      expect(activeStep(runtime)).toBe(target)
+      runtime = write(runtime, { ME: false })
+      runtime = scan(runtime)
+      expect(activeStep(runtime)).toBe(target)
+    }
+    expect(runtime.bools.StationH).toBe(true)
+
+    runtime = write(runtime, { ME: true })
+    runtime = scan(runtime)
+    expect(activeStep(runtime)).toBe('INIT')
+    expect(runtime.bools.StationH).toBe(false)
+    assertOnlyStation(runtime, null)
   })
 })

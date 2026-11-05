@@ -748,6 +748,12 @@
                 "id": "n028",
                 "kind": "NO",
                 "tag": "SD"
+              },
+              {
+                "type": "contact",
+                "id": "n030",
+                "kind": "NC",
+                "tag": "SingleMode"
               }
             ],
             [
@@ -759,12 +765,6 @@
               }
             ]
           ]
-        },
-        {
-          "type": "contact",
-          "id": "n030",
-          "kind": "NC",
-          "tag": "SingleMode"
         },
         {
           "type": "output",
