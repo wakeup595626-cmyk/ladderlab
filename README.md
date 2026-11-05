@@ -1,6 +1,14 @@
 # 梯形实验室 LadderLab
 
-在浏览器里编写、运行和观察 PLC 梯形图，不需要安装博途或连接真实 PLC。
+中文 | [English](README.en.md)
+
+[![CI](https://github.com/wakeup595626-cmyk/ladderlab/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/wakeup595626-cmyk/ladderlab/actions/workflows/ci.yml)
+[![Live Demo](https://img.shields.io/badge/Live%20Demo-GitHub%20Pages-2ea44f)](https://wakeup595626-cmyk.github.io/ladderlab/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Node](https://img.shields.io/badge/node-%5E22.12%20%7C%20%5E24%20%7C%20%3E%3D26-339933?logo=nodedotjs&logoColor=white)](package.json)
+
+在浏览器里编写、运行和观察 PLC 梯形图，不需要安装博途或连接真实 PLC。适合课程
+实验、课设演示和梯形图逻辑自学。
 
 [在线体验](https://wakeup595626-cmyk.github.io/ladderlab/) ·
 [使用指南](docs/GUIDE.md) ·
